@@ -75,7 +75,7 @@ export function useReceiptApi() {
 
       const response = await fetch(`${API_BASE_URL}/receipts`, {
         method: "POST",
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         body: formData,
       });
 
