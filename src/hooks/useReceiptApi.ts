@@ -37,6 +37,7 @@ export function useReceiptApi() {
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   const uploadReceipt = async (file: File) => {
     const id = crypto.randomUUID();
@@ -145,14 +146,13 @@ export function useReceiptApi() {
     if (isLoadingMore || !hasMore) return;
     setIsLoadingMore(true);
     try {
-      const lastReceipt = receipts[receipts.length - 1];
-      const url = lastReceipt
-        ? `${API_BASE_URL}/receipts?start_after_id=${lastReceipt.id}`
+      const url = nextCursor
+        ? `${API_BASE_URL}/receipts?start_after_id=${nextCursor}`
         : `${API_BASE_URL}/receipts`;
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
-      const items: Receipt[] = (data.items || data.results || data).map((r: Receipt) => ({
+      const items: Receipt[] = (data.receipts || []).map((r: Receipt) => ({
         ...r,
         status: "success" as const,
       }));
@@ -160,7 +160,9 @@ export function useReceiptApi() {
         setHasMore(false);
       } else {
         setReceipts((prev) => [...prev, ...items]);
-        if (data.has_more === false || data.next === null) {
+        if (data.next_cursor) {
+          setNextCursor(data.next_cursor);
+        } else {
           setHasMore(false);
         }
       }
@@ -169,7 +171,7 @@ export function useReceiptApi() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [receipts, isLoadingMore, hasMore]);
+  }, [nextCursor, isLoadingMore, hasMore]);
 
   return { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage };
 }
