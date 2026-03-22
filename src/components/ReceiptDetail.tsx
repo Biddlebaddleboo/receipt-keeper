@@ -201,6 +201,13 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               <RotateCcw className="w-5 h-5" />
             </button>
           )}
+          <a
+            href={`${API_BASE_URL}/receipts/${receipt.id}/image`}
+            download={`receipt-${receipt.vendor || receipt.id}.jpg`}
+            className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+          >
+            <Download className="w-5 h-5" />
+          </a>
           <button
             onClick={handleDelete}
             disabled={isDeleting}
