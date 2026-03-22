@@ -15,7 +15,6 @@ const statusIcon = {
 };
 
 export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
-  const imageUrl = receipt.image_url || receipt.localImageUrl;
   const displayDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         month: "short",
@@ -30,11 +29,6 @@ export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
       className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-lg bg-card hover:bg-secondary/60 receipt-shadow hover:receipt-shadow-hover transition-all duration-300 text-left group opacity-0 animate-fade-up active:scale-[0.98]"
       style={{ animationDelay: `${index * 60}ms` }}
     >
-      {imageUrl && (
-        <div className="w-12 h-12 rounded-md overflow-hidden bg-muted flex-shrink-0 ring-1 ring-border">
-          <img src={imageUrl} alt="Receipt" className="w-full h-full object-cover" loading="lazy" />
-        </div>
-      )}
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 mb-0.5">
