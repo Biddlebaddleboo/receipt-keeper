@@ -36,6 +36,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [isSaving, setIsSaving] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const { categories } = useCategoryApi();
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
