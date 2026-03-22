@@ -40,7 +40,6 @@ export function useReceiptApi() {
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   const uploadReceipt = async (file: File) => {
