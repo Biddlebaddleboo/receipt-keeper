@@ -59,7 +59,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders },
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error("Failed to save");
