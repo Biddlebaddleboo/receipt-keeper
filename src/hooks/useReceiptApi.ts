@@ -4,9 +4,12 @@ export interface Receipt {
   id: string;
   imageUrl: string;
   file: File;
-  uploadedAt: Date;
+  capturedAt: Date;
   status: "pending" | "uploading" | "success" | "error";
   errorMessage?: string;
+  storeName: string;
+  amount: number;
+  date: Date;
 }
 
 // Configure your backend URL here
@@ -16,7 +19,7 @@ export function useReceiptApi() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
-  const uploadReceipt = async (file: File) => {
+  const uploadReceipt = async (file: File, metadata: { storeName: string; amount: number; date: Date }) => {
     const id = crypto.randomUUID();
     const imageUrl = URL.createObjectURL(file);
 
@@ -24,8 +27,11 @@ export function useReceiptApi() {
       id,
       imageUrl,
       file,
-      uploadedAt: new Date(),
+      capturedAt: new Date(),
       status: "uploading",
+      storeName: metadata.storeName,
+      amount: metadata.amount,
+      date: metadata.date,
     };
 
     setReceipts((prev) => [newReceipt, ...prev]);
@@ -34,6 +40,9 @@ export function useReceiptApi() {
     try {
       const formData = new FormData();
       formData.append("receipt", file);
+      formData.append("storeName", metadata.storeName);
+      formData.append("amount", metadata.amount.toString());
+      formData.append("date", metadata.date.toISOString());
 
       const response = await fetch(`${API_BASE_URL}/receipts`, {
         method: "POST",
@@ -71,9 +80,25 @@ export function useReceiptApi() {
     const receipt = receipts.find((r) => r.id === id);
     if (receipt) {
       removeReceipt(id);
-      uploadReceipt(receipt.file);
+      uploadReceipt(receipt.file, {
+        storeName: receipt.storeName,
+        amount: receipt.amount,
+        date: receipt.date,
+      });
     }
   };
 
-  return { receipts, isUploading, uploadReceipt, removeReceipt, retryUpload };
+  // Group receipts by date
+  const receiptsByDate = receipts.reduce<Record<string, Receipt[]>>((acc, receipt) => {
+    const key = receipt.date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(receipt);
+    return acc;
+  }, {});
+
+  return { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload };
 }

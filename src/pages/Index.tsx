@@ -1,11 +1,17 @@
-import { CaptureButton } from "@/components/CaptureButton";
-import { ReceiptGrid } from "@/components/ReceiptGrid";
-import { useReceiptApi } from "@/hooks/useReceiptApi";
-import { ScanLine } from "lucide-react";
+import { useState } from "react";
+import { ReceiptList } from "@/components/ReceiptList";
+import { ReceiptDetail } from "@/components/ReceiptDetail";
+import { AddReceiptForm } from "@/components/AddReceiptForm";
+import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
+import { ScanLine, Plus } from "lucide-react";
 
 const Index = () => {
-  const { receipts, isUploading, uploadReceipt, removeReceipt, retryUpload } =
+  const { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload } =
     useReceiptApi();
+  const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const totalSpent = receipts.reduce((sum, r) => sum + r.amount, 0);
 
   return (
     <div className="min-h-screen bg-background">
@@ -15,36 +21,53 @@ const Index = () => {
           <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
             <ScanLine className="w-5 h-5 text-primary-foreground" />
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="text-lg font-semibold leading-tight tracking-tight">
               Receipt Scanner
             </h1>
             <p className="text-xs text-muted-foreground">
               {receipts.length === 0
                 ? "Capture & upload receipts"
-                : `${receipts.length} receipt${receipts.length !== 1 ? "s" : ""}`}
+                : `${receipts.length} receipt${receipts.length !== 1 ? "s" : ""} · $${totalSpent.toFixed(2)} total`}
             </p>
           </div>
         </div>
       </header>
 
       {/* Main content */}
-      <main className="max-w-2xl mx-auto px-4 py-6 pb-32 space-y-6">
-        <div className="opacity-0 animate-fade-up">
-          <ReceiptGrid
-            receipts={receipts}
-            onRemove={removeReceipt}
-            onRetry={retryUpload}
-          />
-        </div>
+      <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
+        <ReceiptList
+          receiptsByDate={receiptsByDate}
+          onReceiptClick={setSelectedReceipt}
+        />
       </main>
 
-      {/* Sticky bottom capture bar */}
-      <div className="fixed bottom-0 inset-x-0 bg-background/80 backdrop-blur-md border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="max-w-2xl mx-auto">
-          <CaptureButton onCapture={uploadReceipt} disabled={isUploading} />
-        </div>
-      </div>
+      {/* FAB */}
+      <button
+        onClick={() => setShowAddForm(true)}
+        className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center receipt-shadow hover:brightness-110 transition-all active:scale-95 z-10"
+      >
+        <Plus className="w-6 h-6" />
+      </button>
+
+      {/* Detail overlay */}
+      {selectedReceipt && (
+        <ReceiptDetail
+          receipt={selectedReceipt}
+          onClose={() => setSelectedReceipt(null)}
+          onRemove={removeReceipt}
+          onRetry={retryUpload}
+        />
+      )}
+
+      {/* Add form overlay */}
+      {showAddForm && (
+        <AddReceiptForm
+          onSubmit={uploadReceipt}
+          onClose={() => setShowAddForm(false)}
+          disabled={isUploading}
+        />
+      )}
     </div>
   );
 };
