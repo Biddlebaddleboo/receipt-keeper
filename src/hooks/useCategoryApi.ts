@@ -64,7 +64,7 @@ export function useCategoryApi() {
   const deleteCategory = async (id: string) => {
     const response = await fetch(`${API_BASE_URL}/categories/${id}`, {
       method: "DELETE",
-      headers: authHeaders,
+      headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error("Failed to delete category");
     setCategories((prev) => prev.filter((c) => c.id !== id));
