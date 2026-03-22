@@ -5,6 +5,12 @@ export interface ExtractedField {
   value: string;
 }
 
+export interface ReceiptItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
 export interface Receipt {
   id: string;
   vendor: string;
