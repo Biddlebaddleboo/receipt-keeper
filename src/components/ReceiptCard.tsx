@@ -1,18 +1,11 @@
 import { Receipt } from "@/hooks/useReceiptApi";
-import { CheckCircle2, AlertCircle, Loader2, Store, ChevronRight } from "lucide-react";
+import { ChevronRight, Tag } from "lucide-react";
 
 interface ReceiptCardProps {
   receipt: Receipt;
   onClick: (receipt: Receipt) => void;
   index: number;
 }
-
-const statusIcon = {
-  pending: null,
-  uploading: <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />,
-  success: <CheckCircle2 className="w-3.5 h-3.5 text-success" />,
-  error: <AlertCircle className="w-3.5 h-3.5 text-destructive" />,
-};
 
 export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
   const displayDate = receipt.purchase_date
@@ -29,14 +22,20 @@ export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
       className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-lg bg-card hover:bg-secondary/60 receipt-shadow hover:receipt-shadow-hover transition-all duration-300 text-left group opacity-0 animate-fade-up active:scale-[0.98]"
       style={{ animationDelay: `${index * 60}ms` }}
     >
-
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 mb-0.5">
-          <Store className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-          <span className="text-sm font-medium truncate">{receipt.vendor || "Unknown"}</span>
-          {statusIcon[receipt.status]}
+        <span className="text-sm font-medium truncate block">{receipt.vendor || "Unknown"}</span>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-xs text-muted-foreground">{displayDate}</span>
+          {receipt.category && (
+            <>
+              <span className="text-xs text-muted-foreground/40">·</span>
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Tag className="w-3 h-3" />
+                {receipt.category}
+              </span>
+            </>
+          )}
         </div>
-        <p className="text-xs text-muted-foreground">{displayDate}</p>
       </div>
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
