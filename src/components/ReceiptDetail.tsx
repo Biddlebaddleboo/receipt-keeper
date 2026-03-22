@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
-import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon } from "lucide-react";
+import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download } from "lucide-react";
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 
@@ -201,6 +201,13 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               <RotateCcw className="w-5 h-5" />
             </button>
           )}
+          <a
+            href={`${API_BASE_URL}/receipts/${receipt.id}/image`}
+            download={`receipt-${receipt.vendor || receipt.id}.jpg`}
+            className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+          >
+            <Download className="w-5 h-5" />
+          </a>
           <button
             onClick={handleDelete}
             disabled={isDeleting}
