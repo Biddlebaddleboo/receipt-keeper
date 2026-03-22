@@ -37,11 +37,33 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [isSaving, setIsSaving] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [authImageUrl, setAuthImageUrl] = useState<string | null>(receipt.localImageUrl || null);
   const { categories } = useCategoryApi();
   const { token } = useAuth();
   const tokenRef = useRef(token);
   useEffect(() => { tokenRef.current = token; }, [token]);
   const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+
+  // Fetch image with auth headers
+  useEffect(() => {
+    if (receipt.localImageUrl) {
+      setAuthImageUrl(receipt.localImageUrl);
+      return;
+    }
+    if (!tokenRef.current || !receipt.id) return;
+    let revoke: string | null = null;
+    fetch(`${API_BASE_URL}/receipts/${receipt.id}/image`, { headers: getAuthHeaders() })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load image");
+        return res.blob();
+      })
+      .then((blob) => {
+        revoke = URL.createObjectURL(blob);
+        setAuthImageUrl(revoke);
+      })
+      .catch(() => setAuthImageUrl(null));
+    return () => { if (revoke) URL.revokeObjectURL(revoke); };
+  }, [receipt.id, receipt.localImageUrl]);
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
@@ -186,7 +208,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   };
 
   const status = statusConfig[receipt.status];
-  const imageUrl = receipt.localImageUrl || `${API_BASE_URL}/receipts/${receipt.id}/image`;
+  const imageUrl = authImageUrl;
   const purchaseDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
@@ -206,13 +228,24 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               <RotateCcw className="w-5 h-5" />
             </button>
           )}
-          <a
-            href={`${API_BASE_URL}/receipts/${receipt.id}/image`}
-            download={`receipt-${receipt.vendor || receipt.id}.jpg`}
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API_BASE_URL}/receipts/${receipt.id}/image`, { headers: getAuthHeaders() });
+                if (!res.ok) throw new Error("Download failed");
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `receipt-${receipt.vendor || receipt.id}.jpg`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch { toast.error("Failed to download image"); }
+            }}
             className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
           >
             <Download className="w-5 h-5" />
-          </a>
+          </button>
           <button
             onClick={handleDelete}
             disabled={isDeleting}
