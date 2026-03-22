@@ -40,6 +40,7 @@ export function useReceiptApi() {
       vendor: metadata.storeName,
       total: metadata.amount,
       currency: "USD",
+      category: "",
       purchase_date: metadata.date.toISOString(),
       extracted_text: "",
       extracted_fields: [],
