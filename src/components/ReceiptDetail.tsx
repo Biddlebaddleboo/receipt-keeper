@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
+import type { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download } from "lucide-react";
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
