@@ -154,7 +154,7 @@ export function useReceiptApi() {
       const url = nextCursor
         ? `${API_BASE_URL}/receipts?start_after_id=${nextCursor}`
         : `${API_BASE_URL}/receipts`;
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: authHeaders });
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
       const items: Receipt[] = (data.receipts || []).map((r: Receipt) => ({
