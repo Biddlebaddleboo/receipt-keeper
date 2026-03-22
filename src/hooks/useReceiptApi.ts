@@ -23,7 +23,7 @@ export interface Receipt {
 }
 
 // Configure your backend URL here
-const API_BASE_URL = "/api";
+const API_BASE_URL = "";
 
 export function useReceiptApi() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
