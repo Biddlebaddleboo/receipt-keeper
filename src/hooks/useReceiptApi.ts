@@ -10,6 +10,7 @@ export interface Receipt {
   vendor: string;
   total: number;
   currency: string;
+  category: string;
   purchase_date: string;
   extracted_text: string;
   extracted_fields: ExtractedField[];
