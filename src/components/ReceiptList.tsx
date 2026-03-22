@@ -75,24 +75,11 @@ export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoading
         );
       })}
 
-      {hasMore && (
-        <div className="flex justify-center pt-2 pb-4">
-          <button
-            onClick={onLoadMore}
-            disabled={isLoadingMore}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80 text-sm font-medium text-foreground transition-colors active:scale-[0.98] disabled:opacity-50"
-          >
-            {isLoadingMore ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading…
-              </>
-            ) : (
-              "Load more receipts"
-            )}
-          </button>
-        </div>
-      )}
+      <div ref={sentinelRef} className="flex justify-center py-4">
+        {isLoadingMore && (
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+        )}
+      </div>
     </div>
   );
 }
