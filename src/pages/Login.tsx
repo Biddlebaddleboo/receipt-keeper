@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine } from "lucide-react";
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_ID = "267658267276-mnjifd6o265q1of401199uaukpuq650p.apps.googleusercontent.com";
 
 declare global {
   interface Window {
