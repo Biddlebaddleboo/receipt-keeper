@@ -4,9 +4,11 @@ import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
 import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
-import { ScanLine, Plus, Settings } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { ScanLine, Plus, Settings, LogOut } from "lucide-react";
 
 const Index = () => {
+  const { signOut } = useAuth();
   const navigate = useNavigate();
   const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
     useReceiptApi();
@@ -42,6 +44,13 @@ const Index = () => {
             className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
           >
             <Settings className="w-5 h-5 text-muted-foreground" />
+          </button>
+          <button
+            onClick={signOut}
+            className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+            title="Sign out"
+          >
+            <LogOut className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
       </header>
