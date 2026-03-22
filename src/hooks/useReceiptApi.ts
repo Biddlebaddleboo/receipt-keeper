@@ -28,7 +28,6 @@ const API_BASE_URL = "";
 export function useReceiptApi() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
@@ -146,7 +145,11 @@ export function useReceiptApi() {
     if (isLoadingMore || !hasMore) return;
     setIsLoadingMore(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts?page=${page}`);
+      const lastReceipt = receipts[receipts.length - 1];
+      const url = lastReceipt
+        ? `${API_BASE_URL}/receipts?start_after_id=${lastReceipt.id}`
+        : `${API_BASE_URL}/receipts`;
+      const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
       const items: Receipt[] = (data.items || data.results || data).map((r: Receipt) => ({
@@ -157,7 +160,6 @@ export function useReceiptApi() {
         setHasMore(false);
       } else {
         setReceipts((prev) => [...prev, ...items]);
-        setPage((p) => p + 1);
         if (data.has_more === false || data.next === null) {
           setHasMore(false);
         }
@@ -167,7 +169,7 @@ export function useReceiptApi() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [page, isLoadingMore, hasMore]);
+  }, [receipts, isLoadingMore, hasMore]);
 
   return { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage };
 }
