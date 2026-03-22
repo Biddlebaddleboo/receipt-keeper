@@ -228,13 +228,24 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               <RotateCcw className="w-5 h-5" />
             </button>
           )}
-          <a
-            href={`${API_BASE_URL}/receipts/${receipt.id}/image`}
-            download={`receipt-${receipt.vendor || receipt.id}.jpg`}
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch(`${API_BASE_URL}/receipts/${receipt.id}/image`, { headers: getAuthHeaders() });
+                if (!res.ok) throw new Error("Download failed");
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `receipt-${receipt.vendor || receipt.id}.jpg`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch { toast.error("Failed to download image"); }
+            }}
             className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
           >
             <Download className="w-5 h-5" />
-          </a>
+          </button>
           <button
             onClick={handleDelete}
             disabled={isDeleting}
