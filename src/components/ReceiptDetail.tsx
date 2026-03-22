@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -39,7 +39,9 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [editValue, setEditValue] = useState("");
   const { categories } = useCategoryApi();
   const { token } = useAuth();
-  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const tokenRef = useRef(token);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+  const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
@@ -59,7 +61,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error("Failed to save");
@@ -81,7 +83,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE", headers: authHeaders });
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE", headers: getAuthHeaders() });
       if (!response.ok) throw new Error("Failed to delete");
       onRemove(receipt.id);
       onClose();
@@ -129,7 +131,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to save");
@@ -149,7 +151,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to delete item");
@@ -170,7 +172,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to add item");
