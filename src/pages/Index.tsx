@@ -39,6 +39,9 @@ const Index = () => {
         <ReceiptList
           receiptsByDate={receiptsByDate}
           onReceiptClick={setSelectedReceipt}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={loadNextPage}
         />
       </main>
 

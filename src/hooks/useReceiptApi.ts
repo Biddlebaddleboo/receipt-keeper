@@ -142,5 +142,32 @@ export function useReceiptApi() {
     }
   };
 
-  return { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload, fetchReceipt };
+  const loadNextPage = useCallback(async () => {
+    if (isLoadingMore || !hasMore) return;
+    setIsLoadingMore(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts?page=${page}`);
+      if (!response.ok) throw new Error("Failed to load receipts");
+      const data = await response.json();
+      const items: Receipt[] = (data.items || data.results || data).map((r: Receipt) => ({
+        ...r,
+        status: "success" as const,
+      }));
+      if (items.length === 0) {
+        setHasMore(false);
+      } else {
+        setReceipts((prev) => [...prev, ...items]);
+        setPage((p) => p + 1);
+        if (data.has_more === false || data.next === null) {
+          setHasMore(false);
+        }
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [page, isLoadingMore, hasMore]);
+
+  return { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage };
 }
