@@ -12,14 +12,20 @@ const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northameri
 export function useCategoryApi() {
   const { token, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
-  useEffect(() => { tokenRef.current = token; }, [token]);
-  const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  const getAuthHeaders = (): Record<string, string> =>
+    tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchCategories = useCallback(async () => {
     if (!tokenRef.current) return;
+
     setIsLoading(true);
     setError(null);
     try {
@@ -36,10 +42,18 @@ export function useCategoryApi() {
   }, [token]);
 
   useEffect(() => {
-    if (!authLoading && token) fetchCategories();
+    if (authLoading) return;
+    if (!token) {
+      setCategories([]);
+      setIsLoading(false);
+      return;
+    }
+    fetchCategories();
   }, [authLoading, token, fetchCategories]);
 
   const createCategory = async (name: string, description = "") => {
+    if (!tokenRef.current) throw new Error("Not authenticated");
+
     const response = await fetch(`${API_BASE_URL}/categories`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getAuthHeaders() },
@@ -52,6 +66,8 @@ export function useCategoryApi() {
   };
 
   const updateCategory = async (id: string, updates: { name?: string; description?: string }) => {
+    if (!tokenRef.current) throw new Error("Not authenticated");
+
     const response = await fetch(`${API_BASE_URL}/categories/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...getAuthHeaders() },
@@ -66,6 +82,8 @@ export function useCategoryApi() {
   };
 
   const deleteCategory = async (id: string) => {
+    if (!tokenRef.current) throw new Error("Not authenticated");
+
     const response = await fetch(`${API_BASE_URL}/categories/${id}`, {
       method: "DELETE",
       headers: getAuthHeaders(),
@@ -76,3 +94,4 @@ export function useCategoryApi() {
 
   return { categories, isLoading, error, createCategory, updateCategory, deleteCategory, refetch: fetchCategories };
 }
+
