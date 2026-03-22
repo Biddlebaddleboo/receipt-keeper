@@ -5,6 +5,12 @@ export interface ExtractedField {
   value: string;
 }
 
+export interface ReceiptItem {
+  name: string;
+  quantity: number;
+  price: number;
+}
+
 export interface Receipt {
   id: string;
   vendor: string;
@@ -14,6 +20,7 @@ export interface Receipt {
   purchase_date: string;
   extracted_text: string;
   extracted_fields: ExtractedField[];
+  items: ReceiptItem[];
   created_at: string;
   // Client-side fields
   file?: File;
@@ -44,6 +51,7 @@ export function useReceiptApi() {
       purchase_date: "",
       extracted_text: "",
       extracted_fields: [],
+      items: [],
       created_at: new Date().toISOString(),
       localImageUrl,
       file,

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Receipt } from "@/hooks/useReceiptApi";
-import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List } from "lucide-react";
+import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart } from "lucide-react";
 
 const API_BASE_URL = "";
 
@@ -139,6 +139,28 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               </div>
             </div>
           </div>
+
+          {receipt.items && receipt.items.length > 0 && (
+            <div className="pt-2">
+              <div className="flex items-center gap-2 mb-2 px-0.5">
+                <ShoppingCart className="w-3.5 h-3.5 text-muted-foreground" />
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Items</p>
+              </div>
+              <div className="space-y-1.5">
+                {receipt.items.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-secondary/50">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
+                    </div>
+                    <span className="text-sm font-medium tabular-nums ml-3">
+                      ${item.price.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {receipt.extracted_fields && receipt.extracted_fields.length > 0 && (
             <div className="pt-2">
