@@ -62,6 +62,17 @@ const Login = () => {
         </div>
         <div ref={buttonRef} className="flex justify-center" />
       </div>
+      <p className="absolute bottom-6 text-xs text-muted-foreground">
+        Designed by{" "}
+        <a
+          href="https://jcdigitalsolutions.ca"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-foreground transition-colors"
+        >
+          JC Digital Solutions
+        </a>
+      </p>
     </div>
   );
 };
