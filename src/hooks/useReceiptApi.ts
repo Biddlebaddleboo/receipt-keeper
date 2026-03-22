@@ -41,6 +41,7 @@ export function useReceiptApi() {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   const uploadReceipt = async (file: File) => {
     const id = crypto.randomUUID();
