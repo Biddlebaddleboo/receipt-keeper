@@ -61,6 +61,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  // Periodically check token expiry and auto-sign-out
+  useEffect(() => {
+    if (!token) return;
+    const payload = decodeJwtPayload(token);
+    if (!payload?.exp) return;
+
+    const msUntilExpiry = payload.exp * 1000 - Date.now();
+    if (msUntilExpiry <= 0) {
+      signOut();
+      return;
+    }
+
+    // Sign out 30s before actual expiry to avoid 401s
+    const timeout = setTimeout(() => {
+      signOut();
+    }, Math.max(msUntilExpiry - 30_000, 0));
+
+    return () => clearTimeout(timeout);
+  }, [token, signOut]);
+
   return (
     <AuthContext.Provider value={{ token, user, isLoading, signIn, signOut }}>
       {children}
