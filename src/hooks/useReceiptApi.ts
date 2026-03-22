@@ -1,15 +1,25 @@
 import { useState } from "react";
 
+export interface ExtractedField {
+  label: string;
+  value: string;
+}
+
 export interface Receipt {
   id: string;
-  imageUrl: string;
-  file: File;
-  capturedAt: Date;
+  vendor: string;
+  total: number;
+  currency: string;
+  purchase_date: string;
+  image_url: string;
+  extracted_text: string;
+  extracted_fields: ExtractedField[];
+  created_at: string;
+  // Client-side fields
+  file?: File;
+  localImageUrl?: string;
   status: "pending" | "uploading" | "success" | "error";
   errorMessage?: string;
-  storeName: string;
-  amount: number;
-  date: Date;
 }
 
 // Configure your backend URL here
