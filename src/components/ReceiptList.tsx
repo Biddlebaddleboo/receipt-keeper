@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Receipt } from "@/hooks/useReceiptApi";
 import { ReceiptCard } from "./ReceiptCard";
 import { ReceiptText, Loader2 } from "lucide-react";
