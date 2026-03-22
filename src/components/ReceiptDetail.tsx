@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon } from "lucide-react";
 import { toast } from "sonner";
+import { useCategoryApi } from "@/hooks/useCategoryApi";
 
 const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
 
@@ -35,15 +36,19 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [isSaving, setIsSaving] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const { categories } = useCategoryApi();
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
     if (field === "vendor") payload.vendor = value.trim();
     else if (field === "total") payload.total = parseFloat(value);
+    else if (field === "subtotal") payload.subtotal = parseFloat(value);
+    else if (field === "tax") payload.tax = parseFloat(value);
+    else if (field === "category") payload.category = value;
     else if (field === "purchase_date") payload.purchase_date = value;
 
-    if (field === "total" && isNaN(payload.total as number)) {
-      toast.error("Invalid total");
+    if ((field === "total" || field === "subtotal" || field === "tax") && isNaN(payload[field] as number)) {
+      toast.error(`Invalid ${field}`);
       return;
     }
 
@@ -249,21 +254,51 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               </button>
             )}
 
-            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
-              <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Subtotal</p>
-                <p className="text-sm font-medium tabular-nums">${(receipt.subtotal ?? 0).toFixed(2)}</p>
+            {/* Subtotal */}
+            {editingField === "subtotal" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground">Subtotal</label>
+                <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} step="0.01" min="0" className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm tabular-nums border border-border focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("subtotal", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <button onClick={() => startFieldEdit("subtotal", String(receipt.subtotal ?? 0))} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">Subtotal</p>
+                  <p className="text-sm font-medium tabular-nums">${(receipt.subtotal ?? 0).toFixed(2)}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
 
-            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
-              <ReceiptIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Tax</p>
-                <p className="text-sm font-medium tabular-nums">${(receipt.tax ?? 0).toFixed(2)}</p>
+            {/* Tax */}
+            {editingField === "tax" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground">Tax</label>
+                <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} step="0.01" min="0" className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm tabular-nums border border-border focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("tax", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <button onClick={() => startFieldEdit("tax", String(receipt.tax ?? 0))} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <ReceiptIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">Tax</p>
+                  <p className="text-sm font-medium tabular-nums">${(receipt.tax ?? 0).toFixed(2)}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
 
             {/* Total */}
             {editingField === "total" ? (
@@ -288,13 +323,33 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               </button>
             )}
 
-            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
-              <Tag className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Category</p>
-                <p className="text-sm font-medium">{receipt.category || "—"}</p>
+            {/* Category */}
+            {editingField === "category" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground">Category</label>
+                <select value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary" autoFocus>
+                  <option value="">— None —</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("category", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <button onClick={() => startFieldEdit("category", receipt.category || "")} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <Tag className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">Category</p>
+                  <p className="text-sm font-medium">{receipt.category || "—"}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
 
             {/* Purchase Date */}
             {editingField === "purchase_date" ? (
