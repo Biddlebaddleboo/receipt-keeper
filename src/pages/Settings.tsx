@@ -1,8 +1,11 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Tags } from "lucide-react";
+import { ArrowLeft, ChevronRight, Tags, Moon, Sun } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const Settings = () => {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <div className="min-h-screen bg-background">
@@ -20,6 +23,26 @@ const Settings = () => {
 
       <main className="max-w-2xl mx-auto px-4 py-6">
         <div className="space-y-1">
+          <div className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-lg bg-card receipt-shadow">
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              {theme === "dark" ? (
+                <Moon className="w-4.5 h-4.5 text-primary" />
+              ) : (
+                <Sun className="w-4.5 h-4.5 text-primary" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium block">Dark Mode</span>
+              <span className="text-xs text-muted-foreground">
+                {theme === "dark" ? "Dark theme active" : "Light theme active"}
+              </span>
+            </div>
+            <Switch
+              checked={theme === "dark"}
+              onCheckedChange={toggleTheme}
+            />
+          </div>
+
           <button
             onClick={() => navigate("/settings/categories")}
             className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-lg bg-card hover:bg-secondary/60 receipt-shadow transition-all text-left group active:scale-[0.98]"
