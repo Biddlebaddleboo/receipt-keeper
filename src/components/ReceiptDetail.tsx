@@ -61,7 +61,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error("Failed to save");
@@ -83,7 +83,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE", headers: authHeaders });
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE", headers: getAuthHeaders() });
       if (!response.ok) throw new Error("Failed to delete");
       onRemove(receipt.id);
       onClose();
@@ -131,7 +131,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to save");
@@ -151,7 +151,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to delete item");
@@ -172,7 +172,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to add item");
