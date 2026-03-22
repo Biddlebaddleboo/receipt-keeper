@@ -14,8 +14,9 @@ export interface ReceiptItem {
 export interface Receipt {
   id: string;
   vendor: string;
+  subtotal: number;
+  tax: number;
   total: number;
-  currency: string;
   category: string;
   purchase_date: string;
   extracted_text: string;
@@ -47,7 +48,8 @@ export function useReceiptApi() {
       id,
       vendor: "",
       total: 0,
-      currency: "USD",
+      subtotal: 0,
+      tax: 0,
       category: "",
       purchase_date: "",
       extracted_text: "",
