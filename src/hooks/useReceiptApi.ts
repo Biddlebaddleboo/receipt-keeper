@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export interface ExtractedField {
@@ -36,12 +36,14 @@ const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northameri
 
 export function useReceiptApi() {
   const { token } = useAuth();
+  const tokenRef = useRef(token);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+  const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   const uploadReceipt = async (file: File) => {
     const id = crypto.randomUUID();
@@ -73,7 +75,7 @@ export function useReceiptApi() {
 
       const response = await fetch(`${API_BASE_URL}/receipts`, {
         method: "POST",
-        headers: authHeaders,
+        headers: getAuthHeaders(),
         body: formData,
       });
 
@@ -139,7 +141,7 @@ export function useReceiptApi() {
 
   const fetchReceipt = async (id: string): Promise<Receipt | null> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${id}`, { headers: authHeaders });
+      const response = await fetch(`${API_BASE_URL}/receipts/${id}`, { headers: getAuthHeaders() });
       if (!response.ok) throw new Error("Failed to fetch receipt");
       const data = await response.json();
       return { ...data, status: "success" as const };
@@ -155,7 +157,7 @@ export function useReceiptApi() {
       const url = nextCursor
         ? `${API_BASE_URL}/receipts?start_after_id=${nextCursor}`
         : `${API_BASE_URL}/receipts`;
-      const response = await fetch(url, { headers: authHeaders });
+      const response = await fetch(url, { headers: getAuthHeaders() });
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
       const items: Receipt[] = (data.receipts || []).map((r: Receipt) => ({
