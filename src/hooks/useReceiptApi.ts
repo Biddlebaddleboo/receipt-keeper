@@ -138,7 +138,7 @@ export function useReceiptApi() {
 
   const fetchReceipt = async (id: string): Promise<Receipt | null> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${id}`);
+      const response = await fetch(`${API_BASE_URL}/receipts/${id}`, { headers: authHeaders });
       if (!response.ok) throw new Error("Failed to fetch receipt");
       const data = await response.json();
       return { ...data, status: "success" as const };
