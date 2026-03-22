@@ -19,7 +19,7 @@ export function useCategoryApi() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/categories`, { headers: authHeaders });
+      const response = await fetch(`${API_BASE_URL}/categories`, { headers: getAuthHeaders() });
       if (!response.ok) throw new Error("Failed to fetch categories");
       const data = await response.json();
       const items: Category[] = Array.isArray(data) ? data : data.items || data.results || [];
