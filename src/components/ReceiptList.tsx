@@ -13,6 +13,23 @@ interface ReceiptListProps {
 
 export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoadingMore, onLoadMore }: ReceiptListProps) {
   const dateKeys = Object.keys(receiptsByDate);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!hasMore || !onLoadMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, onLoadMore]);
 
   if (dateKeys.length === 0) {
     return (
