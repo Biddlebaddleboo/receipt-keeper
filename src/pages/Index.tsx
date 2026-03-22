@@ -1,11 +1,13 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
 import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
-import { ScanLine, Plus } from "lucide-react";
+import { ScanLine, Plus, Settings } from "lucide-react";
 
 const Index = () => {
+  const navigate = useNavigate();
   const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
     useReceiptApi();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
@@ -31,6 +33,12 @@ const Index = () => {
                 : `${receipts.length} receipt${receipts.length !== 1 ? "s" : ""} · $${totalSpent.toFixed(2)} total`}
             </p>
           </div>
+          <button
+            onClick={() => navigate("/settings")}
+            className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+          >
+            <Settings className="w-5 h-5 text-muted-foreground" />
+          </button>
         </div>
       </header>
 
