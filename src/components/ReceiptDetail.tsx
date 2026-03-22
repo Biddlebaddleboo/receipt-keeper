@@ -38,6 +38,8 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const { categories } = useCategoryApi();
+  const { token } = useAuth();
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
