@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine, Plus, Settings, LogOut } from "lucide-react";
 
 const Index = () => {
-  const { signOut } = useAuth();
+  const { token, isLoading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
     useReceiptApi();
@@ -16,8 +16,8 @@ const Index = () => {
   const [showAddForm, setShowAddForm] = useState(false);
 
   useEffect(() => {
-    loadNextPage();
-  }, []);
+    if (!authLoading && token) loadNextPage();
+  }, [authLoading, token, loadNextPage]);
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.total, 0);
 

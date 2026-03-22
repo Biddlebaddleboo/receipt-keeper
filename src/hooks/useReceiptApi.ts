@@ -35,10 +35,15 @@ export interface Receipt {
 const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
 
 export function useReceiptApi() {
-  const { token } = useAuth();
+  const { token, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
-  useEffect(() => { tokenRef.current = token; }, [token]);
-  const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  const getAuthHeaders = (): Record<string, string> =>
+    tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -46,6 +51,8 @@ export function useReceiptApi() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   const uploadReceipt = async (file: File) => {
+    if (authLoading || !tokenRef.current) return;
+
     const id = crypto.randomUUID();
     const localImageUrl = URL.createObjectURL(file);
 
@@ -100,9 +107,7 @@ export function useReceiptApi() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       setReceipts((prev) =>
-        prev.map((r) =>
-          r.id === id ? { ...r, status: "error" as const, errorMessage: message } : r
-        )
+        prev.map((r) => (r.id === id ? { ...r, status: "error" as const, errorMessage: message } : r))
       );
     } finally {
       setIsUploading(false);
@@ -140,6 +145,8 @@ export function useReceiptApi() {
   }, {});
 
   const fetchReceipt = async (id: string): Promise<Receipt | null> => {
+    if (authLoading || !tokenRef.current) return null;
+
     try {
       const response = await fetch(`${API_BASE_URL}/receipts/${id}`, { headers: getAuthHeaders() });
       if (!response.ok) throw new Error("Failed to fetch receipt");
@@ -151,7 +158,7 @@ export function useReceiptApi() {
   };
 
   const loadNextPage = useCallback(async () => {
-    if (isLoadingMore || !hasMore || !tokenRef.current) return;
+    if (authLoading || isLoadingMore || !hasMore || !tokenRef.current) return;
     setIsLoadingMore(true);
     try {
       const url = nextCursor
@@ -179,7 +186,19 @@ export function useReceiptApi() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [nextCursor, isLoadingMore, hasMore]);
+  }, [authLoading, nextCursor, isLoadingMore, hasMore]);
 
-  return { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage };
+  return {
+    receipts,
+    receiptsByDate,
+    isUploading,
+    isLoadingMore,
+    hasMore,
+    uploadReceipt,
+    removeReceipt,
+    retryUpload,
+    fetchReceipt,
+    loadNextPage,
+  };
 }
+
