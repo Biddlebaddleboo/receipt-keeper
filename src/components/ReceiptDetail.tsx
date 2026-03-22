@@ -32,7 +32,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   }, [initialReceipt.id, fetchReceipt]);
 
   const status = statusConfig[receipt.status];
-  const imageUrl = receipt.image_url || receipt.localImageUrl;
+  const imageUrl = receipt.localImageUrl || `${API_BASE_URL}/receipts/${receipt.id}/image`;
   const purchaseDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
