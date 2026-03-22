@@ -7,6 +7,7 @@ import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
 import { ScanLine, Plus, Settings } from "lucide-react";
 
 const Index = () => {
+  const navigate = useNavigate();
   const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
     useReceiptApi();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
