@@ -11,7 +11,6 @@ export interface Receipt {
   total: number;
   currency: string;
   purchase_date: string;
-  image_url: string;
   extracted_text: string;
   extracted_fields: ExtractedField[];
   created_at: string;
@@ -41,7 +40,6 @@ export function useReceiptApi() {
       total: metadata.amount,
       currency: "USD",
       purchase_date: metadata.date.toISOString(),
-      image_url: "",
       extracted_text: "",
       extracted_fields: [],
       created_at: new Date().toISOString(),

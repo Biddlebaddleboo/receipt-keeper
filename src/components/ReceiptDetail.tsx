@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Receipt } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List } from "lucide-react";
 
+const API_BASE_URL = "";
+
 interface ReceiptDetailProps {
   receipt: Receipt;
   onClose: () => void;
@@ -32,7 +34,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   }, [initialReceipt.id, fetchReceipt]);
 
   const status = statusConfig[receipt.status];
-  const imageUrl = receipt.image_url || receipt.localImageUrl;
+  const imageUrl = receipt.localImageUrl || `${API_BASE_URL}/receipts/${receipt.id}/image`;
   const purchaseDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
