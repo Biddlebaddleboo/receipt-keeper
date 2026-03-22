@@ -51,6 +51,7 @@ export function useReceiptApi() {
       purchase_date: "",
       extracted_text: "",
       extracted_fields: [],
+      items: [],
       created_at: new Date().toISOString(),
       localImageUrl,
       file,
