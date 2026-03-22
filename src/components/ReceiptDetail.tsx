@@ -81,7 +81,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE" });
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE", headers: authHeaders });
       if (!response.ok) throw new Error("Failed to delete");
       onRemove(receipt.id);
       onClose();
