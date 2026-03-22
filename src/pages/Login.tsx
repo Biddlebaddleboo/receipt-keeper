@@ -61,9 +61,14 @@ const Login = () => {
           <p className="text-sm text-muted-foreground">Sign in to manage your receipts</p>
         </div>
         <div ref={buttonRef} className="flex justify-center" />
-        <Link to="/terms" className="text-xs text-muted-foreground underline hover:text-foreground transition-colors">
-          Terms of Service
-        </Link>
+        <div className="flex gap-3">
+          <Link to="/terms" className="text-xs text-muted-foreground underline hover:text-foreground transition-colors">
+            Terms of Service
+          </Link>
+          <Link to="/privacy" className="text-xs text-muted-foreground underline hover:text-foreground transition-colors">
+            Privacy Policy
+          </Link>
+        </div>
       </div>
       <p className="absolute bottom-6 text-xs text-muted-foreground">
         Designed by{" "}
