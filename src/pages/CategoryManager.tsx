@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Tag, Loader2, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, Plus, Tag, Loader2, Pencil, Check, X, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useCategoryApi, Category } from "@/hooks/useCategoryApi";
 import { toast } from "sonner";
