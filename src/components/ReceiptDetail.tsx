@@ -208,7 +208,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   };
 
   const status = statusConfig[receipt.status];
-  const imageUrl = receipt.localImageUrl || `${API_BASE_URL}/receipts/${receipt.id}/image`;
+  const imageUrl = authImageUrl;
   const purchaseDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
