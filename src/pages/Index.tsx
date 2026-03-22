@@ -6,7 +6,7 @@ import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
 import { ScanLine, Plus } from "lucide-react";
 
 const Index = () => {
-  const { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload } =
+  const { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload, fetchReceipt } =
     useReceiptApi();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
