@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Plus, Tag, Loader2, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, Plus, Tag, Loader2, Pencil, Check, X, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useCategoryApi, Category } from "@/hooks/useCategoryApi";
 import { toast } from "sonner";
 
 const CategoryManager = () => {
   const navigate = useNavigate();
-  const { categories, isLoading, error, createCategory, updateCategory } = useCategoryApi();
+  const { categories, isLoading, error, createCategory, updateCategory, deleteCategory } = useCategoryApi();
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -172,6 +172,19 @@ const CategoryManager = () => {
                       className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors active:scale-95"
                     >
                       <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await deleteCategory(cat.id);
+                          toast.success("Category deleted");
+                        } catch {
+                          toast.error("Failed to delete category");
+                        }
+                      }}
+                      className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </>
                 )}

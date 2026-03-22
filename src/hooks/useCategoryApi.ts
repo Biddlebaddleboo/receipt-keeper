@@ -58,6 +58,11 @@ export function useCategoryApi() {
     );
     return updated;
   };
+  const deleteCategory = async (id: string) => {
+    const response = await fetch(`${API_BASE_URL}/categories/${id}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("Failed to delete category");
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+  };
 
-  return { categories, isLoading, error, createCategory, updateCategory, refetch: fetchCategories };
+  return { categories, isLoading, error, createCategory, updateCategory, deleteCategory, refetch: fetchCategories };
 }
