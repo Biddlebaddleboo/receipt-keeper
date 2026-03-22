@@ -57,6 +57,7 @@ const Index = () => {
           onClose={() => setSelectedReceipt(null)}
           onRemove={removeReceipt}
           onRetry={retryUpload}
+          fetchReceipt={fetchReceipt}
         />
       )}
 

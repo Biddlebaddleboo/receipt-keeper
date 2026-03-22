@@ -128,5 +128,16 @@ export function useReceiptApi() {
     return acc;
   }, {});
 
-  return { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload };
+  const fetchReceipt = async (id: string): Promise<Receipt | null> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${id}`);
+      if (!response.ok) throw new Error("Failed to fetch receipt");
+      const data = await response.json();
+      return { ...data, status: "success" as const };
+    } catch {
+      return null;
+    }
+  };
+
+  return { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload, fetchReceipt };
 }
