@@ -28,7 +28,6 @@ const API_BASE_URL = "";
 export function useReceiptApi() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
