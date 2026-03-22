@@ -226,21 +226,34 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
           </div>
 
           <div className="space-y-2.5 pt-1">
-            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
-              <Store className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Vendor</p>
-                <p className="text-sm font-medium">{receipt.vendor || "—"}</p>
+            {/* Vendor */}
+            {editingField === "vendor" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground">Vendor</label>
+                <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("vendor", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <button onClick={() => startFieldEdit("vendor", receipt.vendor || "")} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <Store className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">Vendor</p>
+                  <p className="text-sm font-medium">{receipt.vendor || "—"}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
 
             <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
               <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div>
                 <p className="text-xs text-muted-foreground">Subtotal</p>
-                <p className="text-sm font-medium tabular-nums">
-                  ${(receipt.subtotal ?? 0).toFixed(2)}
-                </p>
+                <p className="text-sm font-medium tabular-nums">${(receipt.subtotal ?? 0).toFixed(2)}</p>
               </div>
             </div>
 
@@ -248,21 +261,32 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               <ReceiptIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div>
                 <p className="text-xs text-muted-foreground">Tax</p>
-                <p className="text-sm font-medium tabular-nums">
-                  ${(receipt.tax ?? 0).toFixed(2)}
-                </p>
+                <p className="text-sm font-medium tabular-nums">${(receipt.tax ?? 0).toFixed(2)}</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
-              <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Total</p>
-                <p className="text-sm font-medium tabular-nums">
-                  ${receipt.total.toFixed(2)}
-                </p>
+            {/* Total */}
+            {editingField === "total" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground">Total</label>
+                <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} step="0.01" min="0" className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm tabular-nums border border-border focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("total", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <button onClick={() => startFieldEdit("total", String(receipt.total))} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">Total</p>
+                  <p className="text-sm font-medium tabular-nums">${receipt.total.toFixed(2)}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
 
             <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
               <Tag className="w-4 h-4 text-muted-foreground flex-shrink-0" />
@@ -272,13 +296,28 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               </div>
             </div>
 
-            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
-              <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div>
-                <p className="text-xs text-muted-foreground">Purchase Date</p>
-                <p className="text-sm font-medium">{purchaseDate}</p>
+            {/* Purchase Date */}
+            {editingField === "purchase_date" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground">Purchase Date</label>
+                <input type="date" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary" autoFocus />
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("purchase_date", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <button onClick={() => startFieldEdit("purchase_date", receipt.purchase_date || "")} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground">Purchase Date</p>
+                  <p className="text-sm font-medium">{purchaseDate}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
 
             <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
               <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
