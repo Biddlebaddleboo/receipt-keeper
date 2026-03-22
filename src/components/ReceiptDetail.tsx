@@ -201,10 +201,38 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
               <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div>
+                <p className="text-xs text-muted-foreground">Subtotal</p>
+                <p className="text-sm font-medium tabular-nums">
+                  ${(receipt.subtotal ?? 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
+              <ReceiptIcon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Tax</p>
+                <p className="text-sm font-medium tabular-nums">
+                  ${(receipt.tax ?? 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
+              <DollarSign className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div>
                 <p className="text-xs text-muted-foreground">Total</p>
                 <p className="text-sm font-medium tabular-nums">
-                  {receipt.total.toFixed(2)}
+                  ${receipt.total.toFixed(2)}
                 </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50">
+              <Tag className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div>
+                <p className="text-xs text-muted-foreground">Category</p>
+                <p className="text-sm font-medium">{receipt.category || "—"}</p>
               </div>
             </div>
 

@@ -14,8 +14,9 @@ export interface ReceiptItem {
 export interface Receipt {
   id: string;
   vendor: string;
+  subtotal: number;
+  tax: number;
   total: number;
-  currency: string;
   category: string;
   purchase_date: string;
   extracted_text: string;
