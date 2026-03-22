@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Receipt } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List } from "lucide-react";
 
@@ -6,6 +7,7 @@ interface ReceiptDetailProps {
   onClose: () => void;
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
+  fetchReceipt: (id: string) => Promise<Receipt | null>;
 }
 
 const statusConfig = {
@@ -15,7 +17,20 @@ const statusConfig = {
   error: { label: "Failed", color: "bg-destructive/10 text-destructive", icon: <AlertCircle className="w-3.5 h-3.5" /> },
 };
 
-export function ReceiptDetail({ receipt, onClose, onRemove, onRetry }: ReceiptDetailProps) {
+export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
+  const [receipt, setReceipt] = useState(initialReceipt);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchReceipt(initialReceipt.id).then((data) => {
+      if (!cancelled && data) setReceipt(data);
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [initialReceipt.id, fetchReceipt]);
+
   const status = statusConfig[receipt.status];
   const imageUrl = receipt.image_url || receipt.localImageUrl;
   const purchaseDate = receipt.purchase_date
@@ -47,6 +62,12 @@ export function ReceiptDetail({ receipt, onClose, onRemove, onRetry }: ReceiptDe
       </header>
 
       <div className="flex-1 overflow-y-auto">
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
         {imageUrl && (
           <div className="aspect-[3/4] max-h-[50vh] bg-muted overflow-hidden">
             <img src={imageUrl} alt="Receipt" className="w-full h-full object-contain" />
