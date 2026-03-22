@@ -1,84 +1,59 @@
 import { Receipt } from "@/hooks/useReceiptApi";
-import { CheckCircle2, AlertCircle, Loader2, Trash2, RotateCcw } from "lucide-react";
+import { CheckCircle2, AlertCircle, Loader2, Store, ChevronRight } from "lucide-react";
 
 interface ReceiptCardProps {
   receipt: Receipt;
-  onRemove: (id: string) => void;
-  onRetry: (id: string) => void;
+  onClick: (receipt: Receipt) => void;
   index: number;
 }
 
-export function ReceiptCard({ receipt, onRemove, onRetry, index }: ReceiptCardProps) {
-  const statusConfig = {
-    pending: { icon: null, label: "Pending", color: "text-muted-foreground" },
-    uploading: {
-      icon: <Loader2 className="w-4 h-4 animate-spin" />,
-      label: "Uploading…",
-      color: "text-primary",
-    },
-    success: {
-      icon: <CheckCircle2 className="w-4 h-4" />,
-      label: "Uploaded",
-      color: "text-success",
-    },
-    error: {
-      icon: <AlertCircle className="w-4 h-4" />,
-      label: receipt.errorMessage || "Failed",
-      color: "text-destructive",
-    },
-  };
+const statusIcon = {
+  pending: null,
+  uploading: <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />,
+  success: <CheckCircle2 className="w-3.5 h-3.5 text-success" />,
+  error: <AlertCircle className="w-3.5 h-3.5 text-destructive" />,
+};
 
-  const status = statusConfig[receipt.status];
-
+export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
   return (
-    <div
-      className="group bg-card rounded-lg overflow-hidden receipt-shadow hover:receipt-shadow-hover transition-shadow duration-300 opacity-0 animate-scale-in"
-      style={{ animationDelay: `${index * 80}ms` }}
+    <button
+      onClick={() => onClick(receipt)}
+      className="w-full flex items-center gap-3.5 px-3.5 py-3 rounded-lg bg-card hover:bg-secondary/60 receipt-shadow hover:receipt-shadow-hover transition-all duration-300 text-left group opacity-0 animate-fade-up active:scale-[0.98]"
+      style={{ animationDelay: `${index * 60}ms` }}
     >
-      <div className="relative aspect-[3/4] overflow-hidden bg-muted">
+      {/* Thumbnail */}
+      <div className="w-12 h-12 rounded-md overflow-hidden bg-muted flex-shrink-0 ring-1 ring-border">
         <img
           src={receipt.imageUrl}
           alt="Receipt"
           className="w-full h-full object-cover"
           loading="lazy"
         />
-        <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/5 transition-colors duration-200" />
-
-        {/* Actions overlay */}
-        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          {receipt.status === "error" && (
-            <button
-              onClick={() => onRetry(receipt.id)}
-              className="p-2 rounded-md bg-card/90 backdrop-blur-sm text-foreground hover:bg-card transition-colors active:scale-95"
-              title="Retry upload"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-          )}
-          <button
-            onClick={() => onRemove(receipt.id)}
-            className="p-2 rounded-md bg-card/90 backdrop-blur-sm text-destructive hover:bg-card transition-colors active:scale-95"
-            title="Remove"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
       </div>
 
-      <div className="px-3 py-2.5 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">
-          {receipt.uploadedAt.toLocaleDateString("en-US", {
+      {/* Info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <Store className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <span className="text-sm font-medium truncate">{receipt.storeName}</span>
+          {statusIcon[receipt.status]}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {receipt.date.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
+            year: "numeric",
           })}
-        </span>
-        <span className={`flex items-center gap-1 text-xs font-medium ${status.color}`}>
-          {status.icon}
-          {status.label}
-        </span>
+        </p>
       </div>
-    </div>
+
+      {/* Amount */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <span className="text-sm font-semibold tabular-nums">
+          ${receipt.amount.toFixed(2)}
+        </span>
+        <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
+      </div>
+    </button>
   );
 }
