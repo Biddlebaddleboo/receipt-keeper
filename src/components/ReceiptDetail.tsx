@@ -68,10 +68,11 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             </button>
           )}
           <button
-            onClick={() => { onRemove(receipt.id); onClose(); }}
-            className="p-2 rounded-md hover:bg-destructive/10 text-destructive transition-colors active:scale-95"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="p-2 rounded-md hover:bg-destructive/10 text-destructive transition-colors active:scale-95 disabled:opacity-50"
           >
-            <Trash2 className="w-5 h-5" />
+            {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
           </button>
         </div>
       </header>
