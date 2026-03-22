@@ -1,13 +1,16 @@
 import { Receipt } from "@/hooks/useReceiptApi";
 import { ReceiptCard } from "./ReceiptCard";
-import { ReceiptText } from "lucide-react";
+import { ReceiptText, Loader2 } from "lucide-react";
 
 interface ReceiptListProps {
   receiptsByDate: Record<string, Receipt[]>;
   onReceiptClick: (receipt: Receipt) => void;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
-export function ReceiptList({ receiptsByDate, onReceiptClick }: ReceiptListProps) {
+export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoadingMore, onLoadMore }: ReceiptListProps) {
   const dateKeys = Object.keys(receiptsByDate);
 
   if (dateKeys.length === 0) {
@@ -53,6 +56,25 @@ export function ReceiptList({ receiptsByDate, onReceiptClick }: ReceiptListProps
           </section>
         );
       })}
+
+      {hasMore && (
+        <div className="flex justify-center pt-2 pb-4">
+          <button
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-secondary hover:bg-secondary/80 text-sm font-medium text-foreground transition-colors active:scale-[0.98] disabled:opacity-50"
+          >
+            {isLoadingMore ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading…
+              </>
+            ) : (
+              "Load more receipts"
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

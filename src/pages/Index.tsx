@@ -6,7 +6,7 @@ import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
 import { ScanLine, Plus } from "lucide-react";
 
 const Index = () => {
-  const { receipts, receiptsByDate, isUploading, uploadReceipt, removeReceipt, retryUpload, fetchReceipt } =
+  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
     useReceiptApi();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -39,6 +39,9 @@ const Index = () => {
         <ReceiptList
           receiptsByDate={receiptsByDate}
           onReceiptClick={setSelectedReceipt}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={loadNextPage}
         />
       </main>
 
