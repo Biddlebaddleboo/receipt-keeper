@@ -11,7 +11,6 @@ export interface Receipt {
   total: number;
   currency: string;
   purchase_date: string;
-  image_url: string;
   extracted_text: string;
   extracted_fields: ExtractedField[];
   created_at: string;
