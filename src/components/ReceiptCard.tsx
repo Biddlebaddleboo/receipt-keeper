@@ -40,8 +40,7 @@ export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
         <span className="text-sm font-semibold tabular-nums">
-          {receipt.currency === "USD" ? "$" : receipt.currency + " "}
-          {receipt.total.toFixed(2)}
+          ${receipt.total.toFixed(2)}
         </span>
         <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
       </div>
