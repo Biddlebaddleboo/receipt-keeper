@@ -31,17 +31,17 @@ export function useReceiptApi() {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  const uploadReceipt = async (file: File, metadata: { storeName: string; amount: number; date: Date }) => {
+  const uploadReceipt = async (file: File) => {
     const id = crypto.randomUUID();
     const localImageUrl = URL.createObjectURL(file);
 
     const newReceipt: Receipt = {
       id,
-      vendor: metadata.storeName,
-      total: metadata.amount,
+      vendor: "",
+      total: 0,
       currency: "USD",
       category: "",
-      purchase_date: metadata.date.toISOString(),
+      purchase_date: "",
       extracted_text: "",
       extracted_fields: [],
       created_at: new Date().toISOString(),
@@ -56,10 +56,6 @@ export function useReceiptApi() {
     try {
       const formData = new FormData();
       formData.append("receipt", file);
-      formData.append("vendor", metadata.storeName);
-      formData.append("total", metadata.amount.toString());
-      formData.append("currency", "USD");
-      formData.append("purchase_date", metadata.date.toISOString());
 
       const response = await fetch(`${API_BASE_URL}/receipts`, {
         method: "POST",
