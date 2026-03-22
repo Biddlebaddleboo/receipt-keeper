@@ -10,7 +10,7 @@ export interface Category {
 const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
 
 export function useCategoryApi() {
-  const { token } = useAuth();
+  const { token, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
   useEffect(() => { tokenRef.current = token; }, [token]);
   const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
@@ -19,6 +19,7 @@ export function useCategoryApi() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchCategories = useCallback(async () => {
+    if (!tokenRef.current) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -35,8 +36,8 @@ export function useCategoryApi() {
   }, [token]);
 
   useEffect(() => {
-    fetchCategories();
-  }, [fetchCategories]);
+    if (!authLoading && token) fetchCategories();
+  }, [authLoading, token, fetchCategories]);
 
   const createCategory = async (name: string, description = "") => {
     const response = await fetch(`${API_BASE_URL}/categories`, {

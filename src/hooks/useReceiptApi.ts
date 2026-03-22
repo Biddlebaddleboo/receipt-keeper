@@ -151,7 +151,7 @@ export function useReceiptApi() {
   };
 
   const loadNextPage = useCallback(async () => {
-    if (isLoadingMore || !hasMore) return;
+    if (isLoadingMore || !hasMore || !tokenRef.current) return;
     setIsLoadingMore(true);
     try {
       const url = nextCursor
