@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 const CategoryManager = () => {
   const navigate = useNavigate();
-  const { categories, isLoading, error, createCategory, updateCategory } = useCategoryApi();
+  const { categories, isLoading, error, createCategory, updateCategory, deleteCategory } = useCategoryApi();
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [isCreating, setIsCreating] = useState(false);
