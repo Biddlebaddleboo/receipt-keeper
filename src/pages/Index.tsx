@@ -4,7 +4,8 @@ import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
 import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
-import { ScanLine, Plus, Settings } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { ScanLine, Plus, Settings, LogOut } from "lucide-react";
 
 const Index = () => {
   const navigate = useNavigate();
