@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine } from "lucide-react";
 
@@ -61,6 +61,9 @@ const Login = () => {
           <p className="text-sm text-muted-foreground">Sign in to manage your receipts</p>
         </div>
         <div ref={buttonRef} className="flex justify-center" />
+        <Link to="/terms" className="text-xs text-muted-foreground underline hover:text-foreground transition-colors">
+          Terms of Service
+        </Link>
       </div>
       <p className="absolute bottom-6 text-xs text-muted-foreground">
         Designed by{" "}

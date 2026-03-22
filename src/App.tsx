@@ -9,6 +9,7 @@ import Settings from "./pages/Settings.tsx";
 import CategoryManager from "./pages/CategoryManager.tsx";
 import Login from "./pages/Login.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import TermsOfService from "./pages/TermsOfService.tsx";
 
 const queryClient = new QueryClient();
 
@@ -25,6 +26,7 @@ const AppRoutes = () => (
     <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
     <Route path="/settings/categories" element={<RequireAuth><CategoryManager /></RequireAuth>} />
+    <Route path="/terms" element={<TermsOfService />} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
