@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
 import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
-import { ScanLine, Plus } from "lucide-react";
+import { ScanLine, Plus, Settings } from "lucide-react";
 
 const Index = () => {
   const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
