@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { Receipt } from "@/hooks/useReceiptApi";
-import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart } from "lucide-react";
+import { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
+import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus } from "lucide-react";
+import { toast } from "sonner";
 
 const API_BASE_URL = "";
 
@@ -19,10 +20,19 @@ const statusConfig = {
   error: { label: "Failed", color: "bg-destructive/10 text-destructive", icon: <AlertCircle className="w-3.5 h-3.5" /> },
 };
 
+interface EditingItem {
+  index: number;
+  name: string;
+  quantity: string;
+  price: string;
+}
+
 export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
   const [receipt, setReceipt] = useState(initialReceipt);
   const [loading, setLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
@@ -45,6 +55,89 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     });
     return () => { cancelled = true; };
   }, [initialReceipt.id, fetchReceipt]);
+
+  const startEditing = (index: number) => {
+    const item = receipt.items[index];
+    setEditingItem({
+      index,
+      name: item.name,
+      quantity: String(item.quantity),
+      price: String(item.price),
+    });
+  };
+
+  const cancelEditing = () => setEditingItem(null);
+
+  const saveItem = async () => {
+    if (!editingItem) return;
+    const quantity = parseFloat(editingItem.quantity);
+    const price = parseFloat(editingItem.price);
+    if (!editingItem.name.trim() || isNaN(quantity) || isNaN(price)) {
+      toast.error("Please fill in all fields with valid values");
+      return;
+    }
+
+    const updatedItems = receipt.items.map((item, i) =>
+      i === editingItem.index ? { name: editingItem.name.trim(), quantity, price } : item
+    );
+
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: updatedItems }),
+      });
+      if (!response.ok) throw new Error("Failed to save");
+      setReceipt((prev) => ({ ...prev, items: updatedItems }));
+      setEditingItem(null);
+      toast.success("Item updated");
+    } catch {
+      toast.error("Failed to save changes");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteItem = async (index: number) => {
+    const updatedItems = receipt.items.filter((_, i) => i !== index);
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: updatedItems }),
+      });
+      if (!response.ok) throw new Error("Failed to delete item");
+      setReceipt((prev) => ({ ...prev, items: updatedItems }));
+      if (editingItem?.index === index) setEditingItem(null);
+      toast.success("Item removed");
+    } catch {
+      toast.error("Failed to remove item");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const addItem = async () => {
+    const newItem: ReceiptItem = { name: "New item", quantity: 1, price: 0 };
+    const updatedItems = [...(receipt.items || []), newItem];
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: updatedItems }),
+      });
+      if (!response.ok) throw new Error("Failed to add item");
+      setReceipt((prev) => ({ ...prev, items: updatedItems }));
+      startEditing(updatedItems.length - 1);
+    } catch {
+      toast.error("Failed to add item");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const status = statusConfig[receipt.status];
   const imageUrl = receipt.localImageUrl || `${API_BASE_URL}/receipts/${receipt.id}/image`;
@@ -140,27 +233,108 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             </div>
           </div>
 
-          {receipt.items && receipt.items.length > 0 && (
-            <div className="pt-2">
-              <div className="flex items-center gap-2 mb-2 px-0.5">
+          <div className="pt-2">
+            <div className="flex items-center justify-between mb-2 px-0.5">
+              <div className="flex items-center gap-2">
                 <ShoppingCart className="w-3.5 h-3.5 text-muted-foreground" />
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Items</p>
               </div>
-              <div className="space-y-1.5">
-                {receipt.items.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-secondary/50">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.name}</p>
-                      <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
-                    </div>
-                    <span className="text-sm font-medium tabular-nums ml-3">
-                      ${item.price.toFixed(2)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <button
+                onClick={addItem}
+                disabled={isSaving}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-primary hover:bg-primary/10 transition-colors active:scale-95 disabled:opacity-50"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add
+              </button>
             </div>
-          )}
+            <div className="space-y-1.5">
+              {receipt.items && receipt.items.length > 0 ? (
+                receipt.items.map((item, i) =>
+                  editingItem?.index === i ? (
+                    <div key={i} className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2.5 ring-1 ring-primary/20">
+                      <input
+                        type="text"
+                        value={editingItem.name}
+                        onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                        placeholder="Item name"
+                        className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <label className="text-[10px] text-muted-foreground mb-0.5 block">Qty</label>
+                          <input
+                            type="number"
+                            value={editingItem.quantity}
+                            onChange={(e) => setEditingItem({ ...editingItem, quantity: e.target.value })}
+                            min="0"
+                            step="1"
+                            className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm tabular-nums border border-border focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-[10px] text-muted-foreground mb-0.5 block">Price</label>
+                          <input
+                            type="number"
+                            value={editingItem.price}
+                            onChange={(e) => setEditingItem({ ...editingItem, price: e.target.value })}
+                            min="0"
+                            step="0.01"
+                            className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm tabular-nums border border-border focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-1.5 pt-0.5">
+                        <button
+                          onClick={cancelEditing}
+                          className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={saveItem}
+                          disabled={isSaving}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50"
+                        >
+                          {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={i} className="group flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium tabular-nums">
+                          ${item.price.toFixed(2)}
+                        </span>
+                        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startEditing(i)}
+                            className="p-1 rounded hover:bg-background/60 transition-colors active:scale-95"
+                          >
+                            <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
+                          <button
+                            onClick={() => deleteItem(i)}
+                            disabled={isSaving}
+                            className="p-1 rounded hover:bg-destructive/10 transition-colors active:scale-95 disabled:opacity-50"
+                          >
+                            <Minus className="w-3.5 h-3.5 text-destructive" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                )
+              ) : (
+                <p className="text-xs text-muted-foreground px-1 py-2">No items yet</p>
+              )}
+            </div>
+          </div>
 
           {receipt.extracted_fields && receipt.extracted_fields.length > 0 && (
             <div className="pt-2">
