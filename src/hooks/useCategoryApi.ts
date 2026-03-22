@@ -6,7 +6,7 @@ export interface Category {
   description: string;
 }
 
-const API_BASE_URL = "";
+const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
 
 export function useCategoryApi() {
   const [categories, setCategories] = useState<Category[]>([]);
