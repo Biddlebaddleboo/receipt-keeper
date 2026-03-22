@@ -22,6 +22,19 @@ const statusConfig = {
 export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
   const [receipt, setReceipt] = useState(initialReceipt);
   const [loading, setLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete");
+      onRemove(receipt.id);
+      onClose();
+    } catch {
+      setIsDeleting(false);
+    }
+  }, [receipt.id, onRemove, onClose]);
 
   useEffect(() => {
     let cancelled = false;
