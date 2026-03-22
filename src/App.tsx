@@ -9,6 +9,7 @@ import Settings from "./pages/Settings.tsx";
 import CategoryManager from "./pages/CategoryManager.tsx";
 import Login from "./pages/Login.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import TermsOfService from "./pages/TermsOfService.tsx";
 
 const queryClient = new QueryClient();
 
