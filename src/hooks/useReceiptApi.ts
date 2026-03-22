@@ -104,11 +104,7 @@ export function useReceiptApi() {
     const receipt = receipts.find((r) => r.id === id);
     if (receipt?.file) {
       removeReceipt(id);
-      uploadReceipt(receipt.file, {
-        storeName: receipt.vendor,
-        amount: receipt.total,
-        date: new Date(receipt.purchase_date),
-      });
+      uploadReceipt(receipt.file);
     }
   };
 
