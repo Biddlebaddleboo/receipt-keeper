@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Receipt } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List } from "lucide-react";
 
@@ -22,6 +22,19 @@ const statusConfig = {
 export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
   const [receipt, setReceipt] = useState(initialReceipt);
   const [loading, setLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = useCallback(async () => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete");
+      onRemove(receipt.id);
+      onClose();
+    } catch {
+      setIsDeleting(false);
+    }
+  }, [receipt.id, onRemove, onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,10 +68,11 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             </button>
           )}
           <button
-            onClick={() => { onRemove(receipt.id); onClose(); }}
-            className="p-2 rounded-md hover:bg-destructive/10 text-destructive transition-colors active:scale-95"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="p-2 rounded-md hover:bg-destructive/10 text-destructive transition-colors active:scale-95 disabled:opacity-50"
           >
-            <Trash2 className="w-5 h-5" />
+            {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
           </button>
         </div>
       </header>
