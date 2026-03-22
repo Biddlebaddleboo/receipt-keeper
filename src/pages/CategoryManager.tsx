@@ -173,6 +173,19 @@ const CategoryManager = () => {
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await deleteCategory(cat.id);
+                          toast.success("Category deleted");
+                        } catch {
+                          toast.error("Failed to delete category");
+                        }
+                      }}
+                      className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </>
                 )}
               </div>
