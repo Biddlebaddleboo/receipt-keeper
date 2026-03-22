@@ -14,6 +14,9 @@ export function useCategoryApi() {
   const tokenRef = useRef(token);
   useEffect(() => { tokenRef.current = token; }, [token]);
   const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchCategories = useCallback(async () => {
     setIsLoading(true);
