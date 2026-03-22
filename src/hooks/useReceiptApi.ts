@@ -31,17 +31,21 @@ export function useReceiptApi() {
 
   const uploadReceipt = async (file: File, metadata: { storeName: string; amount: number; date: Date }) => {
     const id = crypto.randomUUID();
-    const imageUrl = URL.createObjectURL(file);
+    const localImageUrl = URL.createObjectURL(file);
 
     const newReceipt: Receipt = {
       id,
-      imageUrl,
+      vendor: metadata.storeName,
+      total: metadata.amount,
+      currency: "USD",
+      purchase_date: metadata.date.toISOString(),
+      image_url: "",
+      extracted_text: "",
+      extracted_fields: [],
+      created_at: new Date().toISOString(),
+      localImageUrl,
       file,
-      capturedAt: new Date(),
       status: "uploading",
-      storeName: metadata.storeName,
-      amount: metadata.amount,
-      date: metadata.date,
     };
 
     setReceipts((prev) => [newReceipt, ...prev]);
@@ -50,9 +54,10 @@ export function useReceiptApi() {
     try {
       const formData = new FormData();
       formData.append("receipt", file);
-      formData.append("storeName", metadata.storeName);
-      formData.append("amount", metadata.amount.toString());
-      formData.append("date", metadata.date.toISOString());
+      formData.append("vendor", metadata.storeName);
+      formData.append("total", metadata.amount.toString());
+      formData.append("currency", "USD");
+      formData.append("purchase_date", metadata.date.toISOString());
 
       const response = await fetch(`${API_BASE_URL}/receipts`, {
         method: "POST",
@@ -63,8 +68,19 @@ export function useReceiptApi() {
         throw new Error(`Upload failed: ${response.statusText}`);
       }
 
+      const data = await response.json();
+
       setReceipts((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: "success" as const } : r))
+        prev.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                ...data,
+                id, // keep client id if backend doesn't return one
+                status: "success" as const,
+              }
+            : r
+        )
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
@@ -81,30 +97,32 @@ export function useReceiptApi() {
   const removeReceipt = (id: string) => {
     setReceipts((prev) => {
       const receipt = prev.find((r) => r.id === id);
-      if (receipt) URL.revokeObjectURL(receipt.imageUrl);
+      if (receipt?.localImageUrl) URL.revokeObjectURL(receipt.localImageUrl);
       return prev.filter((r) => r.id !== id);
     });
   };
 
   const retryUpload = (id: string) => {
     const receipt = receipts.find((r) => r.id === id);
-    if (receipt) {
+    if (receipt?.file) {
       removeReceipt(id);
       uploadReceipt(receipt.file, {
-        storeName: receipt.storeName,
-        amount: receipt.amount,
-        date: receipt.date,
+        storeName: receipt.vendor,
+        amount: receipt.total,
+        date: new Date(receipt.purchase_date),
       });
     }
   };
 
   // Group receipts by date
   const receiptsByDate = receipts.reduce<Record<string, Receipt[]>>((acc, receipt) => {
-    const key = receipt.date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+    const key = receipt.purchase_date
+      ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
+      : "Unknown Date";
     if (!acc[key]) acc[key] = [];
     acc[key].push(receipt);
     return acc;

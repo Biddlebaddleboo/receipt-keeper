@@ -11,7 +11,7 @@ const Index = () => {
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
-  const totalSpent = receipts.reduce((sum, r) => sum + r.amount, 0);
+  const totalSpent = receipts.reduce((sum, r) => sum + r.total, 0);
 
   return (
     <div className="min-h-screen bg-background">
