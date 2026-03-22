@@ -33,6 +33,12 @@ const Index = () => {
                 : `${receipts.length} receipt${receipts.length !== 1 ? "s" : ""} · $${totalSpent.toFixed(2)} total`}
             </p>
           </div>
+          <button
+            onClick={() => navigate("/settings")}
+            className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+          >
+            <Settings className="w-5 h-5 text-muted-foreground" />
+          </button>
         </div>
       </header>
 
