@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
-import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus } from "lucide-react";
+import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon } from "lucide-react";
 import { toast } from "sonner";
 
 const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
