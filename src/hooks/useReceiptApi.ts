@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 export interface ExtractedField {
   label: string;
@@ -28,6 +28,9 @@ const API_BASE_URL = "";
 export function useReceiptApi() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const uploadReceipt = async (file: File, metadata: { storeName: string; amount: number; date: Date }) => {
     const id = crypto.randomUUID();
