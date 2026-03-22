@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine } from "lucide-react";
 
@@ -18,8 +19,13 @@ declare global {
 }
 
 const Login = () => {
-  const { signIn } = useAuth();
+  const navigate = useNavigate();
+  const { token, signIn } = useAuth();
   const buttonRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (token) navigate("/", { replace: true });
+  }, [token, navigate]);
 
   useEffect(() => {
     const interval = setInterval(() => {
