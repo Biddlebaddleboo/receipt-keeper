@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 export interface ExtractedField {
   label: string;
