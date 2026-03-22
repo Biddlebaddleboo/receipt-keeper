@@ -64,6 +64,7 @@ const Login = () => {
         <Link to="/terms" className="text-xs text-muted-foreground underline hover:text-foreground transition-colors">
           Terms of Service
         </Link>
+      </div>
       <p className="absolute bottom-6 text-xs text-muted-foreground">
         Designed by{" "}
         <a
