@@ -63,7 +63,7 @@ export function useReceiptApi() {
 
     try {
       const formData = new FormData();
-      formData.append("receipt", file);
+      formData.append("file", file);
 
       const response = await fetch(`${API_BASE_URL}/receipts`, {
         method: "POST",
