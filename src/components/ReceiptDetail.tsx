@@ -33,6 +33,42 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [isDeleting, setIsDeleting] = useState(false);
   const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+
+  const saveField = async (field: string, value: string) => {
+    const payload: Record<string, unknown> = {};
+    if (field === "vendor") payload.vendor = value.trim();
+    else if (field === "total") payload.total = parseFloat(value);
+    else if (field === "purchase_date") payload.purchase_date = value;
+
+    if (field === "total" && isNaN(payload.total as number)) {
+      toast.error("Invalid total");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error("Failed to save");
+      setReceipt((prev) => ({ ...prev, ...payload }));
+      setEditingField(null);
+      toast.success(`${field.charAt(0).toUpperCase() + field.slice(1).replace("_", " ")} updated`);
+    } catch {
+      toast.error("Failed to save changes");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const startFieldEdit = (field: string, currentValue: string) => {
+    setEditingField(field);
+    setEditValue(currentValue);
+  };
 
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
