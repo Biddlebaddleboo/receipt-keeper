@@ -45,6 +45,13 @@ const Index = () => {
           >
             <Settings className="w-5 h-5 text-muted-foreground" />
           </button>
+          <button
+            onClick={signOut}
+            className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+            title="Sign out"
+          >
+            <LogOut className="w-5 h-5 text-muted-foreground" />
+          </button>
         </div>
       </header>
 
