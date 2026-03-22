@@ -38,7 +38,7 @@ export function useCategoryApi() {
   const createCategory = async (name: string, description = "") => {
     const response = await fetch(`${API_BASE_URL}/categories`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify({ name, description }),
     });
     if (!response.ok) throw new Error("Failed to create category");
