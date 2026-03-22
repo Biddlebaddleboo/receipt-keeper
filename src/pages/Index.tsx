@@ -13,6 +13,10 @@ const Index = () => {
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
+  useEffect(() => {
+    loadNextPage();
+  }, []);
+
   const totalSpent = receipts.reduce((sum, r) => sum + r.total, 0);
 
   return (
