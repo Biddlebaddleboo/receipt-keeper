@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
@@ -12,6 +12,10 @@ const Index = () => {
     useReceiptApi();
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+
+  useEffect(() => {
+    loadNextPage();
+  }, []);
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.total, 0);
 
