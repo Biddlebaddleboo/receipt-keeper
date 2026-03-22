@@ -28,7 +28,7 @@ export function ReceiptList({ receiptsByDate, onReceiptClick }: ReceiptListProps
     <div className="space-y-6">
       {dateKeys.map((dateLabel) => {
         const group = receiptsByDate[dateLabel];
-        const total = group.reduce((sum, r) => sum + r.amount, 0);
+        const total = group.reduce((sum, r) => sum + r.total, 0);
 
         return (
           <section key={dateLabel}>
