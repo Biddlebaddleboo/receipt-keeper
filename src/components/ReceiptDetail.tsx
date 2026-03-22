@@ -42,10 +42,13 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const payload: Record<string, unknown> = {};
     if (field === "vendor") payload.vendor = value.trim();
     else if (field === "total") payload.total = parseFloat(value);
+    else if (field === "subtotal") payload.subtotal = parseFloat(value);
+    else if (field === "tax") payload.tax = parseFloat(value);
+    else if (field === "category") payload.category = value;
     else if (field === "purchase_date") payload.purchase_date = value;
 
-    if (field === "total" && isNaN(payload.total as number)) {
-      toast.error("Invalid total");
+    if ((field === "total" || field === "subtotal" || field === "tax") && isNaN(payload[field] as number)) {
+      toast.error(`Invalid ${field}`);
       return;
     }
 
