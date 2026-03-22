@@ -20,6 +20,7 @@ export interface Receipt {
   purchase_date: string;
   extracted_text: string;
   extracted_fields: ExtractedField[];
+  items: ReceiptItem[];
   created_at: string;
   // Client-side fields
   file?: File;
