@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
 export interface Category {
@@ -11,11 +11,9 @@ const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northameri
 
 export function useCategoryApi() {
   const { token } = useAuth();
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const tokenRef = useRef(token);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+  const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
 
   const fetchCategories = useCallback(async () => {
     setIsLoading(true);
