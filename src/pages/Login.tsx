@@ -30,8 +30,7 @@ const Login = () => {
           callback: (response: { credential: string }) => {
             signIn(response.credential);
           },
-          ux_mode: "redirect",
-          login_uri: window.location.origin + "/login",
+          use_fedcm_for_prompt: true,
         });
         window.google.accounts.id.renderButton(buttonRef.current, {
           theme: "outline",
