@@ -203,7 +203,6 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
               <div>
                 <p className="text-xs text-muted-foreground">Total</p>
                 <p className="text-sm font-medium tabular-nums">
-                  {receipt.currency === "USD" ? "$" : receipt.currency + " "}
                   {receipt.total.toFixed(2)}
                 </p>
               </div>
