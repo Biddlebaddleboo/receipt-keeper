@@ -50,7 +50,7 @@ export function useCategoryApi() {
   const updateCategory = async (id: string, updates: { name?: string; description?: string }) => {
     const response = await fetch(`${API_BASE_URL}/categories/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", ...authHeaders },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify(updates),
     });
     if (!response.ok) throw new Error("Failed to update category");
