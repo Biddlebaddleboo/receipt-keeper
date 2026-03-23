@@ -12,11 +12,8 @@ const Settings = () => {
   const { theme, toggleTheme } = useTheme();
   const { plans, isLoading, error } = usePaymentPlanApi();
 
-  const handleSubscribe = (plan: PaymentPlan) => {
-    toast({
-      title: "Coming soon",
-      description: "Payment integration is being set up. Check back shortly!",
-    });
+  const handleSubscribe = () => {
+    window.open("https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8", "_blank");
   };
 
   // Pick icon/color based on plan name
@@ -133,7 +130,7 @@ const Settings = () => {
                 )}
                 <div className="px-5 pb-5">
                   <Button
-                    onClick={() => handleSubscribe(plan)}
+                    onClick={() => handleSubscribe()}
                     className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                   >
                     Subscribe
