@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check } from "lucide-react";
+import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check, Zap } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -63,6 +63,42 @@ const Settings = () => {
               <Button
                 onClick={handleSubscribe}
                 className="w-full bg-amber-500 hover:bg-amber-600 text-white active:scale-[0.98]"
+              >
+                Subscribe
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-card receipt-shadow overflow-hidden mt-3">
+            <div className="px-5 pt-5 pb-4 flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+                <Zap className="w-5 h-5 text-violet-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-base font-semibold">Pro</span>
+                  <span className="text-xs font-medium text-muted-foreground">$11.99 CAD/month</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">Everything you need, no limits</p>
+              </div>
+            </div>
+            <div className="px-5 pb-4 space-y-2">
+              {[
+                "Unlimited receipts per month",
+                "Priority OCR processing",
+                "Export to CSV",
+                "Advanced analytics",
+              ].map((feature) => (
+                <div key={feature} className="flex items-center gap-2.5">
+                  <Check className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+                  <span className="text-sm text-foreground/80">{feature}</span>
+                </div>
+              ))}
+            </div>
+            <div className="px-5 pb-5">
+              <Button
+                onClick={handleSubscribe}
+                className="w-full bg-violet-500 hover:bg-violet-600 text-white active:scale-[0.98]"
               >
                 Subscribe
               </Button>
