@@ -22,7 +22,7 @@ const Settings = () => {
     if (lower.includes("pro")) {
       return { Icon: Zap, color: "violet", bgClass: "bg-violet-500/15", iconClass: "text-violet-500", btnClass: "bg-violet-500 hover:bg-violet-600" };
     }
-    return { Icon: Crown, color: "amber", bgClass: "bg-amber-500/15", iconClass: "text-amber-500", btnClass: "bg-amber-500 hover:bg-amber-600" };
+    return { Icon: Gift, color: "amber", bgClass: "bg-amber-500/15", iconClass: "text-amber-500", btnClass: "bg-amber-500 hover:bg-amber-600" };
   };
 
   const formatBillingPeriod = (period: string) => {
