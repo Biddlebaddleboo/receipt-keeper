@@ -90,7 +90,7 @@ const Settings = () => {
           )}
 
           {/* Free plan - always shown */}
-          {!isLoading && !error && (
+          {!isLoading && !error && userTier === 0 && (
             <div className={`rounded-xl bg-card receipt-shadow overflow-hidden ${isFreePlan ? "ring-2 ring-emerald-500" : ""}`}>
               <div className="px-5 pt-5 pb-4 flex items-start gap-4">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
