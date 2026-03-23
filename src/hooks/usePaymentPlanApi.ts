@@ -10,6 +10,7 @@ export interface PaymentPlan {
   recurringAmount: number;
   billingPeriod: string;
   defaultPaymentLinkId: number;
+  features?: string[];
 }
 
 const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
