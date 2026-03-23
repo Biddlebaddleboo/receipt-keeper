@@ -118,7 +118,11 @@ const Settings = () => {
             </div>
           )}
 
-          {!isLoading && !error && plans.map((plan) => {
+          {!isLoading && !error && plans.filter((plan) => {
+            const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
+            const planTier = PLAN_TIERS[cleanName.toLowerCase()] ?? 0;
+            return planTier >= userTier;
+          }).map((plan) => {
             const { Icon, bgClass, iconClass, btnClass } = getPlanStyle(plan);
             const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
             const isCurrent = isCurrentPlan(cleanName);
