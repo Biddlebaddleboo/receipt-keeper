@@ -35,13 +35,21 @@ const Settings = () => {
     return period;
   };
 
-  // Check if user is on a given plan
+  // Plan tier hierarchy (higher index = higher tier)
+  const PLAN_TIERS: Record<string, number> = { free: 0, plus: 1, pro: 2 };
+
+  const getUserTier = () => {
+    if (!userPlan) return 0;
+    return PLAN_TIERS[userPlan.plan_name.toLowerCase()] ?? 0;
+  };
+
   const isCurrentPlan = (planName: string) => {
     if (!userPlan) return false;
-    return userPlan.plan_name.toLowerCase() === planName.toLowerCase().replace(/ - AI Receipt Tracker$/i, "");
+    return userPlan.plan_name.toLowerCase() === planName.toLowerCase();
   };
 
   const isFreePlan = !userPlan || userPlan.plan_id === "free";
+  const userTier = getUserTier();
 
   return (
     <div className="min-h-screen bg-background">
