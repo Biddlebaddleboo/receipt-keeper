@@ -141,13 +141,13 @@ const Settings = () => {
             !error &&
             plans
               .filter((plan) => {
-                const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
+                const cleanName = plan.name.split(" ")[0];
                 const planTier = PLAN_TIERS[cleanName.toLowerCase()] ?? 0;
                 return planTier >= userTier;
               })
               .map((plan) => {
                 const { Icon, bgClass, iconClass, btnClass } = getPlanStyle(plan);
-                const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
+                const cleanName = plan.name.split(" ")[0];
                 const isCurrent = isCurrentPlan(cleanName);
                 return (
                   <div
