@@ -12,9 +12,9 @@ const BillingSuccess = () => {
           <CheckCircle className="w-8 h-8 text-emerald-500" />
         </div>
         <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Payment Successful!</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Card Information Saved!</h1>
           <p className="text-sm text-muted-foreground">
-            Your subscription is now active. Thank you for upgrading!
+            Your cardholder information has been saved successfully. Your plan is not yet activated — we'll notify you once it's ready.
           </p>
         </div>
         <Button onClick={() => navigate("/")} className="w-full">
