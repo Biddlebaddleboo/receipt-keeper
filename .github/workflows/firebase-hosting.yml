@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - development
 
 jobs:
   build-and-deploy:
@@ -22,5 +23,5 @@ jobs:
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          channelId: preview
+          channelId: ${{ github.ref_name == 'main' && 'live' || 'preview' }}
           projectId: jcdigitalsolutions-jc7
