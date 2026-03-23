@@ -1,19 +1,37 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check, Zap } from "lucide-react";
+import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check, Zap, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/ThemeContext";
 import { toast } from "@/hooks/use-toast";
+import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { plans, isLoading, error } = usePaymentPlanApi();
 
-  const handleSubscribe = () => {
+  const handleSubscribe = (plan: PaymentPlan) => {
     toast({
       title: "Coming soon",
       description: "Payment integration is being set up. Check back shortly!",
     });
+  };
+
+  // Pick icon/color based on plan name
+  const getPlanStyle = (plan: PaymentPlan) => {
+    const lower = plan.name.toLowerCase();
+    if (lower.includes("pro")) {
+      return { Icon: Zap, color: "violet", bgClass: "bg-violet-500/15", iconClass: "text-violet-500", btnClass: "bg-violet-500 hover:bg-violet-600" };
+    }
+    return { Icon: Crown, color: "amber", bgClass: "bg-amber-500/15", iconClass: "text-amber-500", btnClass: "bg-amber-500 hover:bg-amber-600" };
+  };
+
+  const formatBillingPeriod = (period: string) => {
+    if (period === "monthly") return "month";
+    if (period === "yearly") return "year";
+    return period;
   };
 
   return (
@@ -34,76 +52,57 @@ const Settings = () => {
         {/* Subscription */}
         <div>
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">Subscription</h2>
-          <div className="rounded-xl bg-card receipt-shadow overflow-hidden">
-            <div className="px-5 pt-5 pb-4 flex items-start gap-4">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center flex-shrink-0">
-                <Crown className="w-5 h-5 text-amber-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-base font-semibold">Plus</span>
-                  <span className="text-xs font-medium text-muted-foreground">$5.99 CAD/month</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">Unlock more storage and features</p>
-              </div>
-            </div>
-            <div className="px-5 pb-4 space-y-2">
-              {[
-                "100 receipts per month",
-                "Priority OCR processing",
-                "Export to CSV",
-              ].map((feature) => (
-                <div key={feature} className="flex items-center gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                  <span className="text-sm text-foreground/80">{feature}</span>
-                </div>
-              ))}
-            </div>
-            <div className="px-5 pb-5">
-              <Button
-                onClick={handleSubscribe}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white active:scale-[0.98]"
-              >
-                Subscribe
-              </Button>
-            </div>
-          </div>
 
-          <div className="rounded-xl bg-card receipt-shadow overflow-hidden mt-3">
-            <div className="px-5 pt-5 pb-4 flex items-start gap-4">
-              <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center flex-shrink-0">
-                <Zap className="w-5 h-5 text-violet-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-base font-semibold">Pro</span>
-                  <span className="text-xs font-medium text-muted-foreground">$11.99 CAD/month</span>
+          {isLoading && (
+            <div className="space-y-3">
+              <Skeleton className="h-48 w-full rounded-xl" />
+              <Skeleton className="h-48 w-full rounded-xl" />
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-xl bg-card receipt-shadow p-5 text-sm text-muted-foreground">
+              Unable to load plans. Please try again later.
+            </div>
+          )}
+
+          {!isLoading && !error && plans.length === 0 && (
+            <div className="rounded-xl bg-card receipt-shadow p-5 text-sm text-muted-foreground">
+              No plans available at this time.
+            </div>
+          )}
+
+          {!isLoading && !error && plans.map((plan) => {
+            const { Icon, bgClass, iconClass, btnClass } = getPlanStyle(plan);
+            return (
+              <div key={plan.id} className="rounded-xl bg-card receipt-shadow overflow-hidden mt-3 first:mt-0">
+                <div className="px-5 pt-5 pb-4 flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-xl ${bgClass} flex items-center justify-center flex-shrink-0`}>
+                    <Icon className={`w-5 h-5 ${iconClass}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-semibold">{plan.name.replace(/ - AI Receipt Tracker$/i, "")}</span>
+                      <span className="text-xs font-medium text-muted-foreground">
+                        ${plan.recurringAmount.toFixed(2)} {plan.currency}/{formatBillingPeriod(plan.billingPeriod)}
+                      </span>
+                    </div>
+                    {plan.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">Everything you need, no limits</p>
-              </div>
-            </div>
-            <div className="px-5 pb-4 space-y-2">
-              {[
-                "Unlimited receipts per month",
-                "Priority OCR processing",
-                "Export to CSV",
-                "Advanced analytics",
-              ].map((feature) => (
-                <div key={feature} className="flex items-center gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
-                  <span className="text-sm text-foreground/80">{feature}</span>
+                <div className="px-5 pb-5">
+                  <Button
+                    onClick={() => handleSubscribe(plan)}
+                    className={`w-full ${btnClass} text-white active:scale-[0.98]`}
+                  >
+                    Subscribe
+                  </Button>
                 </div>
-              ))}
-            </div>
-            <div className="px-5 pb-5">
-              <Button
-                onClick={handleSubscribe}
-                className="w-full bg-violet-500 hover:bg-violet-600 text-white active:scale-[0.98]"
-              >
-                Subscribe
-              </Button>
-            </div>
-          </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* General */}
