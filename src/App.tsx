@@ -12,6 +12,7 @@ import Login from "./pages/Login.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import TermsOfService from "./pages/TermsOfService.tsx";
 import PrivacyPolicy from "./pages/PrivacyPolicy.tsx";
+import BillingSuccess from "./pages/BillingSuccess.tsx";
 
 const queryClient = new QueryClient();
 
