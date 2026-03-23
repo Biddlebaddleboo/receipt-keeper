@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check, Zap, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check, Zap, Gift } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/ThemeContext";
