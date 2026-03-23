@@ -72,10 +72,39 @@ const Settings = () => {
             </div>
           )}
 
+          {/* Free plan - always shown */}
+          {!isLoading && !error && (
+            <div className="rounded-xl bg-card receipt-shadow overflow-hidden">
+              <div className="px-5 pt-5 pb-4 flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                  <Gift className="w-5 h-5 text-emerald-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-base font-semibold">Free</span>
+                    <span className="text-xs font-medium text-muted-foreground">$0.00 CAD</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">Get started at no cost</p>
+                </div>
+              </div>
+              <div className="px-5 pb-4 space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                  <span className="text-sm text-foreground/80">50 receipts one time</span>
+                </div>
+              </div>
+              <div className="px-5 pb-5">
+                <Button disabled className="w-full bg-emerald-500/50 text-white cursor-default">
+                  Current Plan
+                </Button>
+              </div>
+            </div>
+          )}
+
           {!isLoading && !error && plans.map((plan) => {
             const { Icon, bgClass, iconClass, btnClass } = getPlanStyle(plan);
             return (
-              <div key={plan.id} className="rounded-xl bg-card receipt-shadow overflow-hidden mt-3 first:mt-0">
+              <div key={plan.id} className="rounded-xl bg-card receipt-shadow overflow-hidden mt-3">
                 <div className="px-5 pt-5 pb-4 flex items-start gap-4">
                   <div className={`w-10 h-10 rounded-xl ${bgClass} flex items-center justify-center flex-shrink-0`}>
                     <Icon className={`w-5 h-5 ${iconClass}`} />
@@ -92,6 +121,16 @@ const Settings = () => {
                     )}
                   </div>
                 </div>
+                {plan.features && plan.features.length > 0 && (
+                  <div className="px-5 pb-4 space-y-2">
+                    {plan.features.map((feature) => (
+                      <div key={feature} className="flex items-center gap-2.5">
+                        <Check className={`w-3.5 h-3.5 ${iconClass} flex-shrink-0`} />
+                        <span className="text-sm text-foreground/80">{feature}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="px-5 pb-5">
                   <Button
                     onClick={() => handleSubscribe(plan)}
