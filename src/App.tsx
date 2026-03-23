@@ -31,6 +31,7 @@ const AppRoutes = () => (
     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
     <Route path="/settings/categories" element={<RequireAuth><CategoryManager /></RequireAuth>} />
     <Route path="/billing/success" element={<RequireAuth><BillingSuccess /></RequireAuth>} />
+    <Route path="/billing/cancelled" element={<RequireAuth><BillingCancelled /></RequireAuth>} />
     <Route path="/terms" element={<TermsOfService />} />
     <Route path="/privacy" element={<PrivacyPolicy />} />
     <Route path="*" element={<NotFound />} />
