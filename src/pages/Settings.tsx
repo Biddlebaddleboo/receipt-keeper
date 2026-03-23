@@ -1,16 +1,20 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Crown, Check, Zap, Gift } from "lucide-react";
+import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Check, Zap, Gift } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/ThemeContext";
 import { toast } from "@/hooks/use-toast";
 import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
+import { useUserPlanApi } from "@/hooks/useUserPlanApi";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { plans, isLoading, error } = usePaymentPlanApi();
+  const { userPlan, isLoading: userPlanLoading } = useUserPlanApi();
+  const { plans, isLoading: plansLoading, error } = usePaymentPlanApi();
+
+  const isLoading = userPlanLoading || plansLoading;
 
   const handleSubscribe = () => {
     window.open("https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8", "_blank");
@@ -30,6 +34,14 @@ const Settings = () => {
     if (period === "yearly") return "year";
     return period;
   };
+
+  // Check if user is on a given plan
+  const isCurrentPlan = (planName: string) => {
+    if (!userPlan) return false;
+    return userPlan.plan_name.toLowerCase() === planName.toLowerCase().replace(/ - AI Receipt Tracker$/i, "");
+  };
+
+  const isFreePlan = !userPlan || userPlan.plan_id === "free";
 
   return (
     <div className="min-h-screen bg-background">
@@ -71,7 +83,7 @@ const Settings = () => {
 
           {/* Free plan - always shown */}
           {!isLoading && !error && (
-            <div className="rounded-xl bg-card receipt-shadow overflow-hidden">
+            <div className={`rounded-xl bg-card receipt-shadow overflow-hidden ${isFreePlan ? "ring-2 ring-emerald-500" : ""}`}>
               <div className="px-5 pt-5 pb-4 flex items-start gap-4">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
                   <Gift className="w-5 h-5 text-emerald-500" />
@@ -91,8 +103,8 @@ const Settings = () => {
                 </div>
               </div>
               <div className="px-5 pb-5">
-                <Button disabled className="w-full bg-emerald-500/50 text-white cursor-default">
-                  Current Plan
+                <Button disabled className={`w-full ${isFreePlan ? "bg-emerald-500" : "bg-emerald-500/50"} text-white cursor-default`}>
+                  {isFreePlan ? "Current Plan" : "Free Tier"}
                 </Button>
               </div>
             </div>
@@ -100,15 +112,17 @@ const Settings = () => {
 
           {!isLoading && !error && plans.map((plan) => {
             const { Icon, bgClass, iconClass, btnClass } = getPlanStyle(plan);
+            const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
+            const isCurrent = isCurrentPlan(cleanName);
             return (
-              <div key={plan.id} className="rounded-xl bg-card receipt-shadow overflow-hidden mt-3">
+              <div key={plan.id} className={`rounded-xl bg-card receipt-shadow overflow-hidden mt-3 ${isCurrent ? "ring-2 ring-violet-500" : ""}`}>
                 <div className="px-5 pt-5 pb-4 flex items-start gap-4">
                   <div className={`w-10 h-10 rounded-xl ${bgClass} flex items-center justify-center flex-shrink-0`}>
                     <Icon className={`w-5 h-5 ${iconClass}`} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-base font-semibold">{plan.name.replace(/ - AI Receipt Tracker$/i, "")}</span>
+                      <span className="text-base font-semibold">{cleanName}</span>
                       <span className="text-xs font-medium text-muted-foreground">
                         ${plan.recurringAmount.toFixed(2)} {plan.currency}/{formatBillingPeriod(plan.billingPeriod)}
                       </span>
@@ -129,12 +143,18 @@ const Settings = () => {
                   </div>
                 )}
                 <div className="px-5 pb-5">
-                  <Button
-                    onClick={() => handleSubscribe()}
-                    className={`w-full ${btnClass} text-white active:scale-[0.98]`}
-                  >
-                    Subscribe
-                  </Button>
+                  {isCurrent ? (
+                    <Button disabled className={`w-full ${btnClass} text-white cursor-default`}>
+                      Current Plan{userPlan?.subscription_status === "active" ? " · Active" : ""}
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={() => handleSubscribe()}
+                      className={`w-full ${btnClass} text-white active:scale-[0.98]`}
+                    >
+                      Subscribe
+                    </Button>
+                  )}
                 </div>
               </div>
             );
