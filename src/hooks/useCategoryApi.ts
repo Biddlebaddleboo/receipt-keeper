@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-
-export interface Category {
-  id: string;
-  name: string;
-  description: string;
-}
-
-const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
+import { API_BASE_URL } from "@/config";
 
 export function useCategoryApi() {
   const { token, isLoading: authLoading } = useAuth();
