@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 
+export interface Category {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export function useCategoryApi() {
   const { token, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);

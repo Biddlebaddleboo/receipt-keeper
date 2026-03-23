@@ -2,6 +2,18 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 
+export interface PaymentPlan {
+  id: number;
+  name: string;
+  description: string;
+  status: string;
+  currency: string;
+  recurringAmount: number;
+  billingPeriod: string;
+  defaultPaymentLinkId: number;
+  features?: string[];
+}
+
 export function usePaymentPlanApi() {
   const { token } = useAuth();
   const tokenRef = useRef(token);

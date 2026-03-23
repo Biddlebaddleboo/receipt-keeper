@@ -2,6 +2,21 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 
+export interface UserPlan {
+  owner_email: string;
+  plan_id: string;
+  plan_name: string;
+  description: string;
+  subscription_status: string;
+  plan_interval: string;
+  monthly_limit: number | null;
+  plan_price_cents: number;
+  features: string[];
+  plan_updated_at: string;
+  last_transaction_id: number | null;
+  customer_code: string | null;
+}
+
 export function useUserPlanApi() {
   const { token } = useAuth();
   const tokenRef = useRef(token);
