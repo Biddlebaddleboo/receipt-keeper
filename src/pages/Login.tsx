@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine } from "lucide-react";
 
-const GOOGLE_CLIENT_ID = "267658267276-mnjifd6o265q1of401199uaukpuq650p.apps.googleusercontent.com";
+import { GOOGLE_CLIENT_ID } from "@/config";
 
 declare global {
   interface Window {

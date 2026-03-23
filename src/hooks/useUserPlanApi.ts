@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { API_BASE_URL } from "@/config";
 
 export interface UserPlan {
   owner_email: string;
@@ -15,8 +16,6 @@ export interface UserPlan {
   last_transaction_id: number | null;
   customer_code: string | null;
 }
-
-const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
 
 export function useUserPlanApi() {
   const { token } = useAuth();

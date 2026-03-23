@@ -4,8 +4,7 @@ import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertC
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { useAuth } from "@/contexts/AuthContext";
-
-const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
+import { API_BASE_URL } from "@/config";
 
 interface ReceiptDetailProps {
   receipt: Receipt;
