@@ -35,13 +35,21 @@ const Settings = () => {
     return period;
   };
 
-  // Check if user is on a given plan
+  // Plan tier hierarchy (higher index = higher tier)
+  const PLAN_TIERS: Record<string, number> = { free: 0, plus: 1, pro: 2 };
+
+  const getUserTier = () => {
+    if (!userPlan) return 0;
+    return PLAN_TIERS[userPlan.plan_name.toLowerCase()] ?? 0;
+  };
+
   const isCurrentPlan = (planName: string) => {
     if (!userPlan) return false;
-    return userPlan.plan_name.toLowerCase() === planName.toLowerCase().replace(/ - AI Receipt Tracker$/i, "");
+    return userPlan.plan_name.toLowerCase() === planName.toLowerCase();
   };
 
   const isFreePlan = !userPlan || userPlan.plan_id === "free";
+  const userTier = getUserTier();
 
   return (
     <div className="min-h-screen bg-background">
@@ -82,7 +90,7 @@ const Settings = () => {
           )}
 
           {/* Free plan - always shown */}
-          {!isLoading && !error && (
+          {!isLoading && !error && userTier === 0 && (
             <div className={`rounded-xl bg-card receipt-shadow overflow-hidden ${isFreePlan ? "ring-2 ring-emerald-500" : ""}`}>
               <div className="px-5 pt-5 pb-4 flex items-start gap-4">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
@@ -110,7 +118,11 @@ const Settings = () => {
             </div>
           )}
 
-          {!isLoading && !error && plans.map((plan) => {
+          {!isLoading && !error && plans.filter((plan) => {
+            const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
+            const planTier = PLAN_TIERS[cleanName.toLowerCase()] ?? 0;
+            return planTier >= userTier;
+          }).map((plan) => {
             const { Icon, bgClass, iconClass, btnClass } = getPlanStyle(plan);
             const cleanName = plan.name.replace(/ - AI Receipt Tracker$/i, "");
             const isCurrent = isCurrentPlan(cleanName);
