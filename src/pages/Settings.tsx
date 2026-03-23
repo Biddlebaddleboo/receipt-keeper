@@ -130,7 +130,7 @@ const Settings = () => {
                 )}
                 <div className="px-5 pb-5">
                   <Button
-                    onClick={() => handleSubscribe(plan)}
+                    onClick={() => handleSubscribe()}
                     className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                   >
                     Subscribe
