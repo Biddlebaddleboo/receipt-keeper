@@ -65,7 +65,8 @@ const Login = () => {
             🎉 Limited Time — Free tier receipt limit is not enforced!
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Upload unlimited receipts while this offer lasts.
+            Upload unlimited receipts while this offer lasts. Free tier limits will be enforced at a future date.
+          </p>
           </p>
         </div>
         <div ref={buttonRef} className="flex justify-center" />
