@@ -60,6 +60,14 @@ const Login = () => {
           <h1 className="text-2xl font-semibold tracking-tight">AI Receipt Tracker</h1>
           <p className="text-sm text-muted-foreground">Sign in to manage your receipts</p>
         </div>
+        <div className="w-full rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center">
+          <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+            🎉 Limited Time — Free tier receipt limit is not enforced!
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Upload unlimited receipts while this offer lasts. Free tier limits will be enforced at a future date.
+          </p>
+        </div>
         <div ref={buttonRef} className="flex justify-center" />
         <div className="flex gap-3">
           <Link to="/terms" className="text-xs text-muted-foreground underline hover:text-foreground transition-colors">
