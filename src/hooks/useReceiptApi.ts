@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { API_BASE_URL } from "@/config";
 
 export interface ExtractedField {
   label: string;
@@ -30,9 +31,6 @@ export interface Receipt {
   status: "pending" | "uploading" | "success" | "error";
   errorMessage?: string;
 }
-
-// Configure your backend URL here
-const API_BASE_URL = "https://ai-receipt-tracker-backend-267658267276.northamerica-northeast2.run.app";
 
 export function useReceiptApi() {
   const { token, isLoading: authLoading } = useAuth();

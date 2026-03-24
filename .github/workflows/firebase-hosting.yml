@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - main
+      - development
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'main' || 'development' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,10 +19,13 @@ jobs:
 
       - run: npm install
       - run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          channelId: live
+          channelId: ${{ github.ref_name == 'main' && 'live' || 'preview' }}
           projectId: jcdigitalsolutions-jc7
