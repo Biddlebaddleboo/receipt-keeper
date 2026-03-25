@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Check, Zap, Gift } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -6,10 +7,21 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { toast } from "@/hooks/use-toast";
 import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
 import { useUserPlanApi } from "@/hooks/useUserPlanApi";
+import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CreditCard, AlertTriangle } from "lucide-react";
-import { PAYMENT_PAGE_URL } from "@/config";
+import { PAYMENT_PAGE_URL, API_BASE_URL } from "@/config";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Settings = () => {
   const navigate = useNavigate();
