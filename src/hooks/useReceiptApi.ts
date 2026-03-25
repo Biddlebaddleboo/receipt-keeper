@@ -229,7 +229,7 @@ export function useReceiptApi() {
     return acc;
   }, {});
 
-  const fetchReceipt = async (id: string): Promise<Receipt | null> => {
+  const fetchReceipt = useCallback(async (id: string): Promise<Receipt | null> => {
     if (authLoading || !tokenRef.current) return null;
 
     try {
@@ -240,7 +240,7 @@ export function useReceiptApi() {
     } catch {
       return null;
     }
-  };
+  }, [authLoading]);
 
   const loadNextPage = useCallback(async () => {
     if (authLoading || isLoadingMore || !hasMore || !tokenRef.current) return;
@@ -295,7 +295,7 @@ export function useReceiptApi() {
     };
 
     tick();
-    pollTimerRef.current = window.setInterval(tick, 5_000);
+    pollTimerRef.current = window.setInterval(tick, 15_000);
     document.addEventListener("visibilitychange", tick);
 
     return () => {
