@@ -32,6 +32,7 @@ const Settings = () => {
 
   const [confirmPlan, setConfirmPlan] = useState<{ id: string; name: string; amount: string } | null>(null);
   const [isActivating, setIsActivating] = useState(false);
+  const [showContactDialog, setShowContactDialog] = useState(false);
 
   const isLoading = userPlanLoading || plansLoading;
 
@@ -134,6 +135,16 @@ const Settings = () => {
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">
             Subscription
           </h2>
+
+          {!isLoading && !error && !isFreePlan && (
+            <Alert className="mb-3 border-blue-500/30 bg-blue-500/10">
+              <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
+                To cancel your plan, please contact{" "}
+                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">info@jcdigitalsolutions.ca</a>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {!isLoading && !error && paymentMethodSaved && (
             <Alert className="mb-3 border-emerald-500/30 bg-emerald-500/10">
@@ -260,6 +271,13 @@ const Settings = () => {
                         <Button disabled className={`w-full ${btnClass} text-white cursor-default`}>
                           Current Plan{userPlan?.subscription_status === "active" ? " · Active" : ""}
                         </Button>
+                      ) : userTier === 1 && cleanName.toLowerCase() === "pro" ? (
+                        <Button
+                          onClick={() => setShowContactDialog(true)}
+                          className={`w-full ${btnClass} text-white active:scale-[0.98]`}
+                        >
+                          Subscribe
+                        </Button>
                       ) : (
                         <Button
                           onClick={() => handleSubscribe(
@@ -330,6 +348,22 @@ const Settings = () => {
             <AlertDialogAction onClick={handleConfirmSubscribe} disabled={isActivating}>
               {isActivating ? "Activating…" : "Confirm & Subscribe"}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={showContactDialog} onOpenChange={setShowContactDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Upgrade to Pro</AlertDialogTitle>
+            <AlertDialogDescription>
+              To upgrade to the Pro plan, please contact us at{" "}
+              <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium text-foreground">
+                info@jcdigitalsolutions.ca
+              </a>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
