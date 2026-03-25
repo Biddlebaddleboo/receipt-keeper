@@ -7,6 +7,9 @@ import { toast } from "@/hooks/use-toast";
 import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
 import { useUserPlanApi } from "@/hooks/useUserPlanApi";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CreditCard, AlertTriangle } from "lucide-react";
+import { PAYMENT_PAGE_URL } from "@/config";
 
 const Settings = () => {
   const navigate = useNavigate();
