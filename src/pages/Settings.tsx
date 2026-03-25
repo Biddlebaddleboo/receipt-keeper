@@ -271,6 +271,13 @@ const Settings = () => {
                         <Button disabled className={`w-full ${btnClass} text-white cursor-default`}>
                           Current Plan{userPlan?.subscription_status === "active" ? " · Active" : ""}
                         </Button>
+                      ) : userTier === 1 && cleanName.toLowerCase() === "pro" ? (
+                        <Button
+                          onClick={() => setShowContactDialog(true)}
+                          className={`w-full ${btnClass} text-white active:scale-[0.98]`}
+                        >
+                          Subscribe
+                        </Button>
                       ) : (
                         <Button
                           onClick={() => handleSubscribe(
