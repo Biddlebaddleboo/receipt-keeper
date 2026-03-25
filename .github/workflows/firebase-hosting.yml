@@ -22,6 +22,7 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_PAYMENT_PAGE_URL: ${{ vars.VITE_PAYMENT_PAGE_URL }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
