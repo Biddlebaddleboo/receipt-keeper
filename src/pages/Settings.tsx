@@ -26,15 +26,45 @@ import {
 const Settings = () => {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { userPlan, isLoading: userPlanLoading } = useUserPlanApi();
+  const { token } = useAuth();
+  const { userPlan, isLoading: userPlanLoading, refetch: refetchUserPlan } = useUserPlanApi();
   const { plans, isLoading: plansLoading, error } = usePaymentPlanApi();
+
+  const [confirmPlan, setConfirmPlan] = useState<{ id: string; name: string; amount: string } | null>(null);
+  const [isActivating, setIsActivating] = useState(false);
 
   const isLoading = userPlanLoading || plansLoading;
 
   const paymentMethodSaved = userPlan?.payment_method_saved ?? false;
 
-  const handleSubscribe = () => {
-    window.open(PAYMENT_PAGE_URL, "_blank");
+  const handleSubscribe = (planId: string, planName: string, amount: string) => {
+    setConfirmPlan({ id: planId, name: planName, amount });
+  };
+
+  const handleConfirmSubscribe = async () => {
+    if (!confirmPlan || !token) return;
+    setIsActivating(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/subscriptions/activate`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ plan_id: confirmPlan.id }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to activate subscription");
+      }
+      toast({ title: "Subscription activated!", description: `You are now on the ${confirmPlan.name} plan.` });
+      refetchUserPlan();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setIsActivating(false);
+      setConfirmPlan(null);
+    }
   };
 
   const handleAddPaymentMethod = () => {
