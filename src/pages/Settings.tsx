@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Check, Zap, Gift } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -6,23 +7,64 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { toast } from "@/hooks/use-toast";
 import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
 import { useUserPlanApi } from "@/hooks/useUserPlanApi";
+import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CreditCard, AlertTriangle } from "lucide-react";
-import { PAYMENT_PAGE_URL } from "@/config";
+import { PAYMENT_PAGE_URL, API_BASE_URL } from "@/config";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { userPlan, isLoading: userPlanLoading } = useUserPlanApi();
+  const { token } = useAuth();
+  const { userPlan, isLoading: userPlanLoading, refetch: refetchUserPlan } = useUserPlanApi();
   const { plans, isLoading: plansLoading, error } = usePaymentPlanApi();
+
+  const [confirmPlan, setConfirmPlan] = useState<{ id: string; name: string; amount: string } | null>(null);
+  const [isActivating, setIsActivating] = useState(false);
 
   const isLoading = userPlanLoading || plansLoading;
 
   const paymentMethodSaved = userPlan?.payment_method_saved ?? false;
 
-  const handleSubscribe = () => {
-    window.open(PAYMENT_PAGE_URL, "_blank");
+  const handleSubscribe = (planId: string, planName: string, amount: string) => {
+    setConfirmPlan({ id: planId, name: planName, amount });
+  };
+
+  const handleConfirmSubscribe = async () => {
+    if (!confirmPlan || !token) return;
+    setIsActivating(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/subscriptions/activate`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ plan_id: confirmPlan.id }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to activate subscription");
+      }
+      toast({ title: "Subscription activated!", description: `You are now on the ${confirmPlan.name} plan.` });
+      refetchUserPlan();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setIsActivating(false);
+      setConfirmPlan(null);
+    }
   };
 
   const handleAddPaymentMethod = () => {
@@ -220,7 +262,11 @@ const Settings = () => {
                         </Button>
                       ) : (
                         <Button
-                          onClick={() => handleSubscribe()}
+                          onClick={() => handleSubscribe(
+                            cleanName.toLowerCase(),
+                            cleanName,
+                            `$${plan.recurringAmount.toFixed(2)} ${plan.currency}/${formatBillingPeriod(plan.billingPeriod)}`
+                          )}
                           disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >
@@ -270,6 +316,23 @@ const Settings = () => {
           </div>
         </div>
       </main>
+      <AlertDialog open={!!confirmPlan} onOpenChange={(open) => !open && setConfirmPlan(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Subscription</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will be charged <span className="font-semibold text-foreground">{confirmPlan?.amount}</span> for the{" "}
+              <span className="font-semibold text-foreground">{confirmPlan?.name}</span> plan. Do you want to proceed?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActivating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSubscribe} disabled={isActivating}>
+              {isActivating ? "Activating…" : "Confirm & Subscribe"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
