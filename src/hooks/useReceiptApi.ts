@@ -108,27 +108,40 @@ export function useReceiptApi() {
     return finalizeUpload(signed.storage_path, meta);
   };
 
-  const uploadReceiptLegacy = async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await apiFetch(`${API_BASE_URL}/receipts`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
-    }
-
-    return response.json();
-  };
-
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
+
+  const normalizeReceipt = useCallback((r: Receipt): Receipt => {
+    return {
+      ...r,
+      status: "success" as const,
+    };
+  }, []);
+
+  const mergeIncomingReceipts = useCallback((prev: Receipt[], incoming: Receipt[]) => {
+    const incomingIds = new Set(incoming.map((r) => r.id));
+    const incomingMap = new Map(incoming.map((r) => [r.id, r]));
+
+    const mergedIncoming = incoming.map((incomingReceipt) => {
+      const existing = prev.find((p) => p.id === incomingReceipt.id);
+      if (!existing) return incomingReceipt;
+      return {
+        ...existing,
+        ...incomingReceipt,
+        localImageUrl: existing.localImageUrl || incomingReceipt.localImageUrl,
+        file: existing.file,
+        status: "success" as const,
+        errorMessage: undefined,
+      };
+    });
+
+    const rest = prev.filter((r) => !incomingIds.has(r.id));
+    return [...mergedIncoming, ...rest.filter((r) => !incomingMap.has(r.id))];
+  }, []);
 
   const uploadReceipt = async (file: File) => {
     if (authLoading || !tokenRef.current) return;
@@ -157,12 +170,7 @@ export function useReceiptApi() {
     setIsUploading(true);
 
     try {
-      let data: Record<string, unknown>;
-      try {
-        data = await createReceiptViaSignedUpload(file);
-      } catch {
-        data = await uploadReceiptLegacy(file);
-      }
+      const data = (await createReceiptViaSignedUpload(file)) as Record<string, unknown>;
 
       setReceipts((prev) =>
         prev.map((r) =>
@@ -170,7 +178,7 @@ export function useReceiptApi() {
             ? {
                 ...r,
                 ...data,
-                id, // keep client id if backend doesn't return one
+                id: typeof data.id === "string" ? data.id : id,
                 status: "success" as const,
               }
             : r
@@ -239,14 +247,11 @@ export function useReceiptApi() {
       const response = await apiFetch(url);
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
-      const items: Receipt[] = (data.receipts || []).map((r: Receipt) => ({
-        ...r,
-        status: "success" as const,
-      }));
+      const items: Receipt[] = (data.receipts || []).map((r: Receipt) => normalizeReceipt(r));
       if (items.length === 0) {
         setHasMore(false);
       } else {
-        setReceipts((prev) => [...prev, ...items]);
+        setReceipts((prev) => mergeIncomingReceipts(prev, items));
         if (data.next_cursor) {
           setNextCursor(data.next_cursor);
         } else {
@@ -258,7 +263,46 @@ export function useReceiptApi() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [authLoading, nextCursor, isLoadingMore, hasMore]);
+  }, [authLoading, nextCursor, isLoadingMore, hasMore, mergeIncomingReceipts, normalizeReceipt]);
+
+  const refreshLatest = useCallback(async () => {
+    if (authLoading || !tokenRef.current || isLoadingMore) return;
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/receipts`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const items: Receipt[] = (data.receipts || []).map((r: Receipt) => normalizeReceipt(r));
+      if (items.length > 0) {
+        setReceipts((prev) => mergeIncomingReceipts(prev, items));
+      }
+      if (typeof data.next_cursor === "string") {
+        setNextCursor(data.next_cursor);
+        setHasMore(true);
+      }
+    } catch {
+      // no-op; keep existing list
+    }
+  }, [authLoading, isLoadingMore, mergeIncomingReceipts, normalizeReceipt]);
+
+  useEffect(() => {
+    if (authLoading || !tokenRef.current) return;
+
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      refreshLatest();
+    };
+
+    tick();
+    pollTimerRef.current = window.setInterval(tick, 5_000);
+    document.addEventListener("visibilitychange", tick);
+
+    return () => {
+      if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [authLoading, token, refreshLatest]);
 
   return {
     receipts,
