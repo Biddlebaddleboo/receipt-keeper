@@ -32,6 +32,7 @@ const Settings = () => {
 
   const [confirmPlan, setConfirmPlan] = useState<{ id: string; name: string; amount: string } | null>(null);
   const [isActivating, setIsActivating] = useState(false);
+  const [showContactDialog, setShowContactDialog] = useState(false);
 
   const isLoading = userPlanLoading || plansLoading;
 
