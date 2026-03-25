@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
+import { apiFetch } from "@/lib/api";
 
 export interface ExtractedField {
   label: string;
@@ -11,6 +12,23 @@ export interface ReceiptItem {
   name: string;
   quantity: number;
   price: number;
+}
+
+interface ReceiptUploadMeta {
+  vendor?: string;
+  subtotal?: number;
+  tax?: number;
+  total?: number;
+  category?: string;
+  purchase_date?: string;
+}
+
+interface SignedUploadResponse {
+  storage_path: string;
+  upload_url: string;
+  method: "PUT";
+  headers: Record<string, string>;
+  expires_at: string;
 }
 
 export interface Receipt {
@@ -25,6 +43,7 @@ export interface Receipt {
   extracted_fields: ExtractedField[];
   items: ReceiptItem[];
   created_at: string;
+  image_url?: string;
   // Client-side fields
   file?: File;
   localImageUrl?: string;
@@ -39,8 +58,71 @@ export function useReceiptApi() {
     tokenRef.current = token;
   }, [token]);
 
-  const getAuthHeaders = (): Record<string, string> =>
-    tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
+  const getSignedUpload = async (file: File): Promise<SignedUploadResponse> => {
+    const contentType = file.type?.trim() || "image/jpeg";
+    const response = await apiFetch(`${API_BASE_URL}/receipts/signed-upload`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        content_type: contentType,
+      }),
+    });
+
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<SignedUploadResponse>;
+  };
+
+  const uploadToGCS = async (uploadUrl: string, file: File, headers: Record<string, string>) => {
+    const response = await fetch(uploadUrl, {
+      method: "PUT",
+      headers,
+      credentials: "omit",
+      body: file,
+    });
+
+    if (!response.ok) throw new Error(`GCS upload failed: ${response.status}`);
+  };
+
+  const finalizeUpload = async (storagePath: string, meta?: ReceiptUploadMeta) => {
+    const response = await apiFetch(`${API_BASE_URL}/receipts/finalize-upload`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        storage_path: storagePath,
+        ...meta,
+      }),
+    });
+
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  };
+
+  const createReceiptViaSignedUpload = async (file: File, meta?: ReceiptUploadMeta) => {
+    const signed = await getSignedUpload(file);
+    await uploadToGCS(signed.upload_url, file, signed.headers);
+    return finalizeUpload(signed.storage_path, meta);
+  };
+
+  const uploadReceiptLegacy = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await apiFetch(`${API_BASE_URL}/receipts`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.statusText}`);
+    }
+
+    return response.json();
+  };
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -75,20 +157,12 @@ export function useReceiptApi() {
     setIsUploading(true);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch(`${API_BASE_URL}/receipts`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
+      let data: Record<string, unknown>;
+      try {
+        data = await createReceiptViaSignedUpload(file);
+      } catch {
+        data = await uploadReceiptLegacy(file);
       }
-
-      const data = await response.json();
 
       setReceipts((prev) =>
         prev.map((r) =>
@@ -146,7 +220,7 @@ export function useReceiptApi() {
     if (authLoading || !tokenRef.current) return null;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${id}`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`${API_BASE_URL}/receipts/${id}`);
       if (!response.ok) throw new Error("Failed to fetch receipt");
       const data = await response.json();
       return { ...data, status: "success" as const };
@@ -162,7 +236,7 @@ export function useReceiptApi() {
       const url = nextCursor
         ? `${API_BASE_URL}/receipts?start_after_id=${nextCursor}`
         : `${API_BASE_URL}/receipts`;
-      const response = await fetch(url, { headers: getAuthHeaders() });
+      const response = await apiFetch(url);
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
       const items: Receipt[] = (data.receipts || []).map((r: Receipt) => ({
@@ -199,4 +273,3 @@ export function useReceiptApi() {
     loadNextPage,
   };
 }
-

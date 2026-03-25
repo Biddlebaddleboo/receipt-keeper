@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CreditCard, AlertTriangle } from "lucide-react";
 import { PAYMENT_PAGE_URL, API_BASE_URL } from "@/config";
+import { apiFetch } from "@/lib/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,10 +47,9 @@ const Settings = () => {
     if (!confirmPlan || !token) return;
     setIsActivating(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/billing/subscriptions/activate`, {
+      const response = await apiFetch(`${API_BASE_URL}/billing/subscriptions/activate`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ plan_id: confirmPlan.id }),
