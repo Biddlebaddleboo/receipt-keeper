@@ -136,6 +136,16 @@ const Settings = () => {
             Subscription
           </h2>
 
+          {!isLoading && !error && !isFreePlan && (
+            <Alert className="mb-3 border-blue-500/30 bg-blue-500/10">
+              <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
+                To cancel your plan, please contact{" "}
+                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">info@jcdigitalsolutions.ca</a>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {!isLoading && !error && paymentMethodSaved && (
             <Alert className="mb-3 border-emerald-500/30 bg-emerald-500/10">
               <CreditCard className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
