@@ -108,22 +108,6 @@ export function useReceiptApi() {
     return finalizeUpload(signed.storage_path, meta);
   };
 
-  const uploadReceiptLegacy = async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await apiFetch(`${API_BASE_URL}/receipts`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
-    }
-
-    return response.json();
-  };
-
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -186,12 +170,7 @@ export function useReceiptApi() {
     setIsUploading(true);
 
     try {
-      let data: Record<string, unknown>;
-      try {
-        data = await createReceiptViaSignedUpload(file);
-      } catch {
-        data = await uploadReceiptLegacy(file);
-      }
+      const data = (await createReceiptViaSignedUpload(file)) as Record<string, unknown>;
 
       setReceipts((prev) =>
         prev.map((r) =>
