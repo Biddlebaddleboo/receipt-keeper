@@ -90,12 +90,29 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    fetchReceipt(initialReceipt.id).then((data) => {
+    let timerId: number | null = null;
+
+    const refreshDetail = async (showLoader: boolean) => {
+      if (showLoader) setLoading(true);
+      const data = await fetchReceipt(initialReceipt.id);
       if (!cancelled && data) setReceipt(data);
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
+      if (!cancelled && showLoader) setLoading(false);
+    };
+
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      refreshDetail(false);
+    };
+
+    refreshDetail(true);
+    timerId = window.setInterval(tick, 8_000);
+    document.addEventListener("visibilitychange", tick);
+
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearInterval(timerId);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [initialReceipt.id, fetchReceipt]);
 
   const startEditing = (index: number) => {
