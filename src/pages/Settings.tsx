@@ -316,6 +316,23 @@ const Settings = () => {
           </div>
         </div>
       </main>
+      <AlertDialog open={!!confirmPlan} onOpenChange={(open) => !open && setConfirmPlan(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Subscription</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will be charged <span className="font-semibold text-foreground">{confirmPlan?.amount}</span> for the{" "}
+              <span className="font-semibold text-foreground">{confirmPlan?.name}</span> plan. Do you want to proceed?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActivating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSubscribe} disabled={isActivating}>
+              {isActivating ? "Activating…" : "Confirm & Subscribe"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
