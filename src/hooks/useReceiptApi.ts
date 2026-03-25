@@ -114,6 +114,11 @@ export function useReceiptApi() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const pollTimerRef = useRef<number | null>(null);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+
+  useEffect(() => {
+    isLoadingMoreRef.current = isLoadingMore;
+  }, [isLoadingMore]);
 
   const normalizeReceipt = useCallback((r: Receipt): Receipt => {
     return {
@@ -266,7 +271,7 @@ export function useReceiptApi() {
   }, [authLoading, nextCursor, isLoadingMore, hasMore, mergeIncomingReceipts, normalizeReceipt]);
 
   const refreshLatest = useCallback(async () => {
-    if (authLoading || !tokenRef.current || isLoadingMore) return;
+    if (authLoading || !tokenRef.current || isLoadingMoreRef.current) return;
 
     try {
       const response = await apiFetch(`${API_BASE_URL}/receipts`);
@@ -276,14 +281,10 @@ export function useReceiptApi() {
       if (items.length > 0) {
         setReceipts((prev) => mergeIncomingReceipts(prev, items));
       }
-      if (typeof data.next_cursor === "string") {
-        setNextCursor(data.next_cursor);
-        setHasMore(true);
-      }
     } catch {
       // no-op; keep existing list
     }
-  }, [authLoading, isLoadingMore, mergeIncomingReceipts, normalizeReceipt]);
+  }, [authLoading, mergeIncomingReceipts, normalizeReceipt]);
 
   useEffect(() => {
     if (authLoading || !tokenRef.current) return;
