@@ -262,7 +262,11 @@ const Settings = () => {
                         </Button>
                       ) : (
                         <Button
-                          onClick={() => handleSubscribe()}
+                          onClick={() => handleSubscribe(
+                            cleanName.toLowerCase(),
+                            cleanName,
+                            `$${plan.recurringAmount.toFixed(2)} ${plan.currency}/${formatBillingPeriod(plan.billingPeriod)}`
+                          )}
                           disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >
