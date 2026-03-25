@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download } from "lucide-react";
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
-import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
+import { apiFetch } from "@/lib/api";
 
 interface ReceiptDetailProps {
   receipt: Receipt;
@@ -36,33 +36,8 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [isSaving, setIsSaving] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [authImageUrl, setAuthImageUrl] = useState<string | null>(receipt.localImageUrl || null);
+  const [localDownloadPending, setLocalDownloadPending] = useState(false);
   const { categories } = useCategoryApi();
-  const { token } = useAuth();
-  const tokenRef = useRef(token);
-  useEffect(() => { tokenRef.current = token; }, [token]);
-  const getAuthHeaders = (): Record<string, string> => tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
-
-  // Fetch image with auth headers
-  useEffect(() => {
-    if (receipt.localImageUrl) {
-      setAuthImageUrl(receipt.localImageUrl);
-      return;
-    }
-    if (!tokenRef.current || !receipt.id) return;
-    let revoke: string | null = null;
-    fetch(`${API_BASE_URL}/receipts/${receipt.id}/image`, { headers: getAuthHeaders() })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load image");
-        return res.blob();
-      })
-      .then((blob) => {
-        revoke = URL.createObjectURL(blob);
-        setAuthImageUrl(revoke);
-      })
-      .catch(() => setAuthImageUrl(null));
-    return () => { if (revoke) URL.revokeObjectURL(revoke); };
-  }, [receipt.id, receipt.localImageUrl]);
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
@@ -80,9 +55,9 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error("Failed to save");
@@ -104,7 +79,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const handleDelete = useCallback(async () => {
     setIsDeleting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE", headers: getAuthHeaders() });
+      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, { method: "DELETE" });
       if (!response.ok) throw new Error("Failed to delete");
       onRemove(receipt.id);
       onClose();
@@ -150,9 +125,9 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to save");
@@ -170,9 +145,9 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const updatedItems = receipt.items.filter((_, i) => i !== index);
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to delete item");
@@ -191,9 +166,9 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const updatedItems = [...(receipt.items || []), newItem];
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ items: updatedItems }),
       });
       if (!response.ok) throw new Error("Failed to add item");
@@ -207,7 +182,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   };
 
   const status = statusConfig[receipt.status];
-  const imageUrl = authImageUrl;
+  const imageUrl = receipt.localImageUrl || receipt.image_url || null;
   const purchaseDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
@@ -230,7 +205,11 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
           <button
             onClick={async () => {
               try {
-                const res = await fetch(`${API_BASE_URL}/receipts/${receipt.id}/image`, { headers: getAuthHeaders() });
+                setLocalDownloadPending(true);
+                const imageEndpoint = receipt.image_url || `${API_BASE_URL}/receipts/${receipt.id}/image`;
+                const res = receipt.image_url
+                  ? await fetch(imageEndpoint, { credentials: "omit" })
+                  : await apiFetch(imageEndpoint);
                 if (!res.ok) throw new Error("Download failed");
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
@@ -239,11 +218,16 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                 a.download = `receipt-${receipt.vendor || receipt.id}.jpg`;
                 a.click();
                 URL.revokeObjectURL(url);
-              } catch { toast.error("Failed to download image"); }
+              } catch {
+                toast.error("Failed to download image");
+              } finally {
+                setLocalDownloadPending(false);
+              }
             }}
+            disabled={localDownloadPending}
             className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
           >
-            <Download className="w-5 h-5" />
+            {localDownloadPending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
           </button>
           <button
             onClick={handleDelete}

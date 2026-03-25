@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
+import { apiFetch } from "@/lib/api";
 
 export interface Category {
   id: string;
@@ -15,9 +16,6 @@ export function useCategoryApi() {
     tokenRef.current = token;
   }, [token]);
 
-  const getAuthHeaders = (): Record<string, string> =>
-    tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {};
-
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +26,7 @@ export function useCategoryApi() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/categories`, { headers: getAuthHeaders() });
+      const response = await apiFetch(`${API_BASE_URL}/categories`);
       if (!response.ok) throw new Error("Failed to fetch categories");
       const data = await response.json();
       const items: Category[] = Array.isArray(data) ? data : data.items || data.results || [];
@@ -53,9 +51,9 @@ export function useCategoryApi() {
   const createCategory = async (name: string, description = "") => {
     if (!tokenRef.current) throw new Error("Not authenticated");
 
-    const response = await fetch(`${API_BASE_URL}/categories`, {
+    const response = await apiFetch(`${API_BASE_URL}/categories`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, description }),
     });
     if (!response.ok) throw new Error("Failed to create category");
@@ -67,9 +65,9 @@ export function useCategoryApi() {
   const updateCategory = async (id: string, updates: { name?: string; description?: string }) => {
     if (!tokenRef.current) throw new Error("Not authenticated");
 
-    const response = await fetch(`${API_BASE_URL}/categories/${id}`, {
+    const response = await apiFetch(`${API_BASE_URL}/categories/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updates),
     });
     if (!response.ok) throw new Error("Failed to update category");
@@ -83,9 +81,8 @@ export function useCategoryApi() {
   const deleteCategory = async (id: string) => {
     if (!tokenRef.current) throw new Error("Not authenticated");
 
-    const response = await fetch(`${API_BASE_URL}/categories/${id}`, {
+    const response = await apiFetch(`${API_BASE_URL}/categories/${id}`, {
       method: "DELETE",
-      headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error("Failed to delete category");
     setCategories((prev) => prev.filter((c) => c.id !== id));
@@ -93,4 +90,3 @@ export function useCategoryApi() {
 
   return { categories, isLoading, error, createCategory, updateCategory, deleteCategory, refetch: fetchCategories };
 }
-

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
+import { apiFetch } from "@/lib/api";
 
 export interface PaymentPlan {
   id: number;
@@ -15,26 +16,22 @@ export interface PaymentPlan {
 }
 
 export function usePaymentPlanApi() {
-  const { token } = useAuth();
+  const { token, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
-  tokenRef.current = token;
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   const [plans, setPlans] = useState<PaymentPlan[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const getAuthHeaders = useCallback(() => ({
-    Authorization: `Bearer ${tokenRef.current}`,
-  }), []);
 
   const fetchPlans = useCallback(async () => {
     if (!tokenRef.current) return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/billing/helcim/payment-plans`, {
-        headers: getAuthHeaders(),
-      });
+      const response = await apiFetch(`${API_BASE_URL}/billing/helcim/payment-plans`);
       if (!response.ok) throw new Error("Failed to fetch payment plans");
       const json = await response.json();
       setPlans(json.data ?? []);
@@ -43,11 +40,12 @@ export function usePaymentPlanApi() {
     } finally {
       setIsLoading(false);
     }
-  }, [getAuthHeaders]);
+  }, []);
 
   useEffect(() => {
+    if (authLoading || !token) return;
     fetchPlans();
-  }, [fetchPlans]);
+  }, [authLoading, token, fetchPlans]);
 
   return { plans, isLoading, error, refetch: fetchPlans };
 }

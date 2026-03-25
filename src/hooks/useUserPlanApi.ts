@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
+import { apiFetch } from "@/lib/api";
 
 export interface UserPlan {
   owner_email: string;
@@ -19,9 +20,11 @@ export interface UserPlan {
 }
 
 export function useUserPlanApi() {
-  const { token } = useAuth();
+  const { token, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
-  tokenRef.current = token;
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   const [userPlan, setUserPlan] = useState<UserPlan | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -32,9 +35,7 @@ export function useUserPlanApi() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/users/me/plan`, {
-        headers: { Authorization: `Bearer ${tokenRef.current}` },
-      });
+      const response = await apiFetch(`${API_BASE_URL}/users/me/plan`);
       if (!response.ok) throw new Error("Failed to fetch user plan");
       const json = await response.json();
       setUserPlan(json);
@@ -46,8 +47,9 @@ export function useUserPlanApi() {
   }, []);
 
   useEffect(() => {
+    if (authLoading || !token) return;
     fetchUserPlan();
-  }, [fetchUserPlan]);
+  }, [authLoading, token, fetchUserPlan]);
 
   return { userPlan, isLoading, error, refetch: fetchUserPlan };
 }

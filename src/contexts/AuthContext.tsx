@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { updateAuthReadyState } from "@/lib/authReady";
 
 interface AuthContextType {
   token: string | null;
@@ -80,6 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => clearTimeout(timeout);
   }, [token, signOut]);
+
+  useEffect(() => {
+    updateAuthReadyState(token, isLoading);
+  }, [token, isLoading]);
 
   return (
     <AuthContext.Provider value={{ token, user, isLoading, signIn, signOut }}>
