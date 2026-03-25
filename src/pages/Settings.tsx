@@ -351,6 +351,22 @@ const Settings = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={showContactDialog} onOpenChange={setShowContactDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Upgrade to Pro</AlertDialogTitle>
+            <AlertDialogDescription>
+              To upgrade to the Pro plan, please contact us at{" "}
+              <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium text-foreground">
+                info@jcdigitalsolutions.ca
+              </a>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
