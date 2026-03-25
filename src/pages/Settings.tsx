@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Check, Zap, Gift } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -6,18 +7,69 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { toast } from "@/hooks/use-toast";
 import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
 import { useUserPlanApi } from "@/hooks/useUserPlanApi";
+import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CreditCard, AlertTriangle } from "lucide-react";
+import { PAYMENT_PAGE_URL, API_BASE_URL } from "@/config";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { userPlan, isLoading: userPlanLoading } = useUserPlanApi();
+  const { token } = useAuth();
+  const { userPlan, isLoading: userPlanLoading, refetch: refetchUserPlan } = useUserPlanApi();
   const { plans, isLoading: plansLoading, error } = usePaymentPlanApi();
+
+  const [confirmPlan, setConfirmPlan] = useState<{ id: string; name: string; amount: string } | null>(null);
+  const [isActivating, setIsActivating] = useState(false);
+  const [showContactDialog, setShowContactDialog] = useState(false);
 
   const isLoading = userPlanLoading || plansLoading;
 
-  const handleSubscribe = () => {
-    window.open("https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8", "_blank");
+  const paymentMethodSaved = userPlan?.payment_method_saved ?? false;
+
+  const handleSubscribe = (planId: string, planName: string, amount: string) => {
+    setConfirmPlan({ id: planId, name: planName, amount });
+  };
+
+  const handleConfirmSubscribe = async () => {
+    if (!confirmPlan || !token) return;
+    setIsActivating(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/billing/subscriptions/activate`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ plan_id: confirmPlan.id }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to activate subscription");
+      }
+      toast({ title: "Subscription activated!", description: `You are now on the ${confirmPlan.name} plan.` });
+      refetchUserPlan();
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setIsActivating(false);
+      setConfirmPlan(null);
+    }
+  };
+
+  const handleAddPaymentMethod = () => {
+    window.open(PAYMENT_PAGE_URL, "_blank");
   };
 
   // Pick icon/color based on plan name
@@ -83,6 +135,42 @@ const Settings = () => {
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">
             Subscription
           </h2>
+
+          {!isLoading && !error && !isFreePlan && (
+            <Alert className="mb-3 border-blue-500/30 bg-blue-500/10">
+              <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
+                To cancel your plan, please contact{" "}
+                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">info@jcdigitalsolutions.ca</a>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!isLoading && !error && paymentMethodSaved && (
+            <Alert className="mb-3 border-emerald-500/30 bg-emerald-500/10">
+              <CreditCard className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <AlertDescription className="text-sm text-emerald-600 dark:text-emerald-400">
+                Your payment method is currently saved.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!isLoading && !error && !paymentMethodSaved && (
+            <Alert className="mb-3 border-amber-500/30 bg-amber-500/10">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <AlertDescription className="text-sm text-amber-600 dark:text-amber-400 flex items-center justify-between gap-2 flex-wrap">
+                <span>Add your payment method first before upgrading.</span>
+                <Button
+                  size="sm"
+                  onClick={handleAddPaymentMethod}
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                >
+                  <CreditCard className="w-4 h-4 mr-1" />
+                  Add Payment Method
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {isLoading && (
             <div className="space-y-3">
@@ -183,9 +271,21 @@ const Settings = () => {
                         <Button disabled className={`w-full ${btnClass} text-white cursor-default`}>
                           Current Plan{userPlan?.subscription_status === "active" ? " · Active" : ""}
                         </Button>
+                      ) : userTier === 1 && cleanName.toLowerCase() === "pro" ? (
+                        <Button
+                          onClick={() => setShowContactDialog(true)}
+                          className={`w-full ${btnClass} text-white active:scale-[0.98]`}
+                        >
+                          Subscribe
+                        </Button>
                       ) : (
                         <Button
-                          onClick={() => handleSubscribe()}
+                          onClick={() => handleSubscribe(
+                            cleanName.toLowerCase(),
+                            cleanName,
+                            `$${plan.recurringAmount.toFixed(2)} ${plan.currency}/${formatBillingPeriod(plan.billingPeriod)}`
+                          )}
+                          disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >
                           Subscribe
@@ -234,6 +334,39 @@ const Settings = () => {
           </div>
         </div>
       </main>
+      <AlertDialog open={!!confirmPlan} onOpenChange={(open) => !open && setConfirmPlan(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Subscription</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will be charged <span className="font-semibold text-foreground">{confirmPlan?.amount}</span> for the{" "}
+              <span className="font-semibold text-foreground">{confirmPlan?.name}</span> plan. Do you want to proceed?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActivating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmSubscribe} disabled={isActivating}>
+              {isActivating ? "Activating…" : "Confirm & Subscribe"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={showContactDialog} onOpenChange={setShowContactDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Upgrade to Pro</AlertDialogTitle>
+            <AlertDialogDescription>
+              To upgrade to the Pro plan, please contact us at{" "}
+              <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium text-foreground">
+                info@jcdigitalsolutions.ca
+              </a>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

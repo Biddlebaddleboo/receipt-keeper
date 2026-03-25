@@ -15,6 +15,7 @@ export interface UserPlan {
   plan_updated_at: string;
   last_transaction_id: number | null;
   customer_code: string | null;
+  payment_method_saved: boolean;
 }
 
 export function useUserPlanApi() {
