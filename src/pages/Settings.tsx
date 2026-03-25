@@ -221,6 +221,7 @@ const Settings = () => {
                       ) : (
                         <Button
                           onClick={() => handleSubscribe()}
+                          disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >
                           Subscribe
