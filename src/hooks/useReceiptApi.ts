@@ -114,6 +114,21 @@ export function useReceiptApi() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const pollTimerRef = useRef<number | null>(null);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const hasMoreRef = useRef(hasMore);
+  const nextCursorRef = useRef(nextCursor);
+
+  useEffect(() => {
+    isLoadingMoreRef.current = isLoadingMore;
+  }, [isLoadingMore]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  useEffect(() => {
+    nextCursorRef.current = nextCursor;
+  }, [nextCursor]);
 
   const normalizeReceipt = useCallback((r: Receipt): Receipt => {
     return {
@@ -224,7 +239,7 @@ export function useReceiptApi() {
     return acc;
   }, {});
 
-  const fetchReceipt = async (id: string): Promise<Receipt | null> => {
+  const fetchReceipt = useCallback(async (id: string): Promise<Receipt | null> => {
     if (authLoading || !tokenRef.current) return null;
 
     try {
@@ -235,38 +250,44 @@ export function useReceiptApi() {
     } catch {
       return null;
     }
-  };
+  }, [authLoading]);
 
   const loadNextPage = useCallback(async () => {
-    if (authLoading || isLoadingMore || !hasMore || !tokenRef.current) return;
+    if (authLoading || isLoadingMoreRef.current || !hasMoreRef.current || !tokenRef.current) return;
+    isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
-      const url = nextCursor
-        ? `${API_BASE_URL}/receipts?start_after_id=${nextCursor}`
+      const cursor = nextCursorRef.current;
+      const url = cursor
+        ? `${API_BASE_URL}/receipts?start_after_id=${cursor}`
         : `${API_BASE_URL}/receipts`;
       const response = await apiFetch(url);
       if (!response.ok) throw new Error("Failed to load receipts");
       const data = await response.json();
       const items: Receipt[] = (data.receipts || []).map((r: Receipt) => normalizeReceipt(r));
       if (items.length === 0) {
+        hasMoreRef.current = false;
         setHasMore(false);
       } else {
         setReceipts((prev) => mergeIncomingReceipts(prev, items));
         if (data.next_cursor) {
+          nextCursorRef.current = data.next_cursor;
           setNextCursor(data.next_cursor);
         } else {
+          hasMoreRef.current = false;
           setHasMore(false);
         }
       }
     } catch {
       // silently fail
     } finally {
+      isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [authLoading, nextCursor, isLoadingMore, hasMore, mergeIncomingReceipts, normalizeReceipt]);
+  }, [authLoading, mergeIncomingReceipts, normalizeReceipt]);
 
   const refreshLatest = useCallback(async () => {
-    if (authLoading || !tokenRef.current || isLoadingMore) return;
+    if (authLoading || !tokenRef.current || isLoadingMoreRef.current) return;
 
     try {
       const response = await apiFetch(`${API_BASE_URL}/receipts`);
@@ -276,14 +297,10 @@ export function useReceiptApi() {
       if (items.length > 0) {
         setReceipts((prev) => mergeIncomingReceipts(prev, items));
       }
-      if (typeof data.next_cursor === "string") {
-        setNextCursor(data.next_cursor);
-        setHasMore(true);
-      }
     } catch {
       // no-op; keep existing list
     }
-  }, [authLoading, isLoadingMore, mergeIncomingReceipts, normalizeReceipt]);
+  }, [authLoading, mergeIncomingReceipts, normalizeReceipt]);
 
   useEffect(() => {
     if (authLoading || !tokenRef.current) return;
@@ -294,7 +311,7 @@ export function useReceiptApi() {
     };
 
     tick();
-    pollTimerRef.current = window.setInterval(tick, 5_000);
+    pollTimerRef.current = window.setInterval(tick, 15_000);
     document.addEventListener("visibilitychange", tick);
 
     return () => {
