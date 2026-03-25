@@ -5,3 +5,7 @@ export const API_BASE_URL =
 export const GOOGLE_CLIENT_ID =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ||
   "267658267276-mnjifd6o265q1of401199uaukpuq650p.apps.googleusercontent.com";
+
+export const PAYMENT_PAGE_URL =
+  import.meta.env.VITE_PAYMENT_PAGE_URL ||
+  "https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8";

@@ -7,6 +7,9 @@ import { toast } from "@/hooks/use-toast";
 import { usePaymentPlanApi, PaymentPlan } from "@/hooks/usePaymentPlanApi";
 import { useUserPlanApi } from "@/hooks/useUserPlanApi";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CreditCard, AlertTriangle } from "lucide-react";
+import { PAYMENT_PAGE_URL } from "@/config";
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -16,8 +19,14 @@ const Settings = () => {
 
   const isLoading = userPlanLoading || plansLoading;
 
+  const paymentMethodSaved = userPlan?.payment_method_saved ?? false;
+
   const handleSubscribe = () => {
-    window.open("https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8", "_blank");
+    window.open(PAYMENT_PAGE_URL, "_blank");
+  };
+
+  const handleAddPaymentMethod = () => {
+    window.open(PAYMENT_PAGE_URL, "_blank");
   };
 
   // Pick icon/color based on plan name
@@ -83,6 +92,32 @@ const Settings = () => {
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">
             Subscription
           </h2>
+
+          {!isLoading && !error && paymentMethodSaved && (
+            <Alert className="mb-3 border-emerald-500/30 bg-emerald-500/10">
+              <CreditCard className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <AlertDescription className="text-sm text-emerald-600 dark:text-emerald-400">
+                Your payment method is currently saved.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {!isLoading && !error && !paymentMethodSaved && (
+            <Alert className="mb-3 border-amber-500/30 bg-amber-500/10">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <AlertDescription className="text-sm text-amber-600 dark:text-amber-400 flex items-center justify-between gap-2 flex-wrap">
+                <span>Add your payment method first before upgrading.</span>
+                <Button
+                  size="sm"
+                  onClick={handleAddPaymentMethod}
+                  className="bg-amber-500 hover:bg-amber-600 text-white"
+                >
+                  <CreditCard className="w-4 h-4 mr-1" />
+                  Add Payment Method
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {isLoading && (
             <div className="space-y-3">
@@ -186,6 +221,7 @@ const Settings = () => {
                       ) : (
                         <Button
                           onClick={() => handleSubscribe()}
+                          disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >
                           Subscribe
