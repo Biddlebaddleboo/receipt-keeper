@@ -294,7 +294,7 @@ export function useReceiptApi() {
     };
 
     tick();
-    pollTimerRef.current = window.setInterval(tick, 10_000);
+    pollTimerRef.current = window.setInterval(tick, 5_000);
     document.addEventListener("visibilitychange", tick);
 
     return () => {
