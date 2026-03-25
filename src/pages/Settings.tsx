@@ -19,8 +19,14 @@ const Settings = () => {
 
   const isLoading = userPlanLoading || plansLoading;
 
+  const paymentMethodSaved = userPlan?.payment_method_saved ?? false;
+
   const handleSubscribe = () => {
-    window.open("https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8", "_blank");
+    window.open(PAYMENT_PAGE_URL, "_blank");
+  };
+
+  const handleAddPaymentMethod = () => {
+    window.open(PAYMENT_PAGE_URL, "_blank");
   };
 
   // Pick icon/color based on plan name
