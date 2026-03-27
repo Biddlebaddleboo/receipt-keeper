@@ -1,6 +1,6 @@
 type FFmpegInstance = {
   loaded: boolean;
-  load: (args: { coreURL: string; wasmURL: string; workerURL: string }) => Promise<void>;
+  load: (args: { coreURL: string; wasmURL: string; workerURL?: string }) => Promise<void>;
   writeFile: (path: string, data: Uint8Array) => Promise<void>;
   exec: (args: string[]) => Promise<void>;
   readFile: (path: string) => Promise<Uint8Array>;
@@ -12,7 +12,7 @@ let ffmpegLoadPromise: Promise<{
   fetchFile: (file: File | Blob | string) => Promise<Uint8Array>;
 }> | null = null;
 
-const CORE_BASE_URL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm";
+const CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
 
 const loadFFmpeg = async () => {
   if (ffmpegLoadPromise) return ffmpegLoadPromise;
@@ -25,13 +25,12 @@ const loadFFmpeg = async () => {
 
     const ffmpeg = new FFmpeg() as FFmpegInstance;
     if (!ffmpeg.loaded) {
-      const [coreURL, wasmURL, workerURL] = await Promise.all([
+      const [coreURL, wasmURL] = await Promise.all([
         toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.js`, "text/javascript"),
         toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.wasm`, "application/wasm"),
-        toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.worker.js`, "text/javascript"),
       ]);
 
-      await ffmpeg.load({ coreURL, wasmURL, workerURL });
+      await ffmpeg.load({ coreURL, wasmURL });
     }
 
     return { ffmpeg, fetchFile };
