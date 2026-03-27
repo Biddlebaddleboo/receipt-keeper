@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
+import { doc, updateDoc } from "firebase/firestore/lite";
+import { db } from "@/lib/firebase";
 
 interface ReceiptDetailProps {
   receipt: Receipt;
@@ -40,6 +42,10 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [signedImageUrl, setSignedImageUrl] = useState<string | null>(null);
   const { categories } = useCategoryApi();
 
+  const updateReceiptInFirestore = useCallback(async (updates: Record<string, unknown>) => {
+    await updateDoc(doc(db, "receipts", receipt.id), updates);
+  }, [receipt.id]);
+
   const fetchSignedImageUrl = useCallback(async (receiptID: string): Promise<string | null> => {
     try {
       const response = await apiFetch(`${API_BASE_URL}/receipts/sign-image`, {
@@ -70,12 +76,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
     setIsSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error("Failed to save");
+      await updateReceiptInFirestore(payload);
       setReceipt((prev) => ({ ...prev, ...payload }));
       setEditingField(null);
       toast.success(`${field.charAt(0).toUpperCase() + field.slice(1).replace("_", " ")} updated`);
@@ -197,12 +198,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
     setIsSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: updatedItems }),
-      });
-      if (!response.ok) throw new Error("Failed to save");
+      await updateReceiptInFirestore({ items: updatedItems });
       setReceipt((prev) => ({ ...prev, items: updatedItems }));
       setEditingItem(null);
       toast.success("Item updated");
@@ -217,12 +213,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const updatedItems = receipt.items.filter((_, i) => i !== index);
     setIsSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: updatedItems }),
-      });
-      if (!response.ok) throw new Error("Failed to delete item");
+      await updateReceiptInFirestore({ items: updatedItems });
       setReceipt((prev) => ({ ...prev, items: updatedItems }));
       if (editingItem?.index === index) setEditingItem(null);
       toast.success("Item removed");
@@ -238,12 +229,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const updatedItems = [...(receipt.items || []), newItem];
     setIsSaving(true);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts/${receipt.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: updatedItems }),
-      });
-      if (!response.ok) throw new Error("Failed to add item");
+      await updateReceiptInFirestore({ items: updatedItems });
       setReceipt((prev) => ({ ...prev, items: updatedItems }));
       startEditing(updatedItems.length - 1);
     } catch {
