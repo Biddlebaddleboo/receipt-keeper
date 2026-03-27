@@ -62,6 +62,12 @@ export function useUserPlanApi() {
           : "free";
 
     const normalizedPlanName = firstWord(rawPlanName);
+    const paymentMethodSaved =
+      typeof data.payment_method_saved === "boolean"
+        ? data.payment_method_saved
+        : typeof data.payment_method_ready === "boolean"
+          ? data.payment_method_ready
+          : false;
 
     return ({
     owner_email: typeof data.owner_email === "string" ? data.owner_email : "",
@@ -75,8 +81,13 @@ export function useUserPlanApi() {
     features: Array.isArray(data.features) ? data.features.filter((f): f is string => typeof f === "string") : [],
     plan_updated_at: typeof data.plan_updated_at === "string" ? data.plan_updated_at : "",
     last_transaction_id: typeof data.last_transaction_id === "number" ? data.last_transaction_id : null,
-    customer_code: typeof data.customer_code === "string" ? data.customer_code : null,
-    payment_method_saved: Boolean(data.payment_method_saved),
+    customer_code:
+      typeof data.customer_code === "string"
+        ? data.customer_code
+        : typeof data.helcim_customer_code === "string"
+          ? data.helcim_customer_code
+          : null,
+    payment_method_saved: paymentMethodSaved,
   });
   };
 
