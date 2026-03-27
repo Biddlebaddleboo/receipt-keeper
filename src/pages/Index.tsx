@@ -6,6 +6,7 @@ import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
 import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine, Plus, Settings, LogOut } from "lucide-react";
+import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
 
 const Index = () => {
   const { token, isLoading: authLoading, signOut } = useAuth();
@@ -15,6 +16,10 @@ const Index = () => {
   const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const didInitialLoadRef = useRef(false);
+
+  useEffect(() => {
+    preloadReceiptImageConverter();
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;

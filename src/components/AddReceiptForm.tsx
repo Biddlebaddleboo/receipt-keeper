@@ -1,9 +1,10 @@
 import { useState, useRef } from "react";
 import { X, Camera, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 
 interface AddReceiptFormProps {
-  onSubmit: (file: File) => void;
+  onSubmit: (file: File, onProgress?: (progress: number) => void) => Promise<void> | void;
   onClose: () => void;
   disabled?: boolean;
 }
@@ -11,12 +12,23 @@ interface AddReceiptFormProps {
 export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [isQueueingUpload, setIsQueueingUpload] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (f: File) => {
+    if (!f.type.startsWith("image/")) {
+      setSubmitError("Only image files are allowed.");
+      return;
+    }
+    setSubmitError(null);
     setFile(f);
-    setPreview(URL.createObjectURL(f));
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(f);
+    });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -25,10 +37,42 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
     e.target.value = "";
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!file) return;
-    onSubmit(file);
-    onClose();
+    if (isQueueingUpload) return;
+
+    setIsQueueingUpload(true);
+    setUploadProgress(2);
+    setSubmitError(null);
+    let conversionProgressTimer: number | null = null;
+    try {
+      conversionProgressTimer = window.setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 14) return prev;
+          return Math.min(14, prev + 1);
+        });
+      }, 220);
+
+      const convertedFile = await convertReceiptImageFile(file);
+      if (conversionProgressTimer) {
+        window.clearInterval(conversionProgressTimer);
+        conversionProgressTimer = null;
+      }
+      setUploadProgress((prev) => Math.max(prev, 15));
+      if (convertedFile.type !== "image/webp") {
+        throw new Error(`WebP conversion failed. Got type: ${convertedFile.type || "unknown"}`);
+      }
+      await onSubmit(convertedFile, (progress) => setUploadProgress(progress));
+      onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed";
+      setSubmitError(message);
+      console.error(error);
+      setUploadProgress(0);
+    } finally {
+      if (conversionProgressTimer) window.clearInterval(conversionProgressTimer);
+      setIsQueueingUpload(false);
+    }
   };
 
   return (
@@ -40,7 +84,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
         <h2 className="text-sm font-semibold">New Receipt</h2>
         <button
           onClick={handleSubmit}
-          disabled={!file || disabled}
+          disabled={!file || disabled || isQueueingUpload}
           className={cn(
             "px-4 py-1.5 rounded-md text-sm font-medium transition-all active:scale-95",
             file ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground pointer-events-none"
@@ -54,15 +98,32 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
         <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleInputChange} />
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleInputChange} />
 
+        {submitError && (
+          <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {submitError}
+          </div>
+        )}
+
         {preview ? (
-          <div className="relative aspect-[4/3] rounded-lg overflow-hidden bg-muted ring-1 ring-border">
-            <img src={preview} alt="Receipt preview" className="w-full h-full object-cover" />
-            <button
-              onClick={() => { setFile(null); if (preview) URL.revokeObjectURL(preview); setPreview(null); }}
-              className="absolute top-2 right-2 p-1.5 rounded-md bg-card/90 backdrop-blur-sm hover:bg-card transition-colors active:scale-95"
-            >
-              <X className="w-4 h-4" />
-            </button>
+          <div className="space-y-3">
+            <div className="relative aspect-[4/3] rounded-lg overflow-hidden bg-muted ring-1 ring-border">
+              <img src={preview} alt="Receipt preview" className="w-full h-full object-cover" />
+              <button
+                onClick={() => { setFile(null); if (preview) URL.revokeObjectURL(preview); setPreview(null); setUploadProgress(0); }}
+                disabled={isQueueingUpload}
+                className="absolute top-2 right-2 p-1.5 rounded-md bg-card/90 backdrop-blur-sm hover:bg-card transition-colors active:scale-95 disabled:opacity-40"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {isQueueingUpload && (
+              <div className="w-full h-2 rounded-full bg-secondary overflow-hidden ring-1 ring-border/60">
+                <div
+                  className="h-full bg-primary transition-[width] duration-200 ease-out"
+                  style={{ width: `${Math.max(1, Math.min(100, uploadProgress))}%` }}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex gap-3">
