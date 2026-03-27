@@ -78,6 +78,15 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     try {
       await updateReceiptInFirestore(payload);
       setReceipt((prev) => ({ ...prev, ...payload }));
+      if (field === "category") {
+        window.dispatchEvent(
+          new CustomEvent("receipt-category-updated", {
+            detail: {
+              receiptId: receipt.id,
+            },
+          })
+        );
+      }
       setEditingField(null);
       toast.success(`${field.charAt(0).toUpperCase() + field.slice(1).replace("_", " ")} updated`);
     } catch {

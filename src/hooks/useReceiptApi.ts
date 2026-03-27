@@ -386,6 +386,32 @@ export function useReceiptApi() {
     };
   }, [authLoading, token, refreshLatest, isFirebaseReady, firebaseUID]);
 
+  useEffect(() => {
+    const handleCategoryUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ receiptId?: string }>;
+      const receiptId = customEvent.detail?.receiptId;
+      if (!receiptId || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
+
+      void (async () => {
+        try {
+          const snapshot = await getDoc(doc(db, "receipts", receiptId));
+          if (!snapshot.exists()) return;
+          const data = snapshot.data() as Record<string, unknown>;
+          if ((typeof data.owner_email === "string" ? data.owner_email : "") !== userEmailRef.current) return;
+          const updated = fromFirestoreDoc(snapshot.id, data);
+          setReceipts((prev) => prev.map((r) => (r.id === receiptId ? { ...r, category: updated.category } : r)));
+        } catch {
+          // keep current UI state if refresh fails
+        }
+      })();
+    };
+
+    window.addEventListener("receipt-category-updated", handleCategoryUpdated);
+    return () => {
+      window.removeEventListener("receipt-category-updated", handleCategoryUpdated);
+    };
+  }, [fromFirestoreDoc, isFirebaseReady, firebaseUID]);
+
   return {
     receipts,
     receiptsByDate,
