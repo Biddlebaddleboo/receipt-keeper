@@ -205,40 +205,6 @@ const Settings = () => {
             </div>
           )}
 
-          {/* Free plan - always shown */}
-          {!isLoading && !error && userTier === 0 && (
-            <div
-              className={`rounded-xl bg-card receipt-shadow overflow-hidden ${isFreePlan ? "ring-2 ring-emerald-500" : ""}`}
-            >
-              <div className="px-5 pt-5 pb-4 flex items-start gap-4">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                  <Gift className="w-5 h-5 text-emerald-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-base font-semibold">Free</span>
-                    <span className="text-xs font-medium text-muted-foreground">$0.00 CAD</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">Get started at no cost</p>
-                </div>
-              </div>
-              <div className="px-5 pb-4 space-y-2">
-                <div className="flex items-center gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                  <span className="text-sm text-foreground/80">50 receipts lifetime with OCR</span>
-                </div>
-              </div>
-              <div className="px-5 pb-5">
-                <Button
-                  disabled
-                  className={`w-full ${isFreePlan ? "bg-emerald-500" : "bg-emerald-500/50"} text-white cursor-default`}
-                >
-                  {isFreePlan ? "Current Plan" : "Free Tier"}
-                </Button>
-              </div>
-            </div>
-          )}
-
           {!isLoading &&
             !error &&
             plans
