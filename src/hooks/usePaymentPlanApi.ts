@@ -21,7 +21,7 @@ export function usePaymentPlanApi() {
     setIsLoading(true);
     setError(null);
     try {
-      const querySnapshot = await getDocs(collection(db, "payment_plans"));
+      const querySnapshot = await getDocs(collection(db, "plans"));
       const fetchedPlans: PaymentPlan[] = querySnapshot.docs.map((doc) => ({
         id: doc.id,
         name: doc.data().name ?? "",
