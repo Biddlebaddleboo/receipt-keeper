@@ -36,10 +36,22 @@ export function useUserPlanApi() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mapPlan = (data: Record<string, unknown>): UserPlan => ({
+  const firstWord = (value: string) => value.trim().split(/\s+/)[0];
+
+  const mapPlan = (data: Record<string, unknown>): UserPlan => {
+    const rawPlanName =
+      typeof data.plan_name === "string" && data.plan_name.trim()
+        ? data.plan_name
+        : typeof data.plan_id === "string" && data.plan_id.trim()
+          ? data.plan_id
+          : "free";
+
+    const normalizedPlanName = firstWord(rawPlanName);
+
+    return ({
     owner_email: typeof data.owner_email === "string" ? data.owner_email : "",
-    plan_id: typeof data.plan_id === "string" ? data.plan_id : "free",
-    plan_name: typeof data.plan_name === "string" ? data.plan_name : "free",
+    plan_id: typeof data.plan_id === "string" && data.plan_id.trim() ? data.plan_id : normalizedPlanName,
+    plan_name: normalizedPlanName,
     description: typeof data.description === "string" ? data.description : "",
     subscription_status: typeof data.subscription_status === "string" ? data.subscription_status : "inactive",
     plan_interval: typeof data.plan_interval === "string" ? data.plan_interval : "month",
@@ -51,6 +63,7 @@ export function useUserPlanApi() {
     customer_code: typeof data.customer_code === "string" ? data.customer_code : null,
     payment_method_saved: Boolean(data.payment_method_saved),
   });
+  };
 
   const fetchUserPlan = useCallback(async () => {
     if (!tokenRef.current) return;
