@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore/lite";
+import { db } from "@/lib/firebase";
 
 export interface ExtractedField {
   label: string;
@@ -52,11 +54,17 @@ export interface Receipt {
 }
 
 export function useReceiptApi() {
-  const { token, isLoading: authLoading } = useAuth();
+  const RECEIPTS_PAGE_SIZE = 10;
+  const { token, user, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
+
+  const userEmailRef = useRef(user?.email ?? null);
+  useEffect(() => {
+    userEmailRef.current = user?.email ?? null;
+  }, [user?.email]);
 
   const getSignedUpload = async (file: File): Promise<SignedUploadResponse> => {
     const contentType = file.type?.trim() || "image/jpeg";
@@ -136,6 +144,37 @@ export function useReceiptApi() {
       status: "success" as const,
     };
   }, []);
+
+  const toISOString = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    if (value && typeof value === "object" && "toDate" in (value as Record<string, unknown>)) {
+      try {
+        const date = (value as { toDate: () => Date }).toDate();
+        return date.toISOString();
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  };
+
+  const fromFirestoreDoc = useCallback((id: string, data: Record<string, unknown>): Receipt => {
+    return normalizeReceipt({
+      id,
+      vendor: typeof data.vendor === "string" ? data.vendor : "",
+      subtotal: typeof data.subtotal === "number" ? data.subtotal : 0,
+      tax: typeof data.tax === "number" ? data.tax : 0,
+      total: typeof data.total === "number" ? data.total : 0,
+      category: typeof data.category === "string" ? data.category : "",
+      purchase_date: typeof data.purchase_date === "string" ? data.purchase_date : "",
+      extracted_text: typeof data.extracted_text === "string" ? data.extracted_text : "",
+      extracted_fields: Array.isArray(data.extracted_fields) ? (data.extracted_fields as ExtractedField[]) : [],
+      items: Array.isArray(data.items) ? (data.items as ReceiptItem[]) : [],
+      created_at: toISOString(data.created_at),
+      image_url: typeof data.image_url === "string" ? data.image_url : undefined,
+      status: "success",
+    });
+  }, [normalizeReceipt]);
 
   const mergeIncomingReceipts = useCallback((prev: Receipt[], incoming: Receipt[]) => {
     const incomingIds = new Set(incoming.map((r) => r.id));
@@ -240,39 +279,60 @@ export function useReceiptApi() {
   }, {});
 
   const fetchReceipt = useCallback(async (id: string): Promise<Receipt | null> => {
-    if (authLoading || !tokenRef.current) return null;
+    if (authLoading || !tokenRef.current || !userEmailRef.current) return null;
 
     try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts/${id}`);
-      if (!response.ok) throw new Error("Failed to fetch receipt");
-      const data = await response.json();
-      return { ...data, status: "success" as const };
+      const receiptRef = doc(db, "receipts", id);
+      const snapshot = await getDoc(receiptRef);
+      if (!snapshot.exists()) return null;
+      const data = snapshot.data() as Record<string, unknown>;
+      if ((typeof data.owner_email === "string" ? data.owner_email : "") !== userEmailRef.current) return null;
+      return fromFirestoreDoc(snapshot.id, data);
     } catch {
       return null;
     }
-  }, [authLoading]);
+  }, [authLoading, fromFirestoreDoc]);
 
   const loadNextPage = useCallback(async () => {
-    if (authLoading || isLoadingMoreRef.current || !hasMoreRef.current || !tokenRef.current) return;
+    if (authLoading || isLoadingMoreRef.current || !hasMoreRef.current || !tokenRef.current || !userEmailRef.current) return;
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
       const cursor = nextCursorRef.current;
-      const url = cursor
-        ? `${API_BASE_URL}/receipts?start_after_id=${cursor}`
-        : `${API_BASE_URL}/receipts`;
-      const response = await apiFetch(url);
-      if (!response.ok) throw new Error("Failed to load receipts");
-      const data = await response.json();
-      const items: Receipt[] = (data.receipts || []).map((r: Receipt) => normalizeReceipt(r));
+      let firestoreQuery = query(
+        collection(db, "receipts"),
+        where("owner_email", "==", userEmailRef.current),
+        orderBy("created_at", "desc"),
+        limit(RECEIPTS_PAGE_SIZE),
+      );
+
+      if (cursor) {
+        const afterSnapshot = await getDoc(doc(db, "receipts", cursor));
+        if (afterSnapshot.exists()) {
+          firestoreQuery = query(
+            collection(db, "receipts"),
+            where("owner_email", "==", userEmailRef.current),
+            orderBy("created_at", "desc"),
+            startAfter(afterSnapshot),
+            limit(RECEIPTS_PAGE_SIZE),
+          );
+        }
+      }
+
+      const snapshot = await getDocs(firestoreQuery);
+      const items: Receipt[] = snapshot.docs.map((d) => fromFirestoreDoc(d.id, d.data() as Record<string, unknown>));
       if (items.length === 0) {
         hasMoreRef.current = false;
         setHasMore(false);
       } else {
         setReceipts((prev) => mergeIncomingReceipts(prev, items));
-        if (data.next_cursor) {
-          nextCursorRef.current = data.next_cursor;
-          setNextCursor(data.next_cursor);
+        const lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.docs.length < RECEIPTS_PAGE_SIZE) {
+          hasMoreRef.current = false;
+          setHasMore(false);
+        } else if (lastDoc) {
+          nextCursorRef.current = lastDoc.id;
+          setNextCursor(lastDoc.id);
         } else {
           hasMoreRef.current = false;
           setHasMore(false);
@@ -284,23 +344,28 @@ export function useReceiptApi() {
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [authLoading, mergeIncomingReceipts, normalizeReceipt]);
+  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts]);
 
   const refreshLatest = useCallback(async () => {
-    if (authLoading || !tokenRef.current || isLoadingMoreRef.current) return;
+    if (authLoading || !tokenRef.current || !userEmailRef.current || isLoadingMoreRef.current) return;
 
     try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts`);
-      if (!response.ok) return;
-      const data = await response.json();
-      const items: Receipt[] = (data.receipts || []).map((r: Receipt) => normalizeReceipt(r));
+      const snapshot = await getDocs(
+        query(
+          collection(db, "receipts"),
+          where("owner_email", "==", userEmailRef.current),
+          orderBy("created_at", "desc"),
+          limit(RECEIPTS_PAGE_SIZE),
+        )
+      );
+      const items: Receipt[] = snapshot.docs.map((d) => fromFirestoreDoc(d.id, d.data() as Record<string, unknown>));
       if (items.length > 0) {
         setReceipts((prev) => mergeIncomingReceipts(prev, items));
       }
     } catch {
       // no-op; keep existing list
     }
-  }, [authLoading, mergeIncomingReceipts, normalizeReceipt]);
+  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts]);
 
   useEffect(() => {
     if (authLoading || !tokenRef.current) return;
