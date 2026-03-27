@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore/lite";
 import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { db, firebaseAuth } from "@/lib/firebase";
 
@@ -89,7 +89,7 @@ export function useUserPlanApi() {
       const fallbackData = fallbackSnap.docs[0].data() as Record<string, unknown>;
       setUserPlan(mapPlan(fallbackData));
     } catch (e: any) {
-      setError(e.message);
+      setError(e?.code ? `${e.code}: ${e.message}` : e.message);
     } finally {
       setIsLoading(false);
     }

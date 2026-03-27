@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { collection, getDocs } from "firebase/firestore/lite";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
+import { useAuth } from "@/contexts/AuthContext";
+import { db, firebaseAuth } from "@/lib/firebase";
 
 export interface PaymentPlan {
   id: string;
@@ -13,14 +15,26 @@ export interface PaymentPlan {
 }
 
 export function usePaymentPlanApi() {
+  const { token, isLoading: authLoading } = useAuth();
   const [plans, setPlans] = useState<PaymentPlan[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchPlans = useCallback(async () => {
+    if (!token) return;
     setIsLoading(true);
     setError(null);
     try {
+      let currentUser = firebaseAuth.currentUser;
+      if (!currentUser) {
+        const firebaseCredential = GoogleAuthProvider.credential(token);
+        const authResult = await signInWithCredential(firebaseAuth, firebaseCredential);
+        currentUser = authResult.user;
+      }
+      if (!currentUser) {
+        throw new Error("Unable to establish Firebase authentication");
+      }
+
       const querySnapshot = await getDocs(collection(db, "plans"));
       const fetchedPlans: PaymentPlan[] = querySnapshot.docs.map((doc) => ({
         id: doc.id,
@@ -33,15 +47,16 @@ export function usePaymentPlanApi() {
       }));
       setPlans(fetchedPlans);
     } catch (e: any) {
-      setError(e.message);
+      setError(e?.code ? `${e.code}: ${e.message}` : e.message);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
+    if (authLoading || !token) return;
     fetchPlans();
-  }, [fetchPlans]);
+  }, [authLoading, token, fetchPlans]);
 
   return { plans, isLoading, error, refetch: fetchPlans };
 }
