@@ -40,10 +40,6 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   const handleSubmit = async () => {
     if (!file) return;
     if (isQueueingUpload) return;
-    if (file.type !== "image/webp") {
-      setSubmitError("Only WebP files are allowed.");
-      return;
-    }
 
     setIsQueueingUpload(true);
     setUploadProgress(2);
