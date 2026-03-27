@@ -9,3 +9,9 @@ export const GOOGLE_CLIENT_ID =
 export const PAYMENT_PAGE_URL =
   import.meta.env.VITE_PAYMENT_PAGE_URL ||
   "https://jc-digital-solutions.myhelcim.com/hosted/?token=f7fd8827054adf4b085ff8";
+
+export const FIREBASE_API_KEY =
+  import.meta.env.VITE_FIREBASE_API_KEY || "";
+
+export const FIREBASE_DATABASE_ID =
+  import.meta.env.VITE_FIREBASE_DATABASE_ID || "(default)";

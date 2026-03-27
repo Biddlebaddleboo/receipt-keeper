@@ -75,7 +75,15 @@ const Settings = () => {
   // Pick icon/color based on plan name
   const getPlanStyle = (plan: PaymentPlan) => {
     const lower = plan.name.toLowerCase();
-    if (lower.includes("pro")) {
+    if (lower.includes("free")) {
+      return {
+        Icon: Gift,
+        color: "emerald",
+        bgClass: "bg-emerald-500/15",
+        iconClass: "text-emerald-500",
+        btnClass: "bg-emerald-500 hover:bg-emerald-600",
+      };
+    } else if (lower.includes("pro")) {
       return {
         Icon: Zap,
         color: "violet",
@@ -94,9 +102,13 @@ const Settings = () => {
   };
 
   const formatBillingPeriod = (period: string) => {
-    if (period === "monthly") return "month";
-    if (period === "yearly") return "year";
+    if (period === "month" || period === "monthly") return "month";
+    if (period === "year" || period === "yearly") return "year";
     return period;
+  };
+
+  const formatPrice = (priceCents: number) => {
+    return (priceCents / 100).toFixed(2);
   };
 
   // Plan tier hierarchy (higher index = higher tier)
@@ -141,7 +153,9 @@ const Settings = () => {
               <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
                 To cancel your plan, please contact{" "}
-                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">info@jcdigitalsolutions.ca</a>
+                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">
+                  info@jcdigitalsolutions.ca
+                </a>
               </AlertDescription>
             </Alert>
           )}
@@ -191,40 +205,6 @@ const Settings = () => {
             </div>
           )}
 
-          {/* Free plan - always shown */}
-          {!isLoading && !error && userTier === 0 && (
-            <div
-              className={`rounded-xl bg-card receipt-shadow overflow-hidden ${isFreePlan ? "ring-2 ring-emerald-500" : ""}`}
-            >
-              <div className="px-5 pt-5 pb-4 flex items-start gap-4">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                  <Gift className="w-5 h-5 text-emerald-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-base font-semibold">Free</span>
-                    <span className="text-xs font-medium text-muted-foreground">$0.00 CAD</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">Get started at no cost</p>
-                </div>
-              </div>
-              <div className="px-5 pb-4 space-y-2">
-                <div className="flex items-center gap-2.5">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                  <span className="text-sm text-foreground/80">50 receipts lifetime with OCR</span>
-                </div>
-              </div>
-              <div className="px-5 pb-5">
-                <Button
-                  disabled
-                  className={`w-full ${isFreePlan ? "bg-emerald-500" : "bg-emerald-500/50"} text-white cursor-default`}
-                >
-                  {isFreePlan ? "Current Plan" : "Free Tier"}
-                </Button>
-              </div>
-            </div>
-          )}
-
           {!isLoading &&
             !error &&
             plans
@@ -250,10 +230,10 @@ const Settings = () => {
                         <div className="flex items-baseline gap-2">
                           <span className="text-base font-semibold">{cleanName}</span>
                           <span className="text-xs font-medium text-muted-foreground">
-                            ${plan.recurringAmount.toFixed(2)} {plan.currency}/{formatBillingPeriod(plan.billingPeriod)}
+                            ${formatPrice(plan.price_cents)} CAD/{formatBillingPeriod(plan.interval)}
                           </span>
                         </div>
-                        {plan.description && <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>}
+                        {/* No description field in Firestore */}
                       </div>
                     </div>
                     {plan.features && plan.features.length > 0 && (
@@ -280,11 +260,13 @@ const Settings = () => {
                         </Button>
                       ) : (
                         <Button
-                          onClick={() => handleSubscribe(
-                            cleanName.toLowerCase(),
-                            cleanName,
-                            `$${plan.recurringAmount.toFixed(2)} ${plan.currency}/${formatBillingPeriod(plan.billingPeriod)}`
-                          )}
+                          onClick={() =>
+                            handleSubscribe(
+                              cleanName.toLowerCase(),
+                              cleanName,
+                              `$${formatPrice(plan.price_cents)} CAD/${formatBillingPeriod(plan.interval)}`,
+                            )
+                          }
                           disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >

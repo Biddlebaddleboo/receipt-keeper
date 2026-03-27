@@ -1,40 +1,37 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useAuth } from "@/contexts/AuthContext";
-import { API_BASE_URL } from "@/config";
-import { apiFetch } from "@/lib/api";
+import { useState, useCallback, useEffect } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 export interface PaymentPlan {
-  id: number;
+  id: string;
   name: string;
-  description: string;
-  status: string;
-  currency: string;
-  recurringAmount: number;
-  billingPeriod: string;
-  defaultPaymentLinkId: number;
-  features?: string[];
+  features: string[];
+  interval: string;
+  monthly_limit: number | null;
+  payment_plan_id: number;
+  price_cents: number;
 }
 
 export function usePaymentPlanApi() {
-  const { token, isLoading: authLoading } = useAuth();
-  const tokenRef = useRef(token);
-  useEffect(() => {
-    tokenRef.current = token;
-  }, [token]);
-
   const [plans, setPlans] = useState<PaymentPlan[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchPlans = useCallback(async () => {
-    if (!tokenRef.current) return;
     setIsLoading(true);
     setError(null);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/billing/helcim/payment-plans`);
-      if (!response.ok) throw new Error("Failed to fetch payment plans");
-      const json = await response.json();
-      setPlans(json.data ?? []);
+      const querySnapshot = await getDocs(collection(db, "plans"));
+      const fetchedPlans: PaymentPlan[] = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        name: doc.data().name ?? "",
+        features: doc.data().features ?? [],
+        interval: doc.data().interval ?? "month",
+        monthly_limit: doc.data().monthly_limit ?? null,
+        payment_plan_id: doc.data().payment_plan_id ?? 0,
+        price_cents: doc.data().price_cents ?? 0,
+      }));
+      setPlans(fetchedPlans);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -43,9 +40,8 @@ export function usePaymentPlanApi() {
   }, []);
 
   useEffect(() => {
-    if (authLoading || !token) return;
     fetchPlans();
-  }, [authLoading, token, fetchPlans]);
+  }, [fetchPlans]);
 
   return { plans, isLoading, error, refetch: fetchPlans };
 }
