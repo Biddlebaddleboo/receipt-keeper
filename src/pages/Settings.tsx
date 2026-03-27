@@ -82,15 +82,15 @@ const Settings = () => {
         bgClass: "bg-violet-500/15",
         iconClass: "text-violet-500",
         btnClass: "bg-violet-500 hover:bg-violet-600",
-      }else if (lower.includes("free")){
+      };
+    } else if (lower.includes("free")) {
       return {
         Icon: Gift,
         color: "emerald",
         bgClass: "bg-emerald-500/15",
         iconClass: "text-emerald-500",
         btnClass: "bg-emerald-500 hover:bg-emerald-600",
-      },
-      }
+      };
     }
     return {
       Icon: Gift,
@@ -153,7 +153,9 @@ const Settings = () => {
               <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               <AlertDescription className="text-sm text-blue-600 dark:text-blue-400">
                 To cancel your plan, please contact{" "}
-                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">info@jcdigitalsolutions.ca</a>
+                <a href="mailto:info@jcdigitalsolutions.ca" className="underline font-medium">
+                  info@jcdigitalsolutions.ca
+                </a>
               </AlertDescription>
             </Alert>
           )}
@@ -292,11 +294,13 @@ const Settings = () => {
                         </Button>
                       ) : (
                         <Button
-                          onClick={() => handleSubscribe(
-                            cleanName.toLowerCase(),
-                            cleanName,
-                            `$${formatPrice(plan.price_cents)} CAD/${formatBillingPeriod(plan.interval)}`
-                          )}
+                          onClick={() =>
+                            handleSubscribe(
+                              cleanName.toLowerCase(),
+                              cleanName,
+                              `$${formatPrice(plan.price_cents)} CAD/${formatBillingPeriod(plan.interval)}`,
+                            )
+                          }
                           disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
                         >
