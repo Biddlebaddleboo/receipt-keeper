@@ -37,7 +37,22 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [localDownloadPending, setLocalDownloadPending] = useState(false);
+  const [signedImageUrl, setSignedImageUrl] = useState<string | null>(null);
   const { categories } = useCategoryApi();
+
+  const fetchSignedImageUrl = useCallback(async (receiptID: string): Promise<string | null> => {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/receipts/sign-image`, {
+        method: "POST",
+        body: JSON.stringify({ receipt_id: receiptID }),
+      });
+      if (!response.ok) return null;
+      const payload = (await response.json()) as { image_url?: string };
+      return typeof payload.image_url === "string" && payload.image_url.trim() ? payload.image_url : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
@@ -133,6 +148,28 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     };
   }, [initialReceipt.id, initialReceipt.status, fetchReceipt]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSignedImage = async () => {
+      if (receipt.localImageUrl) {
+        if (!cancelled) setSignedImageUrl(null);
+        return;
+      }
+      if (!receipt.id) {
+        if (!cancelled) setSignedImageUrl(null);
+        return;
+      }
+      const url = await fetchSignedImageUrl(receipt.id);
+      if (!cancelled) setSignedImageUrl(url);
+    };
+
+    void loadSignedImage();
+    return () => {
+      cancelled = true;
+    };
+  }, [receipt.id, receipt.localImageUrl, fetchSignedImageUrl]);
+
   const startEditing = (index: number) => {
     const item = receipt.items[index];
     setEditingItem({
@@ -217,7 +254,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   };
 
   const status = statusConfig[receipt.status];
-  const imageUrl = receipt.localImageUrl || receipt.image_url || null;
+  const imageUrl = receipt.localImageUrl || signedImageUrl || null;
   const purchaseDate = receipt.purchase_date
     ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
@@ -241,10 +278,9 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             onClick={async () => {
               try {
                 setLocalDownloadPending(true);
-                const imageEndpoint = receipt.image_url || `${API_BASE_URL}/receipts/${receipt.id}/image`;
-                const res = receipt.image_url
-                  ? await fetch(imageEndpoint, { credentials: "omit" })
-                  : await apiFetch(imageEndpoint);
+                const imageEndpoint = receipt.localImageUrl || signedImageUrl || (await fetchSignedImageUrl(receipt.id));
+                if (!imageEndpoint) throw new Error("Signed URL not available");
+                const res = await fetch(imageEndpoint, { credentials: "omit" });
                 if (!res.ok) throw new Error("Download failed");
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
@@ -283,7 +319,18 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
         {imageUrl && (
           <div className="aspect-[3/4] max-h-[50vh] bg-muted overflow-hidden">
-            <img src={imageUrl} alt="Receipt" className="w-full h-full object-contain" />
+            <img
+              src={imageUrl}
+              alt="Receipt"
+              className="w-full h-full object-contain"
+              onError={() => {
+                if (!receipt.localImageUrl) {
+                  void fetchSignedImageUrl(receipt.id).then((freshUrl) => {
+                    if (freshUrl) setSignedImageUrl(freshUrl);
+                  });
+                }
+              }}
+            />
           </div>
         )}
 
