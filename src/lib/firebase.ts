@@ -2,7 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDummyKeyForPublicRead",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
   authDomain: "jcdigitalsolutions-jc7.firebaseapp.com",
   projectId: "jcdigitalsolutions-jc7",
 };
