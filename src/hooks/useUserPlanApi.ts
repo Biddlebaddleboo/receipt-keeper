@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { doc, getDoc } from "firebase/firestore";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
 import { db, firebaseAuth } from "@/lib/firebase";
 
 export interface UserPlan {
@@ -32,11 +33,20 @@ export function useUserPlanApi() {
 
   const fetchUserPlan = useCallback(async () => {
     if (!tokenRef.current) return;
-    const currentUser = firebaseAuth.currentUser;
-    if (!currentUser) return;
     setIsLoading(true);
     setError(null);
     try {
+      let currentUser = firebaseAuth.currentUser;
+      if (!currentUser) {
+        const firebaseCredential = GoogleAuthProvider.credential(tokenRef.current);
+        const authResult = await signInWithCredential(firebaseAuth, firebaseCredential);
+        currentUser = authResult.user;
+      }
+
+      if (!currentUser) {
+        throw new Error("Unable to establish Firebase authentication");
+      }
+
       const userRef = doc(db, "users", currentUser.uid);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) {
