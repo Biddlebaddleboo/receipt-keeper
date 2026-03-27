@@ -1,8 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore/lite";
-import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
-import { db, firebaseAuth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 
 export interface UserPlan {
   owner_email: string;
@@ -37,7 +36,7 @@ const DEFAULT_FREE_PLAN: UserPlan = {
 };
 
 export function useUserPlanApi() {
-  const { token, user, isLoading: authLoading } = useAuth();
+  const { token, user, isLoading: authLoading, firebaseUID, isFirebaseReady } = useAuth();
   const tokenRef = useRef(token);
   useEffect(() => {
     tokenRef.current = token;
@@ -63,6 +62,12 @@ export function useUserPlanApi() {
           : "free";
 
     const normalizedPlanName = firstWord(rawPlanName);
+    const paymentMethodSaved =
+      typeof data.payment_method_saved === "boolean"
+        ? data.payment_method_saved
+        : typeof data.payment_method_ready === "boolean"
+          ? data.payment_method_ready
+          : false;
 
     return ({
     owner_email: typeof data.owner_email === "string" ? data.owner_email : "",
@@ -76,28 +81,22 @@ export function useUserPlanApi() {
     features: Array.isArray(data.features) ? data.features.filter((f): f is string => typeof f === "string") : [],
     plan_updated_at: typeof data.plan_updated_at === "string" ? data.plan_updated_at : "",
     last_transaction_id: typeof data.last_transaction_id === "number" ? data.last_transaction_id : null,
-    customer_code: typeof data.customer_code === "string" ? data.customer_code : null,
-    payment_method_saved: Boolean(data.payment_method_saved),
+    customer_code:
+      typeof data.customer_code === "string"
+        ? data.customer_code
+        : typeof data.helcim_customer_code === "string"
+          ? data.helcim_customer_code
+          : null,
+    payment_method_saved: paymentMethodSaved,
   });
   };
 
   const fetchUserPlan = useCallback(async () => {
-    if (!tokenRef.current) return;
+    if (!tokenRef.current || !isFirebaseReady || !firebaseUID) return;
     setIsLoading(true);
     setError(null);
     try {
-      let currentUser = firebaseAuth.currentUser;
-      if (!currentUser) {
-        const firebaseCredential = GoogleAuthProvider.credential(tokenRef.current);
-        const authResult = await signInWithCredential(firebaseAuth, firebaseCredential);
-        currentUser = authResult.user;
-      }
-
-      if (!currentUser) {
-        throw new Error("Unable to establish Firebase authentication");
-      }
-
-      const userRef = doc(db, "users", currentUser.uid);
+      const userRef = doc(db, "users", firebaseUID);
       const userSnap = await getDoc(userRef);
       if (userSnap.exists()) {
         setUserPlan(mapPlan(userSnap.data() as Record<string, unknown>));
@@ -122,12 +121,12 @@ export function useUserPlanApi() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isFirebaseReady, firebaseUID]);
 
   useEffect(() => {
-    if (authLoading || !token) return;
+    if (authLoading || !token || !isFirebaseReady || !firebaseUID) return;
     fetchUserPlan();
-  }, [authLoading, token, fetchUserPlan]);
+  }, [authLoading, token, isFirebaseReady, firebaseUID, fetchUserPlan]);
 
   return { userPlan, isLoading, error, refetch: fetchUserPlan };
 }

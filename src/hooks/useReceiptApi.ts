@@ -55,7 +55,7 @@ export interface Receipt {
 
 export function useReceiptApi() {
   const RECEIPTS_PAGE_SIZE = 10;
-  const { token, user, isLoading: authLoading } = useAuth();
+  const { token, user, isLoading: authLoading, firebaseUID, isFirebaseReady } = useAuth();
   const tokenRef = useRef(token);
   useEffect(() => {
     tokenRef.current = token;
@@ -279,7 +279,7 @@ export function useReceiptApi() {
   }, {});
 
   const fetchReceipt = useCallback(async (id: string): Promise<Receipt | null> => {
-    if (authLoading || !tokenRef.current || !userEmailRef.current) return null;
+    if (authLoading || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return null;
 
     try {
       const receiptRef = doc(db, "receipts", id);
@@ -291,10 +291,10 @@ export function useReceiptApi() {
     } catch {
       return null;
     }
-  }, [authLoading, fromFirestoreDoc]);
+  }, [authLoading, fromFirestoreDoc, isFirebaseReady, firebaseUID]);
 
   const loadNextPage = useCallback(async () => {
-    if (authLoading || isLoadingMoreRef.current || !hasMoreRef.current || !tokenRef.current || !userEmailRef.current) return;
+    if (authLoading || isLoadingMoreRef.current || !hasMoreRef.current || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
@@ -344,10 +344,10 @@ export function useReceiptApi() {
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts]);
+  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts, isFirebaseReady, firebaseUID]);
 
   const refreshLatest = useCallback(async () => {
-    if (authLoading || !tokenRef.current || !userEmailRef.current || isLoadingMoreRef.current) return;
+    if (authLoading || !tokenRef.current || !userEmailRef.current || isLoadingMoreRef.current || !isFirebaseReady || !firebaseUID) return;
 
     try {
       const snapshot = await getDocs(
@@ -365,10 +365,10 @@ export function useReceiptApi() {
     } catch {
       // no-op; keep existing list
     }
-  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts]);
+  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts, isFirebaseReady, firebaseUID]);
 
   useEffect(() => {
-    if (authLoading || !tokenRef.current) return;
+    if (authLoading || !tokenRef.current || !isFirebaseReady || !firebaseUID) return;
 
     const tick = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
@@ -384,7 +384,33 @@ export function useReceiptApi() {
       pollTimerRef.current = null;
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [authLoading, token, refreshLatest]);
+  }, [authLoading, token, refreshLatest, isFirebaseReady, firebaseUID]);
+
+  useEffect(() => {
+    const handleCategoryUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ receiptId?: string }>;
+      const receiptId = customEvent.detail?.receiptId;
+      if (!receiptId || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
+
+      void (async () => {
+        try {
+          const snapshot = await getDoc(doc(db, "receipts", receiptId));
+          if (!snapshot.exists()) return;
+          const data = snapshot.data() as Record<string, unknown>;
+          if ((typeof data.owner_email === "string" ? data.owner_email : "") !== userEmailRef.current) return;
+          const updated = fromFirestoreDoc(snapshot.id, data);
+          setReceipts((prev) => prev.map((r) => (r.id === receiptId ? { ...r, category: updated.category } : r)));
+        } catch {
+          // keep current UI state if refresh fails
+        }
+      })();
+    };
+
+    window.addEventListener("receipt-category-updated", handleCategoryUpdated);
+    return () => {
+      window.removeEventListener("receipt-category-updated", handleCategoryUpdated);
+    };
+  }, [fromFirestoreDoc, isFirebaseReady, firebaseUID]);
 
   return {
     receipts,

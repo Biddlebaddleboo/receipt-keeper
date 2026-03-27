@@ -1,11 +1,13 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { GoogleAuthProvider, signInWithCredential, signOut as firebaseSignOut } from "firebase/auth";
+import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut as firebaseSignOut } from "firebase/auth";
 import { updateAuthReadyState } from "@/lib/authReady";
 import { firebaseAuth } from "@/lib/firebase";
 
 interface AuthContextType {
   token: string | null;
   user: { email: string; name: string; picture: string } | null;
+  firebaseUID: string | null;
+  isFirebaseReady: boolean;
   isLoading: boolean;
   signIn: (credential: string) => void;
   signOut: () => void;
@@ -38,6 +40,8 @@ const signInFirebaseWithGoogleCredential = async (credential: string) => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthContextType["user"]>(null);
+  const [firebaseUID, setFirebaseUID] = useState<string | null>(null);
+  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const signIn = useCallback((credential: string) => {
@@ -102,8 +106,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     updateAuthReadyState(token, isLoading);
   }, [token, isLoading]);
 
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(firebaseAuth, (firebaseUser) => {
+      setFirebaseUID(firebaseUser?.uid ?? null);
+      setIsFirebaseReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ token, user, isLoading, signIn, signOut }}>
+    <AuthContext.Provider value={{ token, user, firebaseUID, isFirebaseReady, isLoading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
