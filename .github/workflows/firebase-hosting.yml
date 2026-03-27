@@ -24,6 +24,7 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
           VITE_PAYMENT_PAGE_URL: ${{ vars.VITE_PAYMENT_PAGE_URL }}
           VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_DATABASE_ID: ${{ vars.VITE_FIREBASE_DATABASE_ID }}
 
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:

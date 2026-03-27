@@ -12,3 +12,6 @@ export const PAYMENT_PAGE_URL =
 
 export const FIREBASE_API_KEY =
   import.meta.env.VITE_FIREBASE_API_KEY || "";
+
+export const FIREBASE_DATABASE_ID =
+  import.meta.env.VITE_FIREBASE_DATABASE_ID || "(default)";
