@@ -19,8 +19,8 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (f: File) => {
-    if (f.type !== "image/webp") {
-      setSubmitError("Only WebP files are allowed.");
+    if (!f.type.startsWith("image/")) {
+      setSubmitError("Only image files are allowed.");
       return;
     }
     setSubmitError(null);
@@ -99,8 +99,8 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       </header>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <input ref={cameraRef} type="file" accept="image/webp" capture="environment" className="hidden" onChange={handleInputChange} />
-        <input ref={fileRef} type="file" accept="image/webp" className="hidden" onChange={handleInputChange} />
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleInputChange} />
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleInputChange} />
 
         {submitError && (
           <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
