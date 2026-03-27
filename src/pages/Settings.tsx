@@ -75,21 +75,21 @@ const Settings = () => {
   // Pick icon/color based on plan name
   const getPlanStyle = (plan: PaymentPlan) => {
     const lower = plan.name.toLowerCase();
-    if (lower.includes("pro")) {
-      return {
-        Icon: Zap,
-        color: "violet",
-        bgClass: "bg-violet-500/15",
-        iconClass: "text-violet-500",
-        btnClass: "bg-violet-500 hover:bg-violet-600",
-      };
-    } else if (lower.includes("free")) {
+    if (lower.includes("free")) {
       return {
         Icon: Gift,
         color: "emerald",
         bgClass: "bg-emerald-500/15",
         iconClass: "text-emerald-500",
         btnClass: "bg-emerald-500 hover:bg-emerald-600",
+      };
+    } else if (lower.includes("pro")) {
+      return {
+        Icon: Zap,
+        color: "violet",
+        bgClass: "bg-violet-500/15",
+        iconClass: "text-violet-500",
+        btnClass: "bg-violet-500 hover:bg-violet-600",
       };
     }
     return {
