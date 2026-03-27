@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { X, Camera, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 
 interface AddReceiptFormProps {
   onSubmit: (file: File) => void;
@@ -11,12 +12,16 @@ interface AddReceiptFormProps {
 export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [isQueueingUpload, setIsQueueingUpload] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (f: File) => {
     setFile(f);
-    setPreview(URL.createObjectURL(f));
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(f);
+    });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -25,10 +30,18 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
     e.target.value = "";
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!file) return;
-    onSubmit(file);
-    onClose();
+    if (isQueueingUpload) return;
+
+    setIsQueueingUpload(true);
+    try {
+      const convertedFile = await convertReceiptImageFile(file);
+      onSubmit(convertedFile);
+      onClose();
+    } finally {
+      setIsQueueingUpload(false);
+    }
   };
 
   return (
