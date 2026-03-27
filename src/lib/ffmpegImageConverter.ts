@@ -1,3 +1,6 @@
+import coreURL from "@ffmpeg/core?url";
+import wasmURL from "@ffmpeg/core/wasm?url";
+
 type FFmpegInstance = {
   loaded: boolean;
   load: (args: { coreURL: string; wasmURL: string; workerURL?: string }) => Promise<void>;
@@ -12,29 +15,25 @@ let ffmpegLoadPromise: Promise<{
   fetchFile: (file: File | Blob | string) => Promise<Uint8Array>;
 }> | null = null;
 
-const CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
-
 const loadFFmpeg = async () => {
   if (ffmpegLoadPromise) return ffmpegLoadPromise;
 
   ffmpegLoadPromise = (async () => {
-    const [{ FFmpeg }, { fetchFile, toBlobURL }] = await Promise.all([
+    const [{ FFmpeg }, { fetchFile }] = await Promise.all([
       import("@ffmpeg/ffmpeg"),
       import("@ffmpeg/util"),
     ]);
 
     const ffmpeg = new FFmpeg() as FFmpegInstance;
     if (!ffmpeg.loaded) {
-      const [coreURL, wasmURL] = await Promise.all([
-        toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.js`, "text/javascript"),
-        toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.wasm`, "application/wasm"),
-      ]);
-
       await ffmpeg.load({ coreURL, wasmURL });
     }
 
     return { ffmpeg, fetchFile };
-  })();
+  })().catch((error) => {
+    ffmpegLoadPromise = null;
+    throw error;
+  });
 
   return ffmpegLoadPromise;
 };
@@ -85,8 +84,8 @@ export const convertReceiptImageFile = async (file: File): Promise<File> => {
       type: "image/webp",
       lastModified: Date.now(),
     });
-  } catch {
-    return file;
+  } catch (error) {
+    throw new Error(`Image conversion to WebP failed: ${error instanceof Error ? error.message : "unknown error"}`);
   } finally {
     await Promise.allSettled([ffmpeg.deleteFile(inputName), ffmpeg.deleteFile(outputName)]);
   }

@@ -39,6 +39,8 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       const convertedFile = await convertReceiptImageFile(file);
       onSubmit(convertedFile);
       onClose();
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsQueueingUpload(false);
     }
