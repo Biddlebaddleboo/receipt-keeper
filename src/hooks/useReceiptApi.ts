@@ -33,6 +33,8 @@ interface SignedUploadResponse {
   expires_at: string;
 }
 
+type UploadProgressCallback = (progress: number) => void;
+
 export interface Receipt {
   id: string;
   vendor: string;
@@ -83,15 +85,32 @@ export function useReceiptApi() {
     return response.json() as Promise<SignedUploadResponse>;
   };
 
-  const uploadToGCS = async (uploadUrl: string, file: File, headers: Record<string, string>) => {
-    const response = await fetch(uploadUrl, {
-      method: "PUT",
-      headers,
-      credentials: "omit",
-      body: file,
-    });
+  const uploadToGCS = async (
+    uploadUrl: string,
+    file: File,
+    headers: Record<string, string>,
+    onProgress?: UploadProgressCallback
+  ) => {
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+      xhr.withCredentials = false;
 
-    if (!response.ok) throw new Error(`GCS upload failed: ${response.status}`);
+      xhr.upload.onprogress = (event) => {
+        if (!onProgress || !event.lengthComputable) return;
+        const uploadPct = Math.round((event.loaded / event.total) * 80); // 15..95 range reserved for upload
+        onProgress(Math.min(95, Math.max(15, 15 + uploadPct)));
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`GCS upload failed: ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error("GCS upload failed"));
+      xhr.onabort = () => reject(new Error("GCS upload aborted"));
+      xhr.send(file);
+    });
   };
 
   const finalizeUpload = async (storagePath: string, meta?: ReceiptUploadMeta) => {
@@ -110,10 +129,15 @@ export function useReceiptApi() {
     return response.json();
   };
 
-  const createReceiptViaSignedUpload = async (file: File, meta?: ReceiptUploadMeta) => {
+  const createReceiptViaSignedUpload = async (file: File, meta?: ReceiptUploadMeta, onProgress?: UploadProgressCallback) => {
+    onProgress?.(5);
     const signed = await getSignedUpload(file);
-    await uploadToGCS(signed.upload_url, file, signed.headers);
-    return finalizeUpload(signed.storage_path, meta);
+    onProgress?.(15);
+    await uploadToGCS(signed.upload_url, file, signed.headers, onProgress);
+    onProgress?.(96);
+    const finalized = await finalizeUpload(signed.storage_path, meta);
+    onProgress?.(100);
+    return finalized;
   };
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -197,7 +221,7 @@ export function useReceiptApi() {
     return [...mergedIncoming, ...rest.filter((r) => !incomingMap.has(r.id))];
   }, []);
 
-  const uploadReceipt = async (file: File) => {
+  const uploadReceipt = async (file: File, onProgress?: UploadProgressCallback) => {
     if (authLoading || !tokenRef.current) return;
 
     const id = crypto.randomUUID();
@@ -224,7 +248,7 @@ export function useReceiptApi() {
     setIsUploading(true);
 
     try {
-      const data = (await createReceiptViaSignedUpload(file)) as Record<string, unknown>;
+      const data = (await createReceiptViaSignedUpload(file, undefined, onProgress)) as Record<string, unknown>;
 
       setReceipts((prev) =>
         prev.map((r) =>
@@ -239,6 +263,7 @@ export function useReceiptApi() {
         )
       );
     } catch (error) {
+      onProgress?.(0);
       const message = error instanceof Error ? error.message : "Upload failed";
       setReceipts((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: "error" as const, errorMessage: message } : r))
