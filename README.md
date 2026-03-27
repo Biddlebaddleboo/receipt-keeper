@@ -1,120 +1,86 @@
-# Receipt Scanner Backend (Go)
+# Receipt Keeper Frontend
 
-Lean Go backend for receipt upload finalization, OCR extraction, image URL signing, and Helcim billing actions.
+React + Vite frontend for receipt tracking with:
 
-## Related Links
+- Google sign-in
+- Firebase Auth + Firestore (direct client reads/writes for user-scoped data)
+- Lightweight backend only for privileged operations (signed uploads/URLs, billing actions)
 
-- Frontend repository: [https://github.com/Biddlebaddleboo/receipt-keeper](https://github.com/Biddlebaddleboo/receipt-keeper)
-- AI Receipt Tracker website: [https://ai-receipt-tracker.web.app/](https://ai-receipt-tracker.web.app/)
+## Links
 
-## What This Service Does
+- Live app: [AI Receipt Tracker](https://ai-receipt-tracker.web.app/)
+- Backend repo: [ai-receipt-tracker-backend](https://github.com/Biddlebaddleboo/ai-receipt-tracker-backend)
 
-- Verifies Google OAuth bearer tokens for protected routes.
-- Issues signed Google Cloud Storage upload URLs.
-- Finalizes uploaded receipts and stores metadata in Firestore.
-- Runs OCR using OpenAI (image is sent as a short-lived signed URL, not file bytes through backend).
-- Signs receipt image URLs on demand.
-- Handles Helcim subscription-related server flows.
+## Stack
 
-## Current Architecture
+- React 18 + TypeScript
+- Vite
+- Firebase Auth
+- Firestore Lite SDK
+- Tailwind + shadcn/radix UI
 
-- Runtime: Go (`cmd/apiserver`)
-- Database: Firestore
-- Object storage: Google Cloud Storage
-- OCR: OpenAI Responses API
-- Billing: Helcim API
-- Container: distroless static image (`Dockerfile`)
+## Architecture
 
-## API Endpoints
+- Frontend reads/writes:
+  - `users` (read-only on client)
+  - `receipts` (owner-scoped read/update)
+  - `categories` (owner-scoped CRUD)
+  - `plans` (read)
+- Backend handles:
+  - Signed upload flow to GCS
+  - Signed image URL generation
+  - Billing activation and webhook-driven payment state
 
-### Public
+## Environment Variables
 
-- `GET /healthz`
-- `GET /billing/helcim/approval`
-- `POST /billing/helcim/approval`
+Create a `.env` file in the project root.
 
-### Authenticated (Google ID token bearer)
-
-#### Receipts
-
-- `POST /receipts/signed-upload`
-  - Request: `{ "filename": "...", "content_type": "image/..." }`
-  - Response includes signed upload URL and `storage_path`.
-
-- `POST /receipts/finalize-upload`
-  - Request: `{ "storage_path": "...", "vendor": ..., "subtotal": ..., "tax": ..., "total": ..., "category": ..., "purchase_date": ... }`
-  - Creates Firestore receipt doc, runs OCR, persists extracted fields.
-
-- `POST /receipts/sign-image`
-  - Request: `{ "receipt_id": "..." }`
-  - Returns a fresh signed image URL.
-
-- `DELETE /receipts/{receipt_id}`
-  - Deletes Firestore receipt doc and underlying storage object.
-
-#### Billing
-
-- `POST /billing/notify`
-- `POST /billing/helcim/customer-code`
-- `GET /billing/helcim/subscriptions`
-- `POST /billing/helcim/subscriptions`
-- `PATCH /billing/helcim/subscriptions`
-- `GET /billing/helcim/subscriptions/{subscription_id}`
-- `DELETE /billing/helcim/subscriptions/{subscription_id}`
-- `POST /billing/helcim/subscriptions/{subscription_id}/sync`
-- `POST /billing/subscriptions/activate`
-
-## Required Environment Variables
-
-Core:
-- `PORT` (default `8080`)
-- `GCLOUD_BUCKET_NAME`
-- `FIRESTORE_DATABASE_ID` (default `(default)`)
-- `FIRESTORE_COLLECTION_NAME` (default `receipts`)
-- `CATEGORIES_COLLECTION_NAME` (default `categories`)
-- `PLANS_COLLECTION_NAME` (default `plans`)
-- `USERS_COLLECTION_NAME` (default `users`)
-
-Auth/CORS:
-- `REQUIRE_OAUTH` (`true`/`false`)
-- `OAUTH_CLIENT_ID` (single string or JSON array/comma-list)
-- `OAUTH_ALLOWED_DOMAINS` (optional)
-- `ALLOWED_ORIGINS` (JSON array or comma-list)
-- `ALLOWED_ORIGIN_REGEX` (optional)
-
-OpenAI:
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL_NAME` (default `gpt-4.1-mini`)
-
-Helcim:
-- `HELCIM_API_TOKEN`
-- `HELCIM_API_BASE_URL` (default `https://api.helcim.com/v2`)
-- `HELCIM_TIMEOUT_SECONDS` (default `20`)
-- `HELCIM_USER_AGENT` (default `ai-receipt-tracker-backend/1.0`)
-- `HELCIM_APPROVAL_SECRET` (optional)
-
-## Local Run
-
-From repo root:
-
-```powershell
-cd cmd\apiserver
-$env:GOCACHE="C:\Users\John\Desktop\Receipt Scanner\.gocache"
-$env:GOMODCACHE="C:\Users\John\Desktop\Receipt Scanner\.gopath\pkg\mod"
-go run .
+```bash
+VITE_FIREBASE_API_KEY=your_firebase_web_api_key
+VITE_FIREBASE_DATABASE_ID=ai-receipt-track
+VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id
+VITE_API_BASE_URL=https://your-backend-url
+VITE_PAYMENT_PAGE_URL=https://your-payment-hosted-page
 ```
 
-## Build/Test
+Notes:
 
-```powershell
-cd cmd\apiserver
-$env:GOCACHE="C:\Users\John\Desktop\Receipt Scanner\.gocache"
-$env:GOMODCACHE="C:\Users\John\Desktop\Receipt Scanner\.gopath\pkg\mod"
-go test ./...
+- `authDomain` and `projectId` are currently set in [firebase.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/lib/firebase.ts).
+- If you fork to another Firebase project, update those values there.
+
+## Scripts
+
+```bash
+npm install
+npm run dev
+npm run build
+npm run preview
+npm run test
 ```
 
-## Notes
+## Firestore Rules Expectations
 
-- Receipt metadata reads are expected to come directly from Firestore client-side.
-- The backend does not persist long-lived signed image URLs in Firestore; URLs are generated on demand.
-- `storage_path` is the single source-of-truth storage field for receipts.
+Current app behavior expects rules that:
+
+- restrict `receipts` and `categories` by `owner_email == request.auth.token.email`
+- keep `users` client read-only
+- keep billing-sensitive writes server-owned
+
+If categories are editable from frontend, rules should allow only:
+
+- `owner_email`
+- `name`
+- `description`
+
+for category create/update.
+
+## Key Paths
+
+- Main settings/subscription UI: [Settings.tsx](/C:/Users/John/Desktop/receipt-keeper-main/src/pages/Settings.tsx)
+- Receipt data hook: [useReceiptApi.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/hooks/useReceiptApi.ts)
+- Category data hook: [useCategoryApi.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/hooks/useCategoryApi.ts)
+- User plan hook: [useUserPlanApi.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/hooks/useUserPlanApi.ts)
+
+## Status
+
+This frontend is optimized for a minimal-backend architecture: direct Firestore access for user-owned app data, with backend kept for security-critical operations only.
