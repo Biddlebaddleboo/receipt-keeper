@@ -28,8 +28,8 @@ interface ReceiptUploadMeta {
 interface SignedUploadResponse {
   storage_path: string;
   upload_url: string;
-  method: "PUT";
-  headers: Record<string, string>;
+  form_fields?: Record<string, string> | null;
+  fields?: Record<string, string> | null;
   expires_at: string;
 }
 
@@ -85,32 +85,25 @@ export function useReceiptApi() {
     return response.json() as Promise<SignedUploadResponse>;
   };
 
-  const uploadToGCS = async (
+  const uploadToGCSViaPolicy = async (
     uploadUrl: string,
     file: File,
-    headers: Record<string, string>,
+    formFields: Record<string, string>,
     onProgress?: UploadProgressCallback
   ) => {
-    await new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", uploadUrl);
-      Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
-      xhr.withCredentials = false;
+    const fd = new FormData();
+    Object.entries(formFields).forEach(([key, value]) => fd.append(key, value));
+    fd.append("file", file);
 
-      xhr.upload.onprogress = (event) => {
-        if (!onProgress || !event.lengthComputable) return;
-        const uploadPct = Math.round((event.loaded / event.total) * 80); // 15..95 range reserved for upload
-        onProgress(Math.min(95, Math.max(15, 15 + uploadPct)));
-      };
+    console.debug("[upload] form data keys", Array.from(fd.keys()));
+    onProgress?.(55);
+    const response = await fetch(uploadUrl, { method: "POST", body: fd });
+    const responseText = await response.text().catch(() => "");
+    console.debug("[upload] gcs status", response.status);
+    console.debug("[upload] gcs response text", responseText);
 
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
-        else reject(new Error(`GCS upload failed: ${xhr.status}`));
-      };
-      xhr.onerror = () => reject(new Error("GCS upload failed"));
-      xhr.onabort = () => reject(new Error("GCS upload aborted"));
-      xhr.send(file);
-    });
+    if (response.status === 201 || response.status === 204) return;
+    throw new Error(`GCS policy upload failed (${response.status}): ${responseText || "No response body"}`);
   };
 
   const finalizeUpload = async (storagePath: string, meta?: ReceiptUploadMeta) => {
@@ -130,10 +123,34 @@ export function useReceiptApi() {
   };
 
   const createReceiptViaSignedUpload = async (file: File, meta?: ReceiptUploadMeta, onProgress?: UploadProgressCallback) => {
+    if (file.type !== "image/webp") {
+      throw new Error(`Only WebP uploads are allowed. Received: ${file.type || "unknown"}`);
+    }
+
     onProgress?.(5);
     const signed = await getSignedUpload(file);
+    console.debug("[upload] signed-upload response shape", {
+      has_upload_url: typeof signed.upload_url === "string",
+      has_storage_path: typeof signed.storage_path === "string",
+      has_form_fields: signed.form_fields != null,
+      has_fields: signed.fields != null,
+      form_field_keys: signed.form_fields ? Object.keys(signed.form_fields) : [],
+      fields_keys: signed.fields ? Object.keys(signed.fields) : [],
+    });
+
+    const resolvedFields = signed.form_fields ?? signed.fields;
+    if (!resolvedFields || typeof resolvedFields !== "object") {
+      throw new Error("signed-upload response missing multipart policy fields (expected form_fields or fields).");
+    }
+    if (typeof signed.upload_url !== "string" || !signed.upload_url) {
+      throw new Error("signed-upload response missing upload_url.");
+    }
+    if (typeof signed.storage_path !== "string" || !signed.storage_path) {
+      throw new Error("signed-upload response missing storage_path.");
+    }
+
     onProgress?.(15);
-    await uploadToGCS(signed.upload_url, file, signed.headers, onProgress);
+    await uploadToGCSViaPolicy(signed.upload_url, file, resolvedFields, onProgress);
     onProgress?.(96);
     const finalized = await finalizeUpload(signed.storage_path, meta);
     onProgress?.(100);
@@ -268,6 +285,7 @@ export function useReceiptApi() {
       setReceipts((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: "error" as const, errorMessage: message } : r))
       );
+      throw (error instanceof Error ? error : new Error(message));
     } finally {
       setIsUploading(false);
     }
