@@ -82,7 +82,15 @@ const Settings = () => {
         bgClass: "bg-violet-500/15",
         iconClass: "text-violet-500",
         btnClass: "bg-violet-500 hover:bg-violet-600",
-      };
+      }else if (lower.includes("free")){
+      return {
+        Icon: Gift,
+        color: "emerald",
+        bgClass: "bg-emerald-500/15",
+        iconClass: "text-emerald-500",
+        btnClass: "bg-emerald-500 hover:bg-emerald-600",
+      },
+      }
     }
     return {
       Icon: Gift,
