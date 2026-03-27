@@ -94,9 +94,13 @@ const Settings = () => {
   };
 
   const formatBillingPeriod = (period: string) => {
-    if (period === "monthly") return "month";
-    if (period === "yearly") return "year";
+    if (period === "month" || period === "monthly") return "month";
+    if (period === "year" || period === "yearly") return "year";
     return period;
+  };
+
+  const formatPrice = (priceCents: number) => {
+    return (priceCents / 100).toFixed(2);
   };
 
   // Plan tier hierarchy (higher index = higher tier)
@@ -250,10 +254,10 @@ const Settings = () => {
                         <div className="flex items-baseline gap-2">
                           <span className="text-base font-semibold">{cleanName}</span>
                           <span className="text-xs font-medium text-muted-foreground">
-                            ${plan.recurringAmount.toFixed(2)} {plan.currency}/{formatBillingPeriod(plan.billingPeriod)}
+                            ${formatPrice(plan.price_cents)} CAD/{formatBillingPeriod(plan.interval)}
                           </span>
                         </div>
-                        {plan.description && <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>}
+                        {/* No description field in Firestore */}
                       </div>
                     </div>
                     {plan.features && plan.features.length > 0 && (
@@ -283,7 +287,7 @@ const Settings = () => {
                           onClick={() => handleSubscribe(
                             cleanName.toLowerCase(),
                             cleanName,
-                            `$${plan.recurringAmount.toFixed(2)} ${plan.currency}/${formatBillingPeriod(plan.billingPeriod)}`
+                            `$${formatPrice(plan.price_cents)} CAD/${formatBillingPeriod(plan.interval)}`
                           )}
                           disabled={!paymentMethodSaved}
                           className={`w-full ${btnClass} text-white active:scale-[0.98]`}
