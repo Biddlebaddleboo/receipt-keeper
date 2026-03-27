@@ -20,6 +20,22 @@ export interface UserPlan {
   payment_method_saved: boolean;
 }
 
+const DEFAULT_FREE_PLAN: UserPlan = {
+  owner_email: "",
+  plan_id: "free",
+  plan_name: "Free",
+  description: "",
+  subscription_status: "inactive",
+  plan_interval: "month",
+  monthly_limit: null,
+  plan_price_cents: 0,
+  features: [],
+  plan_updated_at: "",
+  last_transaction_id: null,
+  customer_code: null,
+  payment_method_saved: false,
+};
+
 export function useUserPlanApi() {
   const { token, user, isLoading: authLoading } = useAuth();
   const tokenRef = useRef(token);
@@ -90,13 +106,13 @@ export function useUserPlanApi() {
 
       const authEmail = userEmailRef.current;
       if (!authEmail) {
-        setUserPlan(null);
+        setUserPlan(DEFAULT_FREE_PLAN);
         return;
       }
       const fallbackQuery = query(collection(db, "users"), where("owner_email", "==", authEmail), limit(1));
       const fallbackSnap = await getDocs(fallbackQuery);
       if (fallbackSnap.empty) {
-        setUserPlan(null);
+        setUserPlan({ ...DEFAULT_FREE_PLAN, owner_email: authEmail });
         return;
       }
       const fallbackData = fallbackSnap.docs[0].data() as Record<string, unknown>;
