@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
-import { collection, doc, getDoc, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore/lite";
+import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
 export interface ExtractedField {
@@ -169,7 +169,8 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const postUploadRefreshTimerRef = useRef<number | null>(null);
   const isLoadingMoreRef = useRef(isLoadingMore);
-  const nextShardCursorRef = useRef<any | null>(null);
+  const shardCatalogRef = useRef<Array<{ id: string; data: Record<string, unknown> }>>([]);
+  const nextShardListIndexRef = useRef(0);
   const hasLoadedFirstShardRef = useRef(false);
   const shardModeRef = useRef<boolean | null>(null);
   const wasPollingPausedRef = useRef(pollingPaused);
@@ -258,6 +259,26 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     });
     return expanded;
   }, [fromFirestoreDoc, fromShardMetadataEntry]);
+
+  const buildShardCatalog = useCallback(async (): Promise<Array<{ id: string; data: Record<string, unknown> }>> => {
+    if (!userEmailRef.current) return [];
+    const snapshot = await getDocs(
+      query(
+        collection(db, "receipts"),
+        where("owner_email", "==", userEmailRef.current),
+      )
+    );
+
+    const shards = snapshot.docs
+      .map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
+      .filter((d) => (typeof d.data._schema === "string" ? d.data._schema : "") === "receipt_shard")
+      .sort((a, b) => {
+        const ai = typeof a.data.shard_index === "number" ? a.data.shard_index : Number(a.data.shard_index || 0);
+        const bi = typeof b.data.shard_index === "number" ? b.data.shard_index : Number(b.data.shard_index || 0);
+        return bi - ai;
+      });
+    return shards;
+  }, []);
 
   const mergeIncomingReceipts = useCallback((prev: Receipt[], incoming: Receipt[]) => {
     const incomingIds = new Set(incoming.map((r) => r.id));
@@ -394,7 +415,6 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
         query(
           collection(db, "receipts"),
           where("owner_email", "==", userEmailRef.current),
-          orderBy("updated_at", "desc"),
           limit(25)
         )
       );
@@ -424,34 +444,18 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
-      const q = nextShardCursorRef.current
-        ? query(
-            collection(db, "receipts"),
-            where("owner_email", "==", userEmailRef.current),
-            where("_schema", "==", "receipt_shard"),
-            orderBy("shard_index", "desc"),
-            startAfter(nextShardCursorRef.current),
-            limit(1),
-          )
-        : query(
-            collection(db, "receipts"),
-            where("owner_email", "==", userEmailRef.current),
-            where("_schema", "==", "receipt_shard"),
-            orderBy("shard_index", "desc"),
-            limit(1),
-          );
+      if (shardCatalogRef.current.length === 0) {
+        shardCatalogRef.current = await buildShardCatalog();
+      }
 
-      const shardSnapshot = await getDocs(q);
-
-      // No more shard docs.
-      if (shardSnapshot.empty) {
+      // No shard docs.
+      if (shardCatalogRef.current.length === 0) {
         if (!hasLoadedFirstShardRef.current) {
           // Legacy fallback once, if shard format not present.
           const legacySnapshot = await getDocs(
             query(
               collection(db, "receipts"),
               where("owner_email", "==", userEmailRef.current),
-              orderBy("created_at", "desc"),
             )
           );
           const legacyItems: Receipt[] = expandReceiptDocs(
@@ -468,15 +472,18 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
         return;
       }
 
+      if (nextShardListIndexRef.current >= shardCatalogRef.current.length) {
+        setHasMore(false);
+        return;
+      }
+
+      const shardDoc = shardCatalogRef.current[nextShardListIndexRef.current];
+      nextShardListIndexRef.current += 1;
       shardModeRef.current = true;
       hasLoadedFirstShardRef.current = true;
-      nextShardCursorRef.current = shardSnapshot.docs[shardSnapshot.docs.length - 1] ?? null;
-      // Keep enabled until next click proves empty.
-      setHasMore(true);
+      setHasMore(nextShardListIndexRef.current < shardCatalogRef.current.length);
 
-      const items: Receipt[] = expandReceiptDocs(
-        shardSnapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
-      );
+      const items: Receipt[] = expandReceiptDocs([shardDoc]);
       if (items.length > 0) {
         setReceipts((prev) => mergeIncomingReceipts(prev, items));
       }
@@ -493,28 +500,17 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
 
     try {
       if (shardModeRef.current !== false) {
-        const latestShardSnapshot = await getDocs(
-          query(
-            collection(db, "receipts"),
-            where("owner_email", "==", userEmailRef.current),
-            where("_schema", "==", "receipt_shard"),
-            orderBy("shard_index", "desc"),
-            limit(1),
-          )
-        );
-        if (!latestShardSnapshot.empty) {
-          const items: Receipt[] = expandReceiptDocs(
-            latestShardSnapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
-          );
+        const shardCatalog = await buildShardCatalog();
+        if (shardCatalog.length > 0) {
+          shardCatalogRef.current = shardCatalog;
+          nextShardListIndexRef.current = 1;
+          const items: Receipt[] = expandReceiptDocs([shardCatalog[0]]);
           if (items.length > 0) {
             setReceipts((prev) => mergeIncomingReceipts(prev, items));
           }
-          if (!hasLoadedFirstShardRef.current) {
-            nextShardCursorRef.current = latestShardSnapshot.docs[latestShardSnapshot.docs.length - 1] ?? null;
-            hasLoadedFirstShardRef.current = true;
-            shardModeRef.current = true;
-            setHasMore(true);
-          }
+          hasLoadedFirstShardRef.current = true;
+          shardModeRef.current = true;
+          setHasMore(shardCatalog.length > 1);
           return;
         }
       }
@@ -524,7 +520,6 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
         query(
           collection(db, "receipts"),
           where("owner_email", "==", userEmailRef.current),
-          orderBy("created_at", "desc"),
         )
       );
       const legacyItems: Receipt[] = expandReceiptDocs(
@@ -542,10 +537,11 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     const wasPaused = wasPollingPausedRef.current;
     wasPollingPausedRef.current = pollingPaused;
     if (pollingPaused) return;
-    // Only refresh when returning from paused state (detail/add overlay closed).
-    if (!wasPaused) return;
     if (authLoading || !tokenRef.current || !isFirebaseReady || !firebaseUID) return;
-    void refreshLatest();
+    // Run once on initial visible load, and again whenever returning from paused state.
+    if (!hasLoadedFirstShardRef.current || wasPaused) {
+      void refreshLatest();
+    }
   }, [pollingPaused, authLoading, token, refreshLatest, isFirebaseReady, firebaseUID]);
 
   useEffect(() => {
