@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
-import { collection, doc, getDoc, getDocs, limit, orderBy, query, startAfter, where } from "firebase/firestore/lite";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
 export interface ExtractedField {
@@ -53,6 +53,8 @@ export interface Receipt {
   localImageUrl?: string;
   status: "pending" | "uploading" | "success" | "error";
   errorMessage?: string;
+  storage_doc_id?: string;
+  shard_doc_id?: string;
 }
 
 interface UseReceiptApiOptions {
@@ -60,7 +62,6 @@ interface UseReceiptApiOptions {
 }
 
 export function useReceiptApi(options?: UseReceiptApiOptions) {
-  const RECEIPTS_PAGE_SIZE = 10;
   const pollingPaused = options?.pollingPaused ?? false;
   const { token, user, isLoading: authLoading, firebaseUID, isFirebaseReady } = useAuth();
   const tokenRef = useRef(token);
@@ -166,23 +167,18 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   const [isUploading, setIsUploading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const pollTimerRef = useRef<number | null>(null);
+  const postUploadRefreshTimerRef = useRef<number | null>(null);
   const isLoadingMoreRef = useRef(isLoadingMore);
-  const hasMoreRef = useRef(hasMore);
-  const nextCursorRef = useRef(nextCursor);
+  const shardCatalogRef = useRef<Array<{ id: string; data: Record<string, unknown> }>>([]);
+  const nextShardListIndexRef = useRef(0);
+  const hasLoadedFirstShardRef = useRef(false);
+  const shardModeRef = useRef<boolean | null>(null);
+  const wasPollingPausedRef = useRef(pollingPaused);
+  const legacyMergedRef = useRef(false);
 
   useEffect(() => {
     isLoadingMoreRef.current = isLoadingMore;
   }, [isLoadingMore]);
-
-  useEffect(() => {
-    hasMoreRef.current = hasMore;
-  }, [hasMore]);
-
-  useEffect(() => {
-    nextCursorRef.current = nextCursor;
-  }, [nextCursor]);
 
   const normalizeReceipt = useCallback((r: Receipt): Receipt => {
     return {
@@ -204,6 +200,45 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return "";
   };
 
+  const toNumber = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  };
+
+  const toItems = (value: unknown): ReceiptItem[] => {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const record = entry as Record<string, unknown>;
+      const name = typeof record.name === "string" ? record.name : "";
+      const quantity = toNumber(record.quantity) ?? 0;
+      const price = toNumber(record.price) ?? 0;
+      return [{ name, quantity, price }];
+    });
+  };
+
+  const toExtractedFields = (value: unknown): ExtractedField[] => {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const record = entry as Record<string, unknown>;
+      if (typeof record.label !== "string" || typeof record.value !== "string") return [];
+      return [{ label: record.label, value: record.value }];
+    });
+  };
+
+  const getAiSuggestions = (data: Record<string, unknown>) => {
+    const extractedFields = data.extracted_fields;
+    if (!extractedFields || typeof extractedFields !== "object" || Array.isArray(extractedFields)) return null;
+    const aiSuggestions = (extractedFields as Record<string, unknown>).ai_suggestions;
+    if (!aiSuggestions || typeof aiSuggestions !== "object" || Array.isArray(aiSuggestions)) return null;
+    return aiSuggestions as Record<string, unknown>;
+  };
+
   const fromFirestoreDoc = useCallback((id: string, data: Record<string, unknown>): Receipt => {
     return normalizeReceipt({
       id,
@@ -219,8 +254,155 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       created_at: toISOString(data.created_at),
       image_url: typeof data.image_url === "string" ? data.image_url : undefined,
       status: "success",
+      storage_doc_id: id,
     });
   }, [normalizeReceipt]);
+
+  const fromShardMetadataEntry = useCallback((shardDocId: string, receiptId: string, raw: Record<string, unknown>): Receipt => {
+    return normalizeReceipt({
+      id: receiptId,
+      vendor: typeof raw.vendor === "string" ? raw.vendor : "",
+      subtotal: typeof raw.subtotal === "number" ? raw.subtotal : 0,
+      tax: typeof raw.tax === "number" ? raw.tax : 0,
+      total: typeof raw.total === "number" ? raw.total : 0,
+      category: typeof raw.category === "string" ? raw.category : "",
+      purchase_date: typeof raw.purchase_date === "string" ? raw.purchase_date : "",
+      extracted_text: typeof raw.extracted_text === "string" ? raw.extracted_text : "",
+      extracted_fields: Array.isArray(raw.extracted_fields) ? (raw.extracted_fields as ExtractedField[]) : [],
+      items: Array.isArray(raw.items) ? (raw.items as ReceiptItem[]) : [],
+      created_at: toISOString(raw.created_at),
+      image_url: typeof raw.image_url === "string" ? raw.image_url : undefined,
+      status: "success",
+      shard_doc_id: shardDocId,
+    });
+  }, [normalizeReceipt]);
+
+  const fromShardDetailDoc = useCallback((
+    shardDocId: string,
+    receiptId: string,
+    metadata: Record<string, unknown>,
+    detailData: Record<string, unknown>
+  ): Receipt => {
+    const aiSuggestions = getAiSuggestions(detailData);
+    const items =
+      toItems(metadata.items).length > 0
+        ? toItems(metadata.items)
+        : toItems(detailData.items).length > 0
+          ? toItems(detailData.items)
+          : toItems(aiSuggestions?.items);
+    const extractedFields =
+      toExtractedFields(metadata.extracted_fields).length > 0
+        ? toExtractedFields(metadata.extracted_fields)
+        : toExtractedFields(detailData.extracted_fields);
+
+    return normalizeReceipt({
+      id: receiptId,
+      vendor:
+        typeof metadata.vendor === "string"
+          ? metadata.vendor
+          : typeof detailData.vendor === "string"
+            ? detailData.vendor
+            : typeof aiSuggestions?.vendor === "string"
+              ? aiSuggestions.vendor
+              : "",
+      subtotal:
+        toNumber(metadata.subtotal)
+        ?? toNumber(detailData.subtotal)
+        ?? toNumber(aiSuggestions?.subtotal)
+        ?? 0,
+      tax:
+        toNumber(metadata.tax)
+        ?? toNumber(detailData.tax)
+        ?? toNumber(aiSuggestions?.tax)
+        ?? 0,
+      total:
+        toNumber(metadata.total)
+        ?? toNumber(detailData.total)
+        ?? toNumber(aiSuggestions?.total)
+        ?? 0,
+      category:
+        typeof metadata.category === "string"
+          ? metadata.category
+          : typeof detailData.category === "string"
+            ? detailData.category
+            : typeof aiSuggestions?.category === "string"
+              ? aiSuggestions.category
+              : "",
+      purchase_date:
+        typeof metadata.purchase_date === "string"
+          ? metadata.purchase_date
+          : typeof detailData.purchase_date === "string"
+            ? detailData.purchase_date
+            : typeof aiSuggestions?.purchase_date === "string"
+              ? aiSuggestions.purchase_date
+              : "",
+      extracted_text:
+        typeof metadata.extracted_text === "string"
+          ? metadata.extracted_text
+          : typeof detailData.extracted_text === "string"
+            ? detailData.extracted_text
+            : "",
+      extracted_fields: extractedFields,
+      items,
+      created_at: toISOString(metadata.created_at || detailData.created_at),
+      image_url:
+        typeof metadata.image_url === "string"
+          ? metadata.image_url
+          : typeof detailData.image_url === "string"
+            ? detailData.image_url
+            : undefined,
+      status: "success",
+      shard_doc_id: shardDocId,
+    });
+  }, [normalizeReceipt]);
+
+  const expandReceiptDocs = useCallback((docs: Array<{ id: string; data: Record<string, unknown> }>): Receipt[] => {
+    const expanded: Receipt[] = [];
+    docs.forEach(({ id, data }) => {
+      const schema = typeof data._schema === "string" ? data._schema : "";
+      const receiptMetadata = data.receipt_metadata as { [key: string]: unknown } | undefined;
+      if (schema === "receipt_shard" && receiptMetadata && typeof receiptMetadata === "object" && !Array.isArray(receiptMetadata)) {
+        Object.entries(receiptMetadata).forEach(([receiptId, rawMeta]) => {
+          if (!receiptId.trim() || !rawMeta || typeof rawMeta !== "object" || Array.isArray(rawMeta)) return;
+          expanded.push(fromShardMetadataEntry(id, receiptId, rawMeta as Record<string, unknown>));
+        });
+      } else {
+        expanded.push(fromFirestoreDoc(id, data));
+      }
+    });
+
+    expanded.sort((a, b) => {
+      const at = a.created_at ? Date.parse(a.created_at) : 0;
+      const bt = b.created_at ? Date.parse(b.created_at) : 0;
+      return bt - at;
+    });
+    return expanded;
+  }, [fromFirestoreDoc, fromShardMetadataEntry]);
+
+  const fetchOwnerReceiptDocs = useCallback(async (): Promise<Array<{ id: string; data: Record<string, unknown> }>> => {
+    if (!userEmailRef.current) return [];
+    const snapshot = await getDocs(
+      query(
+        collection(db, "receipts"),
+        where("owner_email", "==", userEmailRef.current),
+      )
+    );
+    return snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }));
+  }, []);
+
+  const toShardCatalog = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
+    return ownerDocs
+      .filter((d) => (typeof d.data._schema === "string" ? d.data._schema : "") === "receipt_shard")
+      .sort((a, b) => {
+        const ai = typeof a.data.shard_index === "number" ? a.data.shard_index : Number(a.data.shard_index || 0);
+        const bi = typeof b.data.shard_index === "number" ? b.data.shard_index : Number(b.data.shard_index || 0);
+        return bi - ai;
+      });
+  }, []);
+
+  const toLegacyDocs = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
+    return ownerDocs.filter((d) => (typeof d.data._schema === "string" ? d.data._schema : "") !== "receipt_shard");
+  }, []);
 
   const mergeIncomingReceipts = useCallback((prev: Receipt[], incoming: Receipt[]) => {
     const incomingIds = new Set(incoming.map((r) => r.id));
@@ -284,6 +466,16 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
             : r
         )
       );
+
+      // Refresh latest shard once immediately and once again after 10s
+      // to pick up delayed OCR/processing updates.
+      void refreshLatest();
+      if (postUploadRefreshTimerRef.current) {
+        window.clearTimeout(postUploadRefreshTimerRef.current);
+      }
+      postUploadRefreshTimerRef.current = window.setTimeout(() => {
+        void refreshLatest();
+      }, 10_000);
     } catch (error) {
       onProgress?.(0);
       const message = error instanceof Error ? error.message : "Upload failed";
@@ -330,61 +522,98 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     if (authLoading || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return null;
 
     try {
-      const receiptRef = doc(db, "receipts", id);
-      const snapshot = await getDoc(receiptRef);
-      if (!snapshot.exists()) return null;
-      const data = snapshot.data() as Record<string, unknown>;
-      if ((typeof data.owner_email === "string" ? data.owner_email : "") !== userEmailRef.current) return null;
-      return fromFirestoreDoc(snapshot.id, data);
+      const ownerDocs = await fetchOwnerReceiptDocs();
+
+      const legacyDoc = ownerDocs.find(({ id: docId, data }) => {
+        const schema = typeof data._schema === "string" ? data._schema : "";
+        return schema !== "receipt_shard" && docId === id;
+      });
+      if (legacyDoc) {
+        return fromFirestoreDoc(legacyDoc.id, legacyDoc.data);
+      }
+
+      for (const shardDoc of ownerDocs) {
+        const schema = typeof shardDoc.data._schema === "string" ? shardDoc.data._schema : "";
+        if (schema !== "receipt_shard") continue;
+        const receiptMetadata = shardDoc.data.receipt_metadata as { [key: string]: unknown } | undefined;
+        if (!receiptMetadata || typeof receiptMetadata !== "object" || Array.isArray(receiptMetadata)) continue;
+        const rawMeta = receiptMetadata[id];
+        if (!rawMeta || typeof rawMeta !== "object" || Array.isArray(rawMeta)) continue;
+
+        const detailSnapshot = await getDoc(doc(db, "receipts", shardDoc.id, "details", id));
+        if (detailSnapshot.exists()) {
+          return fromShardDetailDoc(
+            shardDoc.id,
+            id,
+            rawMeta as Record<string, unknown>,
+            detailSnapshot.data() as Record<string, unknown>
+          );
+        }
+
+        return fromShardMetadataEntry(shardDoc.id, id, rawMeta as Record<string, unknown>);
+      }
+
+      return null;
     } catch {
       return null;
     }
-  }, [authLoading, fromFirestoreDoc, isFirebaseReady, firebaseUID]);
+  }, [authLoading, fetchOwnerReceiptDocs, fromFirestoreDoc, fromShardDetailDoc, fromShardMetadataEntry, isFirebaseReady, firebaseUID]);
 
   const loadNextPage = useCallback(async () => {
-    if (authLoading || isLoadingMoreRef.current || !hasMoreRef.current || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
+    if (authLoading || isLoadingMoreRef.current || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
+    // If we've exhausted shard pages, do nothing.
+    if (hasLoadedFirstShardRef.current && shardModeRef.current === true && !hasMore) return;
+
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     try {
-      const cursor = nextCursorRef.current;
-      let firestoreQuery = query(
-        collection(db, "receipts"),
-        where("owner_email", "==", userEmailRef.current),
-        orderBy("created_at", "desc"),
-        limit(RECEIPTS_PAGE_SIZE),
-      );
-
-      if (cursor) {
-        const afterSnapshot = await getDoc(doc(db, "receipts", cursor));
-        if (afterSnapshot.exists()) {
-          firestoreQuery = query(
-            collection(db, "receipts"),
-            where("owner_email", "==", userEmailRef.current),
-            orderBy("created_at", "desc"),
-            startAfter(afterSnapshot),
-            limit(RECEIPTS_PAGE_SIZE),
-          );
+      if (shardCatalogRef.current.length === 0) {
+        const ownerDocs = await fetchOwnerReceiptDocs();
+        shardCatalogRef.current = toShardCatalog(ownerDocs);
+        if (!legacyMergedRef.current) {
+          const legacyDocs = toLegacyDocs(ownerDocs);
+          if (legacyDocs.length > 0) {
+            const legacyItems = expandReceiptDocs(legacyDocs);
+            if (legacyItems.length > 0) {
+              setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
+            }
+          }
+          legacyMergedRef.current = true;
         }
       }
 
-      const snapshot = await getDocs(firestoreQuery);
-      const items: Receipt[] = snapshot.docs.map((d) => fromFirestoreDoc(d.id, d.data() as Record<string, unknown>));
-      if (items.length === 0) {
-        hasMoreRef.current = false;
-        setHasMore(false);
-      } else {
-        setReceipts((prev) => mergeIncomingReceipts(prev, items));
-        const lastDoc = snapshot.docs[snapshot.docs.length - 1];
-        if (snapshot.docs.length < RECEIPTS_PAGE_SIZE) {
-          hasMoreRef.current = false;
-          setHasMore(false);
-        } else if (lastDoc) {
-          nextCursorRef.current = lastDoc.id;
-          setNextCursor(lastDoc.id);
+      // No shard docs.
+      if (shardCatalogRef.current.length === 0) {
+        if (!hasLoadedFirstShardRef.current) {
+          // Legacy fallback once, if shard format not present.
+          const ownerDocs = await fetchOwnerReceiptDocs();
+          const legacyItems: Receipt[] = expandReceiptDocs(toLegacyDocs(ownerDocs));
+          if (legacyItems.length > 0) {
+            setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
+          }
+          legacyMergedRef.current = true;
+          shardModeRef.current = false;
+          hasLoadedFirstShardRef.current = true;
         } else {
-          hasMoreRef.current = false;
           setHasMore(false);
         }
+        return;
+      }
+
+      if (nextShardListIndexRef.current >= shardCatalogRef.current.length) {
+        setHasMore(false);
+        return;
+      }
+
+      const shardDoc = shardCatalogRef.current[nextShardListIndexRef.current];
+      nextShardListIndexRef.current += 1;
+      shardModeRef.current = true;
+      hasLoadedFirstShardRef.current = true;
+      setHasMore(nextShardListIndexRef.current < shardCatalogRef.current.length);
+
+      const items: Receipt[] = expandReceiptDocs([shardDoc]);
+      if (items.length > 0) {
+        setReceipts((prev) => mergeIncomingReceipts(prev, items));
       }
     } catch {
       // silently fail
@@ -392,74 +621,81 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts, isFirebaseReady, firebaseUID]);
+  }, [authLoading, expandReceiptDocs, mergeIncomingReceipts, isFirebaseReady, firebaseUID, hasMore, fetchOwnerReceiptDocs, toLegacyDocs, toShardCatalog]);
 
   const refreshLatest = useCallback(async () => {
     if (authLoading || !tokenRef.current || !userEmailRef.current || isLoadingMoreRef.current || !isFirebaseReady || !firebaseUID) return;
 
     try {
-      const snapshot = await getDocs(
-        query(
-          collection(db, "receipts"),
-          where("owner_email", "==", userEmailRef.current),
-          orderBy("created_at", "desc"),
-          limit(RECEIPTS_PAGE_SIZE),
-        )
-      );
-      const items: Receipt[] = snapshot.docs.map((d) => fromFirestoreDoc(d.id, d.data() as Record<string, unknown>));
-      if (items.length > 0) {
-        setReceipts((prev) => mergeIncomingReceipts(prev, items));
+      if (shardModeRef.current !== false) {
+        const ownerDocs = await fetchOwnerReceiptDocs();
+        const shardCatalog = toShardCatalog(ownerDocs);
+        const legacyDocs = toLegacyDocs(ownerDocs);
+        if (legacyDocs.length > 0) {
+          const legacyItems: Receipt[] = expandReceiptDocs(legacyDocs);
+          if (legacyItems.length > 0) {
+            setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
+          }
+          legacyMergedRef.current = true;
+        }
+        if (shardCatalog.length > 0) {
+          shardCatalogRef.current = shardCatalog;
+          nextShardListIndexRef.current = 1;
+          const items: Receipt[] = expandReceiptDocs([shardCatalog[0]]);
+          if (items.length > 0) {
+            setReceipts((prev) => mergeIncomingReceipts(prev, items));
+          }
+          hasLoadedFirstShardRef.current = true;
+          shardModeRef.current = true;
+          setHasMore(shardCatalog.length > 1);
+          return;
+        }
       }
+
+      // Legacy fallback refresh.
+      const legacyItems: Receipt[] = expandReceiptDocs(toLegacyDocs(await fetchOwnerReceiptDocs()));
+      if (legacyItems.length > 0) {
+        setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
+      }
+      legacyMergedRef.current = true;
     } catch {
       // no-op; keep existing list
     }
-  }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts, isFirebaseReady, firebaseUID]);
+  }, [authLoading, expandReceiptDocs, mergeIncomingReceipts, isFirebaseReady, firebaseUID, fetchOwnerReceiptDocs, toLegacyDocs, toShardCatalog]);
 
   useEffect(() => {
+    const wasPaused = wasPollingPausedRef.current;
+    wasPollingPausedRef.current = pollingPaused;
     if (pollingPaused) return;
     if (authLoading || !tokenRef.current || !isFirebaseReady || !firebaseUID) return;
-
-    const tick = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      refreshLatest();
-    };
-
-    tick();
-    pollTimerRef.current = window.setInterval(tick, 15_000);
-    document.addEventListener("visibilitychange", tick);
-
-    return () => {
-      if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-      document.removeEventListener("visibilitychange", tick);
-    };
+    // Run once on initial visible load, and again whenever returning from paused state.
+    if (!hasLoadedFirstShardRef.current || wasPaused) {
+      void refreshLatest();
+    }
   }, [pollingPaused, authLoading, token, refreshLatest, isFirebaseReady, firebaseUID]);
 
   useEffect(() => {
-    const handleCategoryUpdated = (event: Event) => {
-      const customEvent = event as CustomEvent<{ receiptId?: string }>;
-      const receiptId = customEvent.detail?.receiptId;
-      if (!receiptId || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
+    return () => {
+      if (postUploadRefreshTimerRef.current) window.clearTimeout(postUploadRefreshTimerRef.current);
+    };
+  }, []);
 
-      void (async () => {
-        try {
-          const snapshot = await getDoc(doc(db, "receipts", receiptId));
-          if (!snapshot.exists()) return;
-          const data = snapshot.data() as Record<string, unknown>;
-          if ((typeof data.owner_email === "string" ? data.owner_email : "") !== userEmailRef.current) return;
-          const updated = fromFirestoreDoc(snapshot.id, data);
-          setReceipts((prev) => prev.map((r) => (r.id === receiptId ? { ...r, category: updated.category } : r)));
-        } catch {
-          // keep current UI state if refresh fails
-        }
-      })();
+  useEffect(() => {
+    const handleCategoryUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ receiptId?: string; category?: string }>;
+      const receiptId = customEvent.detail?.receiptId;
+      if (!receiptId) return;
+      if (typeof customEvent.detail?.category === "string") {
+        const nextCategory = customEvent.detail.category;
+        setReceipts((prev) => prev.map((r) => (r.id === receiptId ? { ...r, category: nextCategory } : r)));
+      }
     };
 
     window.addEventListener("receipt-category-updated", handleCategoryUpdated);
     return () => {
       window.removeEventListener("receipt-category-updated", handleCategoryUpdated);
     };
-  }, [fromFirestoreDoc, isFirebaseReady, firebaseUID]);
+  }, []);
 
   return {
     receipts,
@@ -472,5 +708,6 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     retryUpload,
     fetchReceipt,
     loadNextPage,
+    refreshLatest,
   };
 }

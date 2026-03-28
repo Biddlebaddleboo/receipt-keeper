@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
-import { doc, updateDoc } from "firebase/firestore/lite";
+import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
 interface ReceiptDetailProps {
@@ -13,6 +13,7 @@ interface ReceiptDetailProps {
   onClose: () => void;
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
+  fetchReceipt: (id: string) => Promise<Receipt | null>;
 }
 
 const statusConfig = {
@@ -29,7 +30,7 @@ interface EditingItem {
   price: string;
 }
 
-export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry }: ReceiptDetailProps) {
+export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
   const [receipt, setReceipt] = useState(initialReceipt);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
@@ -41,8 +42,18 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const { categories } = useCategoryApi();
 
   const updateReceiptInFirestore = useCallback(async (updates: Record<string, unknown>) => {
+    if (receipt.shard_doc_id) {
+      const shardRef = doc(db, "receipts", receipt.shard_doc_id);
+      await Promise.all(
+        Object.entries(updates).map(([key, value]) =>
+          updateDoc(shardRef, new FieldPath("receipt_metadata", receipt.id, key), value)
+        )
+      );
+      return;
+    }
+
     await updateDoc(doc(db, "receipts", receipt.id), updates);
-  }, [receipt.id]);
+  }, [receipt.id, receipt.shard_doc_id]);
 
   const fetchSignedImageUrl = useCallback(async (receiptID: string): Promise<string | null> => {
     try {
@@ -81,6 +92,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
           new CustomEvent("receipt-category-updated", {
             detail: {
               receiptId: receipt.id,
+              category: value,
             },
           })
         );
@@ -114,6 +126,17 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   useEffect(() => {
     setReceipt(initialReceipt);
   }, [initialReceipt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!initialReceipt?.id || initialReceipt.status !== "success") return;
+    void fetchReceipt(initialReceipt.id).then((fresh) => {
+      if (!cancelled && fresh) setReceipt(fresh);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialReceipt?.id, initialReceipt?.status, fetchReceipt]);
 
   useEffect(() => {
     let cancelled = false;
