@@ -174,6 +174,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   const hasLoadedFirstShardRef = useRef(false);
   const shardModeRef = useRef<boolean | null>(null);
   const wasPollingPausedRef = useRef(pollingPaused);
+  const legacyMergedRef = useRef(false);
 
   useEffect(() => {
     isLoadingMoreRef.current = isLoadingMore;
@@ -260,7 +261,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return expanded;
   }, [fromFirestoreDoc, fromShardMetadataEntry]);
 
-  const buildShardCatalog = useCallback(async (): Promise<Array<{ id: string; data: Record<string, unknown> }>> => {
+  const fetchOwnerReceiptDocs = useCallback(async (): Promise<Array<{ id: string; data: Record<string, unknown> }>> => {
     if (!userEmailRef.current) return [];
     const snapshot = await getDocs(
       query(
@@ -268,16 +269,21 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
         where("owner_email", "==", userEmailRef.current),
       )
     );
+    return snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }));
+  }, []);
 
-    const shards = snapshot.docs
-      .map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
+  const toShardCatalog = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
+    return ownerDocs
       .filter((d) => (typeof d.data._schema === "string" ? d.data._schema : "") === "receipt_shard")
       .sort((a, b) => {
         const ai = typeof a.data.shard_index === "number" ? a.data.shard_index : Number(a.data.shard_index || 0);
         const bi = typeof b.data.shard_index === "number" ? b.data.shard_index : Number(b.data.shard_index || 0);
         return bi - ai;
       });
-    return shards;
+  }, []);
+
+  const toLegacyDocs = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
+    return ownerDocs.filter((d) => (typeof d.data._schema === "string" ? d.data._schema : "") !== "receipt_shard");
   }, []);
 
   const mergeIncomingReceipts = useCallback((prev: Receipt[], incoming: Receipt[]) => {
@@ -445,25 +451,30 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     setIsLoadingMore(true);
     try {
       if (shardCatalogRef.current.length === 0) {
-        shardCatalogRef.current = await buildShardCatalog();
+        const ownerDocs = await fetchOwnerReceiptDocs();
+        shardCatalogRef.current = toShardCatalog(ownerDocs);
+        if (!legacyMergedRef.current) {
+          const legacyDocs = toLegacyDocs(ownerDocs);
+          if (legacyDocs.length > 0) {
+            const legacyItems = expandReceiptDocs(legacyDocs);
+            if (legacyItems.length > 0) {
+              setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
+            }
+          }
+          legacyMergedRef.current = true;
+        }
       }
 
       // No shard docs.
       if (shardCatalogRef.current.length === 0) {
         if (!hasLoadedFirstShardRef.current) {
           // Legacy fallback once, if shard format not present.
-          const legacySnapshot = await getDocs(
-            query(
-              collection(db, "receipts"),
-              where("owner_email", "==", userEmailRef.current),
-            )
-          );
-          const legacyItems: Receipt[] = expandReceiptDocs(
-            legacySnapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
-          );
+          const ownerDocs = await fetchOwnerReceiptDocs();
+          const legacyItems: Receipt[] = expandReceiptDocs(toLegacyDocs(ownerDocs));
           if (legacyItems.length > 0) {
             setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
           }
+          legacyMergedRef.current = true;
           shardModeRef.current = false;
           hasLoadedFirstShardRef.current = true;
         } else {
@@ -493,14 +504,23 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [authLoading, expandReceiptDocs, mergeIncomingReceipts, isFirebaseReady, firebaseUID, hasMore]);
+  }, [authLoading, expandReceiptDocs, mergeIncomingReceipts, isFirebaseReady, firebaseUID, hasMore, fetchOwnerReceiptDocs, toLegacyDocs, toShardCatalog]);
 
   const refreshLatest = useCallback(async () => {
     if (authLoading || !tokenRef.current || !userEmailRef.current || isLoadingMoreRef.current || !isFirebaseReady || !firebaseUID) return;
 
     try {
       if (shardModeRef.current !== false) {
-        const shardCatalog = await buildShardCatalog();
+        const ownerDocs = await fetchOwnerReceiptDocs();
+        const shardCatalog = toShardCatalog(ownerDocs);
+        const legacyDocs = toLegacyDocs(ownerDocs);
+        if (legacyDocs.length > 0) {
+          const legacyItems: Receipt[] = expandReceiptDocs(legacyDocs);
+          if (legacyItems.length > 0) {
+            setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
+          }
+          legacyMergedRef.current = true;
+        }
         if (shardCatalog.length > 0) {
           shardCatalogRef.current = shardCatalog;
           nextShardListIndexRef.current = 1;
@@ -516,22 +536,15 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       }
 
       // Legacy fallback refresh.
-      const legacySnapshot = await getDocs(
-        query(
-          collection(db, "receipts"),
-          where("owner_email", "==", userEmailRef.current),
-        )
-      );
-      const legacyItems: Receipt[] = expandReceiptDocs(
-        legacySnapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
-      );
+      const legacyItems: Receipt[] = expandReceiptDocs(toLegacyDocs(await fetchOwnerReceiptDocs()));
       if (legacyItems.length > 0) {
         setReceipts((prev) => mergeIncomingReceipts(prev, legacyItems));
       }
+      legacyMergedRef.current = true;
     } catch {
       // no-op; keep existing list
     }
-  }, [authLoading, expandReceiptDocs, mergeIncomingReceipts, isFirebaseReady, firebaseUID]);
+  }, [authLoading, expandReceiptDocs, mergeIncomingReceipts, isFirebaseReady, firebaseUID, fetchOwnerReceiptDocs, toLegacyDocs, toShardCatalog]);
 
   useEffect(() => {
     const wasPaused = wasPollingPausedRef.current;
