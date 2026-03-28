@@ -40,12 +40,29 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [localDownloadPending, setLocalDownloadPending] = useState(false);
   const [signedImageUrl, setSignedImageUrl] = useState<string | null>(null);
   const { categories } = useCategoryApi();
+  const mirroredMetadataFields = useCallback(
+    (updates: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(updates).filter(([key]) =>
+          ["vendor", "subtotal", "tax", "total", "category", "purchase_date"].includes(key)
+        )
+      ),
+    []
+  );
 
   const updateReceiptInFirestore = useCallback(async (updates: Record<string, unknown>) => {
     if (receipt.shard_doc_id) {
+      const detailRef = doc(db, "receipts", receipt.shard_doc_id, "details", receipt.id);
+      await updateDoc(detailRef, updates);
+
+      const summaryUpdates = mirroredMetadataFields(updates);
+      if (Object.keys(summaryUpdates).length === 0) {
+        return;
+      }
+
       const shardRef = doc(db, "receipts", receipt.shard_doc_id);
       await Promise.all(
-        Object.entries(updates).map(([key, value]) =>
+        Object.entries(summaryUpdates).map(([key, value]) =>
           updateDoc(shardRef, new FieldPath("receipt_metadata", receipt.id, key), value)
         )
       );
@@ -53,7 +70,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     }
 
     await updateDoc(doc(db, "receipts", receipt.id), updates);
-  }, [receipt.id, receipt.shard_doc_id]);
+  }, [mirroredMetadataFields, receipt.id, receipt.shard_doc_id]);
 
   const fetchSignedImageUrl = useCallback(async (receiptID: string): Promise<string | null> => {
     try {
