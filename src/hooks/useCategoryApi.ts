@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { FieldPath, addDoc, collection, deleteField, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore/lite";
+import { FieldPath, addDoc, collection, deleteField, doc, getDocs, query, updateDoc, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
 export interface Category {
@@ -53,7 +53,6 @@ export function useCategoryApi() {
         const data = d.data() as Record<string, unknown>;
         const categoriesMap = data.categories as { [key: string]: unknown } | undefined;
 
-        // New structure: one owner doc with categories map.
         if (categoriesMap && typeof categoriesMap === "object" && !Array.isArray(categoriesMap)) {
           if (!containerDocId) containerDocId = d.id;
           return;
@@ -77,21 +76,6 @@ export function useCategoryApi() {
               items.push({ id: trimmedName, name: trimmedName, description });
             }
           });
-        }
-      });
-
-      // Legacy fallback categories not present in map docs.
-      docs.forEach((d) => {
-        const data = d.data() as Record<string, unknown>;
-        if (typeof data.name === "string" && data.name.trim()) {
-          const legacyName = data.name.trim();
-          if (!items.some((c) => c.name === legacyName)) {
-            items.push({
-              id: legacyName,
-              name: legacyName,
-              description: typeof data.description === "string" ? data.description : "",
-            });
-          }
         }
       });
       setCategories(items.sort((a, b) => a.name.localeCompare(b.name)));
@@ -164,7 +148,6 @@ export function useCategoryApi() {
 
     const containerDocId = categoriesContainerDocIdRef.current;
     if (!containerDocId) {
-      // No container doc yet; migrate into new structure by creating one.
       const created = await addDoc(collection(db, "categories"), {
         owner_email: userEmailRef.current.toLowerCase(),
         categories: {
@@ -205,9 +188,6 @@ export function useCategoryApi() {
         new FieldPath("categories", categoryName),
         deleteField()
       );
-    } else {
-      // Legacy fallback.
-      await deleteDoc(doc(db, "categories", id));
     }
     setCategories((prev) => prev.filter((c) => c.id !== id));
   };
