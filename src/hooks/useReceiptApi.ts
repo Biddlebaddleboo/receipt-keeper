@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
-import { collection, doc, getDoc, getDocs, limit, query, where } from "firebase/firestore/lite";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
 export interface ExtractedField {
@@ -200,6 +200,45 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return "";
   };
 
+  const toNumber = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  };
+
+  const toItems = (value: unknown): ReceiptItem[] => {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const record = entry as Record<string, unknown>;
+      const name = typeof record.name === "string" ? record.name : "";
+      const quantity = toNumber(record.quantity) ?? 0;
+      const price = toNumber(record.price) ?? 0;
+      return [{ name, quantity, price }];
+    });
+  };
+
+  const toExtractedFields = (value: unknown): ExtractedField[] => {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const record = entry as Record<string, unknown>;
+      if (typeof record.label !== "string" || typeof record.value !== "string") return [];
+      return [{ label: record.label, value: record.value }];
+    });
+  };
+
+  const getAiSuggestions = (data: Record<string, unknown>) => {
+    const extractedFields = data.extracted_fields;
+    if (!extractedFields || typeof extractedFields !== "object" || Array.isArray(extractedFields)) return null;
+    const aiSuggestions = (extractedFields as Record<string, unknown>).ai_suggestions;
+    if (!aiSuggestions || typeof aiSuggestions !== "object" || Array.isArray(aiSuggestions)) return null;
+    return aiSuggestions as Record<string, unknown>;
+  };
+
   const fromFirestoreDoc = useCallback((id: string, data: Record<string, unknown>): Receipt => {
     return normalizeReceipt({
       id,
@@ -233,6 +272,85 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       items: Array.isArray(raw.items) ? (raw.items as ReceiptItem[]) : [],
       created_at: toISOString(raw.created_at),
       image_url: typeof raw.image_url === "string" ? raw.image_url : undefined,
+      status: "success",
+      shard_doc_id: shardDocId,
+    });
+  }, [normalizeReceipt]);
+
+  const fromShardDetailDoc = useCallback((
+    shardDocId: string,
+    receiptId: string,
+    metadata: Record<string, unknown>,
+    detailData: Record<string, unknown>
+  ): Receipt => {
+    const aiSuggestions = getAiSuggestions(detailData);
+    const items =
+      toItems(metadata.items).length > 0
+        ? toItems(metadata.items)
+        : toItems(detailData.items).length > 0
+          ? toItems(detailData.items)
+          : toItems(aiSuggestions?.items);
+    const extractedFields =
+      toExtractedFields(metadata.extracted_fields).length > 0
+        ? toExtractedFields(metadata.extracted_fields)
+        : toExtractedFields(detailData.extracted_fields);
+
+    return normalizeReceipt({
+      id: receiptId,
+      vendor:
+        typeof metadata.vendor === "string"
+          ? metadata.vendor
+          : typeof detailData.vendor === "string"
+            ? detailData.vendor
+            : typeof aiSuggestions?.vendor === "string"
+              ? aiSuggestions.vendor
+              : "",
+      subtotal:
+        toNumber(metadata.subtotal)
+        ?? toNumber(detailData.subtotal)
+        ?? toNumber(aiSuggestions?.subtotal)
+        ?? 0,
+      tax:
+        toNumber(metadata.tax)
+        ?? toNumber(detailData.tax)
+        ?? toNumber(aiSuggestions?.tax)
+        ?? 0,
+      total:
+        toNumber(metadata.total)
+        ?? toNumber(detailData.total)
+        ?? toNumber(aiSuggestions?.total)
+        ?? 0,
+      category:
+        typeof metadata.category === "string"
+          ? metadata.category
+          : typeof detailData.category === "string"
+            ? detailData.category
+            : typeof aiSuggestions?.category === "string"
+              ? aiSuggestions.category
+              : "",
+      purchase_date:
+        typeof metadata.purchase_date === "string"
+          ? metadata.purchase_date
+          : typeof detailData.purchase_date === "string"
+            ? detailData.purchase_date
+            : typeof aiSuggestions?.purchase_date === "string"
+              ? aiSuggestions.purchase_date
+              : "",
+      extracted_text:
+        typeof metadata.extracted_text === "string"
+          ? metadata.extracted_text
+          : typeof detailData.extracted_text === "string"
+            ? detailData.extracted_text
+            : "",
+      extracted_fields: extractedFields,
+      items,
+      created_at: toISOString(metadata.created_at || detailData.created_at),
+      image_url:
+        typeof metadata.image_url === "string"
+          ? metadata.image_url
+          : typeof detailData.image_url === "string"
+            ? detailData.image_url
+            : undefined,
       status: "success",
       shard_doc_id: shardDocId,
     });
@@ -404,35 +522,34 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     if (authLoading || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return null;
 
     try {
-      // Legacy structure: one receipt per document.
-      const receiptRef = doc(db, "receipts", id);
-      const snapshot = await getDoc(receiptRef);
-      if (snapshot.exists()) {
-        const data = snapshot.data() as Record<string, unknown>;
-        if ((typeof data.owner_email === "string" ? data.owner_email : "") !== userEmailRef.current) return null;
+      const ownerDocs = await fetchOwnerReceiptDocs();
+
+      const legacyDoc = ownerDocs.find(({ id: docId, data }) => {
         const schema = typeof data._schema === "string" ? data._schema : "";
-        if (schema !== "receipt_shard") {
-          return fromFirestoreDoc(snapshot.id, data);
-        }
+        return schema !== "receipt_shard" && docId === id;
+      });
+      if (legacyDoc) {
+        return fromFirestoreDoc(legacyDoc.id, legacyDoc.data);
       }
 
-      // New structure: receipt metadata entries inside shard docs.
-      const shardSnapshot = await getDocs(
-        query(
-          collection(db, "receipts"),
-          where("owner_email", "==", userEmailRef.current),
-          limit(25)
-        )
-      );
-
-      for (const shardDoc of shardSnapshot.docs) {
-        const data = shardDoc.data() as Record<string, unknown>;
-        const schema = typeof data._schema === "string" ? data._schema : "";
+      for (const shardDoc of ownerDocs) {
+        const schema = typeof shardDoc.data._schema === "string" ? shardDoc.data._schema : "";
         if (schema !== "receipt_shard") continue;
-        const receiptMetadata = data.receipt_metadata as { [key: string]: unknown } | undefined;
+        const receiptMetadata = shardDoc.data.receipt_metadata as { [key: string]: unknown } | undefined;
         if (!receiptMetadata || typeof receiptMetadata !== "object" || Array.isArray(receiptMetadata)) continue;
         const rawMeta = receiptMetadata[id];
         if (!rawMeta || typeof rawMeta !== "object" || Array.isArray(rawMeta)) continue;
+
+        const detailSnapshot = await getDoc(doc(db, "receipts", shardDoc.id, "details", id));
+        if (detailSnapshot.exists()) {
+          return fromShardDetailDoc(
+            shardDoc.id,
+            id,
+            rawMeta as Record<string, unknown>,
+            detailSnapshot.data() as Record<string, unknown>
+          );
+        }
+
         return fromShardMetadataEntry(shardDoc.id, id, rawMeta as Record<string, unknown>);
       }
 
@@ -440,7 +557,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     } catch {
       return null;
     }
-  }, [authLoading, fromFirestoreDoc, fromShardMetadataEntry, isFirebaseReady, firebaseUID]);
+  }, [authLoading, fetchOwnerReceiptDocs, fromFirestoreDoc, fromShardDetailDoc, fromShardMetadataEntry, isFirebaseReady, firebaseUID]);
 
   const loadNextPage = useCallback(async () => {
     if (authLoading || isLoadingMoreRef.current || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return;
