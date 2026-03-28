@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { Receipt } from "@/hooks/useReceiptApi";
 import { ReceiptCard } from "./ReceiptCard";
 import { ReceiptText, Loader2 } from "lucide-react";
@@ -14,22 +14,6 @@ interface ReceiptListProps {
 export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoadingMore, onLoadMore }: ReceiptListProps) {
   const dateKeys = Object.keys(receiptsByDate);
   const sentinelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!hasMore || !onLoadMore) return;
-    const el = sentinelRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMore) {
-          onLoadMore();
-        }
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, isLoadingMore, onLoadMore]);
 
   if (dateKeys.length === 0) {
     return (
@@ -76,9 +60,16 @@ export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoading
       })}
 
       <div ref={sentinelRef} className="flex justify-center py-4">
-        {isLoadingMore && (
+        {isLoadingMore ? (
           <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-        )}
+        ) : hasMore && onLoadMore ? (
+          <button
+            onClick={onLoadMore}
+            className="px-4 py-2 rounded-md text-sm font-medium bg-secondary hover:bg-secondary/80 transition-colors active:scale-95"
+          >
+            Look for more receipts
+          </button>
+        ) : null}
       </div>
     </div>
   );
