@@ -13,7 +13,6 @@ interface ReceiptDetailProps {
   onClose: () => void;
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
-  fetchReceipt: (id: string) => Promise<Receipt | null>;
 }
 
 const statusConfig = {
@@ -30,9 +29,8 @@ interface EditingItem {
   price: string;
 }
 
-export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
+export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry }: ReceiptDetailProps) {
   const [receipt, setReceipt] = useState(initialReceipt);
-  const [loading, setLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -114,49 +112,8 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   }, [receipt.id, onRemove, onClose]);
 
   useEffect(() => {
-    if (initialReceipt.status !== "success") {
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    let timerId: number | null = null;
-    let missCount = 0;
-
-    const refreshDetail = async (showLoader: boolean) => {
-      if (showLoader) setLoading(true);
-      const data = await fetchReceipt(initialReceipt.id);
-      if (!cancelled && data) {
-        missCount = 0;
-        setReceipt(data);
-      }
-      if (!cancelled && !data) {
-        missCount += 1;
-      }
-      if (!cancelled && showLoader) setLoading(false);
-
-      // Stop polling when receipt cannot be found repeatedly (ex: unsaved local id).
-      if (!cancelled && missCount >= 2 && timerId) {
-        window.clearInterval(timerId);
-        timerId = null;
-      }
-    };
-
-    const tick = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      refreshDetail(false);
-    };
-
-    refreshDetail(true);
-    timerId = window.setInterval(tick, 5_000);
-    document.addEventListener("visibilitychange", tick);
-
-    return () => {
-      cancelled = true;
-      if (timerId) window.clearInterval(timerId);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [initialReceipt.id, initialReceipt.status, fetchReceipt]);
+    setReceipt(initialReceipt);
+  }, [initialReceipt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -306,12 +263,6 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        {loading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-        )}
-
         {imageUrl && (
           <div className="aspect-[3/4] max-h-[50vh] bg-muted overflow-hidden">
             <img

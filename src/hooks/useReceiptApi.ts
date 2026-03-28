@@ -55,8 +55,13 @@ export interface Receipt {
   errorMessage?: string;
 }
 
-export function useReceiptApi() {
+interface UseReceiptApiOptions {
+  pollingPaused?: boolean;
+}
+
+export function useReceiptApi(options?: UseReceiptApiOptions) {
   const RECEIPTS_PAGE_SIZE = 10;
+  const pollingPaused = options?.pollingPaused ?? false;
   const { token, user, isLoading: authLoading, firebaseUID, isFirebaseReady } = useAuth();
   const tokenRef = useRef(token);
   useEffect(() => {
@@ -411,6 +416,7 @@ export function useReceiptApi() {
   }, [authLoading, fromFirestoreDoc, mergeIncomingReceipts, isFirebaseReady, firebaseUID]);
 
   useEffect(() => {
+    if (pollingPaused) return;
     if (authLoading || !tokenRef.current || !isFirebaseReady || !firebaseUID) return;
 
     const tick = () => {
@@ -427,7 +433,7 @@ export function useReceiptApi() {
       pollTimerRef.current = null;
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [authLoading, token, refreshLatest, isFirebaseReady, firebaseUID]);
+  }, [pollingPaused, authLoading, token, refreshLatest, isFirebaseReady, firebaseUID]);
 
   useEffect(() => {
     const handleCategoryUpdated = (event: Event) => {

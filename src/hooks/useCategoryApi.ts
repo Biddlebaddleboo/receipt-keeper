@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { addDoc, collection, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore/lite";
+import { FieldPath, addDoc, collection, deleteField, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
 export interface Category {
@@ -24,6 +24,7 @@ export function useCategoryApi() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const categoriesContainerDocIdRef = useRef<string | null>(null);
 
   const fetchCategories = useCallback(async () => {
     if (!tokenRef.current || !isFirebaseReady || !firebaseUID || !userEmailRef.current) return;
@@ -31,19 +32,68 @@ export function useCategoryApi() {
     setIsLoading(true);
     setError(null);
     try {
-      const snapshot = await getDocs(
-        query(collection(db, "categories"), where("owner_email", "==", userEmailRef.current))
+      const authEmail = (userEmailRef.current || "").trim();
+      const normalizedEmail = authEmail.toLowerCase();
+      const snapshots = [];
+      snapshots.push(
+        await getDocs(query(collection(db, "categories"), where("owner_email", "==", authEmail)))
       );
-      const items: Category[] = snapshot.docs
-        .map((d) => {
-          const data = d.data() as Record<string, unknown>;
-          return {
-            id: d.id,
-            name: typeof data.name === "string" ? data.name : "",
-            description: typeof data.description === "string" ? data.description : "",
-          };
-        })
-        .filter((c) => c.name.trim() !== "");
+      if (normalizedEmail && normalizedEmail !== authEmail) {
+        snapshots.push(
+          await getDocs(query(collection(db, "categories"), where("owner_email", "==", normalizedEmail)))
+        );
+      }
+
+      const docsById = new Map<string, (typeof snapshots)[number]["docs"][number]>();
+      snapshots.forEach((snap) => snap.docs.forEach((d) => docsById.set(d.id, d)));
+      const docs = Array.from(docsById.values());
+      let containerDocId: string | null = null;
+
+      docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const categoriesMap = data.categories as { [key: string]: unknown } | undefined;
+
+        // New structure: one owner doc with categories map.
+        if (categoriesMap && typeof categoriesMap === "object" && !Array.isArray(categoriesMap)) {
+          if (!containerDocId) containerDocId = d.id;
+          return;
+        }
+      });
+
+      categoriesContainerDocIdRef.current = containerDocId;
+      const items: Category[] = [];
+      docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const categoriesMap = data.categories as { [key: string]: unknown } | undefined;
+        if (categoriesMap && typeof categoriesMap === "object" && !Array.isArray(categoriesMap)) {
+          Object.entries(categoriesMap).forEach(([name, rawDescription]) => {
+            const trimmedName = name.trim();
+            if (!trimmedName) return;
+            const description = typeof rawDescription === "string" ? rawDescription : "";
+            const existingIndex = items.findIndex((c) => c.name === trimmedName);
+            if (existingIndex >= 0) {
+              items[existingIndex] = { id: trimmedName, name: trimmedName, description };
+            } else {
+              items.push({ id: trimmedName, name: trimmedName, description });
+            }
+          });
+        }
+      });
+
+      // Legacy fallback categories not present in map docs.
+      docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        if (typeof data.name === "string" && data.name.trim()) {
+          const legacyName = data.name.trim();
+          if (!items.some((c) => c.name === legacyName)) {
+            items.push({
+              id: legacyName,
+              name: legacyName,
+              description: typeof data.description === "string" ? data.description : "",
+            });
+          }
+        }
+      });
       setCategories(items.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load categories");
@@ -68,16 +118,32 @@ export function useCategoryApi() {
       throw new Error("Not authenticated");
     }
 
-    const payload = {
-      name: name.trim(),
-      description: description.trim(),
-      owner_email: userEmailRef.current,
-    };
-    const created = await addDoc(collection(db, "categories"), payload);
+    const categoryName = name.trim();
+    if (!categoryName) throw new Error("Category name is required");
+    const categoryDescription = description.trim();
+    const categoryValue: string | null = categoryDescription ? categoryDescription : null;
+
+    const containerDocId = categoriesContainerDocIdRef.current;
+    if (containerDocId) {
+      await updateDoc(
+        doc(db, "categories", containerDocId),
+        new FieldPath("categories", categoryName),
+        categoryValue
+      );
+    } else {
+      const created = await addDoc(collection(db, "categories"), {
+        owner_email: userEmailRef.current.toLowerCase(),
+        categories: {
+          [categoryName]: categoryValue,
+        },
+      });
+      categoriesContainerDocIdRef.current = created.id;
+    }
+
     const newCat: Category = {
-      id: created.id,
-      name: payload.name,
-      description: payload.description,
+      id: categoryName,
+      name: categoryName,
+      description: categoryDescription,
     };
     setCategories((prev) => [...prev, newCat].sort((a, b) => a.name.localeCompare(b.name)));
     return newCat;
@@ -88,17 +154,40 @@ export function useCategoryApi() {
       throw new Error("Not authenticated");
     }
 
-    const updatePayload: Record<string, unknown> = {
-      owner_email: userEmailRef.current,
-    };
-    if (typeof updates.name === "string") updatePayload.name = updates.name.trim();
-    if (typeof updates.description === "string") updatePayload.description = updates.description.trim();
+    const oldName = id.trim();
+    const nextName = typeof updates.name === "string" ? updates.name.trim() : oldName;
+    if (!oldName || !nextName) throw new Error("Category name is required");
+    const existingCategory = categories.find((c) => c.id === id || c.name === oldName);
+    const nextDescription =
+      typeof updates.description === "string" ? updates.description.trim() : (existingCategory?.description ?? "");
+    const nextValue: string | null = nextDescription ? nextDescription : null;
 
-    await updateDoc(doc(db, "categories", id), updatePayload);
+    const containerDocId = categoriesContainerDocIdRef.current;
+    if (!containerDocId) {
+      // No container doc yet; migrate into new structure by creating one.
+      const created = await addDoc(collection(db, "categories"), {
+        owner_email: userEmailRef.current.toLowerCase(),
+        categories: {
+          [nextName]: nextValue,
+        },
+      });
+      categoriesContainerDocIdRef.current = created.id;
+    } else if (oldName !== nextName) {
+      const containerRef = doc(db, "categories", containerDocId);
+      await updateDoc(containerRef, new FieldPath("categories", oldName), deleteField());
+      await updateDoc(containerRef, new FieldPath("categories", nextName), nextValue);
+    } else {
+      await updateDoc(
+        doc(db, "categories", containerDocId),
+        new FieldPath("categories", nextName),
+        nextValue
+      );
+    }
+
     const updated: Category = {
-      id,
-      name: typeof updatePayload.name === "string" ? updatePayload.name : "",
-      description: typeof updatePayload.description === "string" ? updatePayload.description : "",
+      id: nextName,
+      name: nextName,
+      description: nextDescription,
     };
     setCategories((prev) =>
       prev.map((c) => (c.id === id ? updated : c)).sort((a, b) => a.name.localeCompare(b.name))
@@ -108,8 +197,18 @@ export function useCategoryApi() {
 
   const deleteCategory = async (id: string) => {
     if (!tokenRef.current || !isFirebaseReady || !firebaseUID) throw new Error("Not authenticated");
-
-    await deleteDoc(doc(db, "categories", id));
+    const categoryName = id.trim();
+    const containerDocId = categoriesContainerDocIdRef.current;
+    if (containerDocId) {
+      await updateDoc(
+        doc(db, "categories", containerDocId),
+        new FieldPath("categories", categoryName),
+        deleteField()
+      );
+    } else {
+      // Legacy fallback.
+      await deleteDoc(doc(db, "categories", id));
+    }
     setCategories((prev) => prev.filter((c) => c.id !== id));
   };
 

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
 import { AddReceiptForm } from "@/components/AddReceiptForm";
-import { useReceiptApi, Receipt } from "@/hooks/useReceiptApi";
+import { useReceiptApi } from "@/hooks/useReceiptApi";
 import { useAuth } from "@/contexts/AuthContext";
 import { ScanLine, Plus, Settings, LogOut } from "lucide-react";
 import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
@@ -11,10 +11,11 @@ import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
 const Index = () => {
   const { token, isLoading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
-  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage } =
-    useReceiptApi();
-  const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const shouldPausePolling = Boolean(selectedReceiptId) || showAddForm;
+  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, loadNextPage } =
+    useReceiptApi({ pollingPaused: shouldPausePolling });
   const didInitialLoadRef = useRef(false);
 
   useEffect(() => {
@@ -33,6 +34,9 @@ const Index = () => {
   }, [authLoading, token, loadNextPage]);
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.total, 0);
+  const selectedReceipt = selectedReceiptId
+    ? receipts.find((receipt) => receipt.id === selectedReceiptId) ?? null
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -72,7 +76,7 @@ const Index = () => {
       <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
         <ReceiptList
           receiptsByDate={receiptsByDate}
-          onReceiptClick={setSelectedReceipt}
+          onReceiptClick={(receipt) => setSelectedReceiptId(receipt.id)}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
           onLoadMore={loadNextPage}
@@ -91,10 +95,9 @@ const Index = () => {
       {selectedReceipt && (
         <ReceiptDetail
           receipt={selectedReceipt}
-          onClose={() => setSelectedReceipt(null)}
+          onClose={() => setSelectedReceiptId(null)}
           onRemove={removeReceipt}
           onRetry={retryUpload}
-          fetchReceipt={fetchReceipt}
         />
       )}
 
