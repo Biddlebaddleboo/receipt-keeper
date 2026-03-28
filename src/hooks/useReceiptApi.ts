@@ -285,71 +285,71 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   ): Receipt => {
     const aiSuggestions = getAiSuggestions(detailData);
     const items =
-      toItems(metadata.items).length > 0
-        ? toItems(metadata.items)
-        : toItems(detailData.items).length > 0
-          ? toItems(detailData.items)
+      toItems(detailData.items).length > 0
+        ? toItems(detailData.items)
+        : toItems(metadata.items).length > 0
+          ? toItems(metadata.items)
           : toItems(aiSuggestions?.items);
     const extractedFields =
-      toExtractedFields(metadata.extracted_fields).length > 0
-        ? toExtractedFields(metadata.extracted_fields)
-        : toExtractedFields(detailData.extracted_fields);
+      toExtractedFields(detailData.extracted_fields).length > 0
+        ? toExtractedFields(detailData.extracted_fields)
+        : toExtractedFields(metadata.extracted_fields);
 
     return normalizeReceipt({
       id: receiptId,
       vendor:
-        typeof metadata.vendor === "string"
-          ? metadata.vendor
-          : typeof detailData.vendor === "string"
-            ? detailData.vendor
+        typeof detailData.vendor === "string"
+          ? detailData.vendor
+          : typeof metadata.vendor === "string"
+            ? metadata.vendor
             : typeof aiSuggestions?.vendor === "string"
               ? aiSuggestions.vendor
               : "",
       subtotal:
-        toNumber(metadata.subtotal)
-        ?? toNumber(detailData.subtotal)
+        toNumber(detailData.subtotal)
+        ?? toNumber(metadata.subtotal)
         ?? toNumber(aiSuggestions?.subtotal)
         ?? 0,
       tax:
-        toNumber(metadata.tax)
-        ?? toNumber(detailData.tax)
+        toNumber(detailData.tax)
+        ?? toNumber(metadata.tax)
         ?? toNumber(aiSuggestions?.tax)
         ?? 0,
       total:
-        toNumber(metadata.total)
-        ?? toNumber(detailData.total)
+        toNumber(detailData.total)
+        ?? toNumber(metadata.total)
         ?? toNumber(aiSuggestions?.total)
         ?? 0,
       category:
-        typeof metadata.category === "string"
-          ? metadata.category
-          : typeof detailData.category === "string"
-            ? detailData.category
+        typeof detailData.category === "string"
+          ? detailData.category
+          : typeof metadata.category === "string"
+            ? metadata.category
             : typeof aiSuggestions?.category === "string"
               ? aiSuggestions.category
               : "",
       purchase_date:
-        typeof metadata.purchase_date === "string"
-          ? metadata.purchase_date
-          : typeof detailData.purchase_date === "string"
-            ? detailData.purchase_date
+        typeof detailData.purchase_date === "string"
+          ? detailData.purchase_date
+          : typeof metadata.purchase_date === "string"
+            ? metadata.purchase_date
             : typeof aiSuggestions?.purchase_date === "string"
               ? aiSuggestions.purchase_date
               : "",
       extracted_text:
-        typeof metadata.extracted_text === "string"
-          ? metadata.extracted_text
-          : typeof detailData.extracted_text === "string"
-            ? detailData.extracted_text
+        typeof detailData.extracted_text === "string"
+          ? detailData.extracted_text
+          : typeof metadata.extracted_text === "string"
+            ? metadata.extracted_text
             : "",
       extracted_fields: extractedFields,
       items,
-      created_at: toISOString(metadata.created_at || detailData.created_at),
+      created_at: toISOString(detailData.created_at || metadata.created_at),
       image_url:
-        typeof metadata.image_url === "string"
-          ? metadata.image_url
-          : typeof detailData.image_url === "string"
-            ? detailData.image_url
+        typeof detailData.image_url === "string"
+          ? detailData.image_url
+          : typeof metadata.image_url === "string"
+            ? metadata.image_url
             : undefined,
       status: "success",
       shard_doc_id: shardDocId,
