@@ -51,25 +51,24 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   );
 
   const updateReceiptInFirestore = useCallback(async (updates: Record<string, unknown>) => {
-    if (receipt.shard_doc_id) {
-      const detailRef = doc(db, "receipts", receipt.shard_doc_id, "details", receipt.id);
-      await updateDoc(detailRef, updates);
+    if (!receipt.shard_doc_id) {
+      throw new Error("Receipt is missing shard_doc_id");
+    }
 
-      const summaryUpdates = mirroredMetadataFields(updates);
-      if (Object.keys(summaryUpdates).length === 0) {
-        return;
-      }
+    const detailRef = doc(db, "receipts", receipt.shard_doc_id, "details", receipt.id);
+    await updateDoc(detailRef, updates);
 
-      const shardRef = doc(db, "receipts", receipt.shard_doc_id);
-      await Promise.all(
-        Object.entries(summaryUpdates).map(([key, value]) =>
-          updateDoc(shardRef, new FieldPath("receipt_metadata", receipt.id, key), value)
-        )
-      );
+    const summaryUpdates = mirroredMetadataFields(updates);
+    if (Object.keys(summaryUpdates).length === 0) {
       return;
     }
 
-    await updateDoc(doc(db, "receipts", receipt.id), updates);
+    const shardRef = doc(db, "receipts", receipt.shard_doc_id);
+    await Promise.all(
+      Object.entries(summaryUpdates).map(([key, value]) =>
+        updateDoc(shardRef, new FieldPath("receipt_metadata", receipt.id, key), value)
+      )
+    );
   }, [mirroredMetadataFields, receipt.id, receipt.shard_doc_id]);
 
   const fetchSignedImageUrl = useCallback(async (receiptID: string): Promise<string | null> => {
