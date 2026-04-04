@@ -24,7 +24,7 @@ const loadFFmpeg = async () => {
       import("@ffmpeg/util"),
     ]);
 
-    const ffmpeg = new FFmpeg() as FFmpegInstance;
+    const ffmpeg = new FFmpeg() as unknown as FFmpegInstance;
     if (!ffmpeg.loaded) {
       await ffmpeg.load({ coreURL, wasmURL });
     }
