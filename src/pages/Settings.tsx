@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Check, Zap, Gift } from "lucide-react";
+import { ArrowLeft, ChevronRight, Tags, Moon, Sun, Check, Zap, Gift, Trash2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -312,6 +312,26 @@ const Settings = () => {
                 <span className="text-xs text-muted-foreground">Manage receipt categories</span>
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
+            </button>
+          </div>
+        </div>
+
+        {/* Account */}
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">Account</h2>
+          <div className="space-y-1">
+            <button
+              onClick={() => navigate("/settings/delete-account")}
+              className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-lg bg-card hover:bg-destructive/10 receipt-shadow transition-all text-left group active:scale-[0.98]"
+            >
+              <div className="w-9 h-9 rounded-lg bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-4.5 h-4.5 text-destructive" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium block text-destructive">Delete Account</span>
+                <span className="text-xs text-muted-foreground">Permanently delete your account</span>
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-destructive transition-colors" />
             </button>
           </div>
         </div>
