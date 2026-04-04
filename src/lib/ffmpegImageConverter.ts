@@ -24,7 +24,7 @@ const loadFFmpeg = async () => {
       import("@ffmpeg/util"),
     ]);
 
-    const ffmpeg = new FFmpeg() as FFmpegInstance;
+    const ffmpeg = new FFmpeg() as unknown as FFmpegInstance;
     if (!ffmpeg.loaded) {
       await ffmpeg.load({ coreURL, wasmURL });
     }
@@ -78,7 +78,7 @@ export const convertReceiptImageFile = async (file: File): Promise<File> => {
     ]);
 
     const outputData = await ffmpeg.readFile(outputName);
-    const convertedBlob = new Blob([outputData], { type: "image/webp" });
+    const convertedBlob = new Blob([outputData as BlobPart], { type: "image/webp" });
     const convertedName = file.name.replace(/\.[^.]+$/, "") + ".webp";
     return new File([convertedBlob], convertedName, {
       type: "image/webp",
