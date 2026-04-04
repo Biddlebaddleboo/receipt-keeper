@@ -14,6 +14,7 @@ import TermsOfService from "./pages/TermsOfService.tsx";
 import PrivacyPolicy from "./pages/PrivacyPolicy.tsx";
 import BillingSuccess from "./pages/BillingSuccess.tsx";
 import BillingCancelled from "./pages/BillingCancelled.tsx";
+import DeleteAccount from "./pages/DeleteAccount.tsx";
 
 const queryClient = new QueryClient();
 
