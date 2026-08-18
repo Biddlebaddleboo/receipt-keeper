@@ -13,6 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CreditCard, AlertTriangle } from "lucide-react";
 import { PAYMENT_PAGE_URL, API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
+import { AIAccessSettings } from "@/components/AIAccessSettings";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -315,6 +316,8 @@ const Settings = () => {
             </button>
           </div>
         </div>
+
+        <AIAccessSettings />
 
         {/* Account */}
         <div>
