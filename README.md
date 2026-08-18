@@ -4,7 +4,7 @@ React + Vite frontend for receipt tracking with:
 
 - Google sign-in
 - Firebase Auth + Firestore (direct client reads/writes for user-scoped data)
-- Lightweight backend only for privileged operations (signed uploads/URLs, billing actions)
+- Lightweight backend for privileged operations (signed uploads/URLs, billing actions, AI access-token management)
 
 ## Links
 
@@ -30,6 +30,9 @@ React + Vite frontend for receipt tracking with:
   - Signed upload flow to GCS
   - Signed image URL generation
   - Billing activation and webhook-driven payment state
+  - Read-only AI access-token generation/status/revocation
+
+AI access tokens are never read from or written to Firestore by the frontend. The Settings UI uses the existing authenticated backend API, and the full token is returned only when generated or regenerated.
 
 ## Environment Variables
 
@@ -66,6 +69,8 @@ Current app behavior expects rules that:
 - keep `users` client read-only
 - keep billing-sensitive writes server-owned
 
+AI access does not require any additional client Firestore permissions because the `ai_access_tokens` collection is backend-owned.
+
 If categories are editable from frontend, rules should allow only:
 
 - `owner_email`
@@ -77,10 +82,11 @@ for category create/update.
 ## Key Paths
 
 - Main settings/subscription UI: [Settings.tsx](/C:/Users/John/Desktop/receipt-keeper-main/src/pages/Settings.tsx)
+- AI access settings: [AIAccessSettings.tsx](/C:/Users/John/Desktop/receipt-keeper-main/src/components/AIAccessSettings.tsx)
 - Receipt data hook: [useReceiptApi.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/hooks/useReceiptApi.ts)
 - Category data hook: [useCategoryApi.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/hooks/useCategoryApi.ts)
 - User plan hook: [useUserPlanApi.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/hooks/useUserPlanApi.ts)
 
 ## Status
 
-This frontend is optimized for a minimal-backend architecture: direct Firestore access for user-owned app data, with backend kept for security-critical operations only.
+This frontend is optimized for a minimal-backend architecture: direct Firestore access for normal user-owned app data, with backend kept for security-critical operations such as signed URLs, billing, and AI access-token management.
