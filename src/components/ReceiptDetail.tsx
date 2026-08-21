@@ -7,6 +7,7 @@ import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
+import { convertImageBlobToJpeg } from "@/lib/ffmpegImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
@@ -256,6 +257,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             </button>
           )}
           <button
+            aria-label="Download receipt"
             onClick={async () => {
               try {
                 setLocalDownloadPending(true);
@@ -263,8 +265,10 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                 if (!imageEndpoint) throw new Error("Signed URL not available");
                 const res = await fetch(imageEndpoint, { credentials: "omit" });
                 if (!res.ok) throw new Error("Download failed");
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
+                const sourceBlob = await res.blob();
+                const jpegBlob = await convertImageBlobToJpeg(sourceBlob);
+                if (jpegBlob.type !== "image/jpeg") throw new Error("Image conversion to JPEG failed");
+                const url = URL.createObjectURL(jpegBlob);
                 const a = document.createElement("a");
                 a.href = url;
                 a.download = `receipt-${receipt.vendor || receipt.id}.jpg`;

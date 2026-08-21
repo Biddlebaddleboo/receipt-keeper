@@ -6,6 +6,7 @@ import {
   receiptExportFilename,
   receiptExportZipFilename,
 } from "@/lib/receiptExport";
+import { createStoredZip } from "@/lib/zipStore";
 
 const receipt = (overrides: Partial<Receipt>): Receipt => ({
   id: "receipt-id",
@@ -94,11 +95,13 @@ describe("receipt export", () => {
       expect(source.type).toBe("image/webp");
       return jpeg();
     });
+    const progress: Array<{ percentage: number; completed: number; total: number; phase: string }> = [];
 
     const zip = await buildReceiptExportZip([receipt({ id: "one" }), receipt({ id: "two", vendor: "Second" })], {
       getImageUrl,
       fetchImage,
       convert,
+      onProgress: ({ percentage, completed, total, phase }) => progress.push({ percentage, completed, total, phase }),
     });
     expect(convert).toHaveBeenCalledTimes(2);
     const entries = await readZipEntries(zip);
@@ -107,7 +110,37 @@ describe("receipt export", () => {
       "2026-08-20 - Second.jpg",
     ]);
     expect(entries.every((entry) => entry.method === 0)).toBe(true);
+    expect(progress.some((item) => item.phase === "fetching")).toBe(true);
+    expect(progress.some((item) => item.phase === "converting")).toBe(true);
+    expect(progress.some((item) => item.phase === "packaging")).toBe(true);
+    expect(progress.at(-1)).toEqual({ percentage: 100, completed: 2, total: 2, phase: "complete" });
     expect(receiptExportZipFilename({ fromDate: "2026-08-01", toDate: "2026-08-20" })).toBe("receipts-2026-08-01-to-2026-08-20.zip");
+  });
+
+  it("passes JPEG parts directly to the ZIP Blob without a giant local-data buffer", async () => {
+    const imageBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const originalBlob = globalThis.Blob;
+    const capturedParts: BlobPart[][] = [];
+    class CapturingBlob extends originalBlob {
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        if (parts) capturedParts.push(parts);
+        super(parts, options);
+      }
+    }
+    vi.stubGlobal("Blob", CapturingBlob);
+
+    try {
+      const zip = createStoredZip([{ name: "receipt.jpg", data: imageBytes }]);
+      expect(zip.type).toBe("application/zip");
+      expect(capturedParts).toHaveLength(1);
+      expect(capturedParts[0]).toHaveLength(4);
+      expect(capturedParts[0][1]).toBe(imageBytes);
+      expect(capturedParts[0][0]).toBeInstanceOf(Uint8Array);
+      expect(capturedParts[0][2]).toBeInstanceOf(Uint8Array);
+      expect(capturedParts[0][3]).toBeInstanceOf(Uint8Array);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("does not produce a ZIP when conversion fails", async () => {

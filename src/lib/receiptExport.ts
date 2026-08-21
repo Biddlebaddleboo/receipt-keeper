@@ -8,10 +8,21 @@ export interface ReceiptExportFilters {
   categories?: readonly string[];
 }
 
+export type ReceiptExportPhase = "fetching" | "converting" | "packaging" | "complete";
+
+export interface ReceiptExportProgress {
+  completed: number;
+  total: number;
+  percentage: number;
+  phase: ReceiptExportPhase;
+  filename?: string;
+}
+
 export interface ReceiptExportOptions extends ReceiptExportFilters {
   getImageUrl: (receipt: Receipt) => Promise<string | null>;
   fetchImage?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   convert?: (blob: Blob) => Promise<Blob>;
+  onProgress?: (progress: ReceiptExportProgress) => void;
 }
 
 const receiptDate = (value: string): string | null => {
@@ -82,21 +93,55 @@ export const buildReceiptExportZip = async (receipts: Receipt[], options: Receip
   const fetchImage = options.fetchImage ?? fetch;
   const convert = options.convert ?? convertImageBlobToJpeg;
   const usedNames = new Map<string, number>();
+  const filenames = matchingReceipts.map((receipt) => receiptExportFilename(receipt, usedNames));
   const entries: StoredZipEntry[] = [];
+  const total = matchingReceipts.length;
+  const reportProgress = (completed: number, phase: ReceiptExportPhase, filename?: string, phaseFraction = 0) => {
+    const percentage = total === 0
+      ? phase === "complete" ? 100 : 0
+      : Math.min(100, Math.round(((completed + phaseFraction) / total) * 100));
+    options.onProgress?.({ completed, total, percentage, phase, filename });
+  };
 
-  for (const receipt of matchingReceipts) {
-    const imageUrl = await options.getImageUrl(receipt);
-    if (!imageUrl) throw new Error(`Signed image URL unavailable for ${receipt.id}`);
-    const response = await fetchImage(imageUrl, { credentials: "omit" });
-    if (!response.ok) throw new Error(`Failed to fetch receipt image (${response.status})`);
-    const source = await response.blob();
-    const jpeg = await convert(source);
-    if (jpeg.type.split(";", 1)[0].trim().toLowerCase() !== "image/jpeg") {
-      throw new Error("Receipt image conversion did not produce a JPEG");
-    }
-    const data = await readBlobBytes(jpeg);
-    entries.push({ name: receiptExportFilename(receipt, usedNames), data });
+  if (total === 0) {
+    reportProgress(0, "complete");
+    return createStoredZip(entries);
   }
 
-  return createStoredZip(entries);
+  reportProgress(0, "fetching", filenames[0], 0);
+  for (let index = 0; index < matchingReceipts.length; index += 1) {
+    const receipt = matchingReceipts[index];
+    const filename = filenames[index];
+    let response: Response | null = null;
+    let sourceBlob: Blob | null = null;
+    let jpegBlob: Blob | null = null;
+    try {
+      reportProgress(index, "fetching", filename, 0.05);
+      const imageUrl = await options.getImageUrl(receipt);
+      if (!imageUrl) throw new Error(`Signed image URL unavailable for ${receipt.id}`);
+      response = await fetchImage(imageUrl, { credentials: "omit" });
+      if (!response.ok) throw new Error(`Failed to fetch receipt image (${response.status})`);
+      sourceBlob = await response.blob();
+
+      reportProgress(index, "converting", filename, 0.5);
+      jpegBlob = await convert(sourceBlob);
+      if (jpegBlob.type.split(";", 1)[0].trim().toLowerCase() !== "image/jpeg") {
+        throw new Error("Receipt image conversion did not produce a JPEG");
+      }
+      const data = await readBlobBytes(jpegBlob);
+      entries.push({ name: filename, data });
+      reportProgress(index + 1, "packaging", filename);
+    } finally {
+      // The ZIP keeps only `data`; release the source and converted Blob
+      // references immediately after this receipt has been added.
+      response = null;
+      sourceBlob = null;
+      jpegBlob = null;
+    }
+  }
+
+  reportProgress(total, "packaging");
+  const zip = createStoredZip(entries);
+  reportProgress(total, "complete");
+  return zip;
 };

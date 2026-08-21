@@ -7,13 +7,22 @@ const textEncoder = new TextEncoder();
 
 // CRC-32 is required by the ZIP format. This writer intentionally supports
 // only stored (uncompressed) entries; JPEG data is already compressed.
+const crc32Table = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? (value >>> 1) ^ 0xedb88320 : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
 const crc32 = (data: Uint8Array): number => {
   let crc = 0xffffffff;
   for (const byte of data) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
+    crc = (crc >>> 8) ^ crc32Table[(crc ^ byte) & 0xff];
   }
   return (crc ^ 0xffffffff) >>> 0;
 };
@@ -30,21 +39,13 @@ const writeU32 = (target: Uint8Array, offset: number, value: number) => {
   target[offset + 3] = (value >>> 24) & 0xff;
 };
 
-const concat = (parts: Uint8Array[]): Uint8Array => {
-  const length = parts.reduce((total, part) => total + part.length, 0);
-  const output = new Uint8Array(length);
-  let offset = 0;
-  parts.forEach((part) => {
-    output.set(part, offset);
-    offset += part.length;
-  });
-  return output;
-};
-
 export const createStoredZip = (entries: StoredZipEntry[]): Blob => {
-  const localParts: Uint8Array[] = [];
+  // Keep each JPEG as its own Blob part. The browser can assemble these
+  // parts without an additional archive-sized concatenated allocation.
+  const zipParts: BlobPart[] = [];
   const centralParts: Uint8Array[] = [];
   let localOffset = 0;
+  let centralDirectorySize = 0;
 
   entries.forEach(({ name, data }) => {
     const filename = textEncoder.encode(name);
@@ -60,7 +61,7 @@ export const createStoredZip = (entries: StoredZipEntry[]): Blob => {
     writeU32(localHeader, 22, data.length);
     writeU16(localHeader, 26, filename.length);
     localHeader.set(filename, 30);
-    localParts.push(localHeader, data);
+    zipParts.push(localHeader, data);
 
     const centralHeader = new Uint8Array(46 + filename.length);
     writeU32(centralHeader, 0, 0x02014b50);
@@ -75,18 +76,17 @@ export const createStoredZip = (entries: StoredZipEntry[]): Blob => {
     writeU32(centralHeader, 42, localOffset);
     centralHeader.set(filename, 46);
     centralParts.push(centralHeader);
+    centralDirectorySize += centralHeader.length;
 
     localOffset += localHeader.length + data.length;
   });
 
-  const centralDirectory = concat(centralParts);
-  const localData = concat(localParts);
   const end = new Uint8Array(22);
   writeU32(end, 0, 0x06054b50);
   writeU16(end, 8, entries.length);
   writeU16(end, 10, entries.length);
-  writeU32(end, 12, centralDirectory.length);
-  writeU32(end, 16, localData.length);
+  writeU32(end, 12, centralDirectorySize);
+  writeU32(end, 16, localOffset);
 
-  return new Blob([localData, centralDirectory, end], { type: "application/zip" });
+  return new Blob([...zipParts, ...centralParts, end], { type: "application/zip" });
 };

@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CreditCard, ScanLine, Plus, Settings, LogOut, RefreshCw, Download, Loader2 } from "lucide-react";
 import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
-import { buildReceiptExportZip, filterReceiptsForExport, receiptExportZipFilename } from "@/lib/receiptExport";
+import { buildReceiptExportZip, filterReceiptsForExport, receiptExportZipFilename, type ReceiptExportProgress } from "@/lib/receiptExport";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
 import { toast } from "sonner";
 
@@ -28,6 +28,8 @@ const Index = () => {
   const [exportToDate, setExportToDate] = useState("");
   const [exportCategories, setExportCategories] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const [matchingReceiptCount, setMatchingReceiptCount] = useState<number | null>(null);
+  const [exportProgress, setExportProgress] = useState<ReceiptExportProgress | null>(null);
 
   const categoryOptions = useMemo(
     () => Array.from(new Set([...categories.map((category) => category.name), ...receipts.map((receipt) => receipt.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b)),
@@ -54,6 +56,11 @@ const Index = () => {
     ? receipts.find((receipt) => receipt.id === selectedReceiptId) ?? null
     : null;
 
+  const resetExportStatus = () => {
+    setMatchingReceiptCount(null);
+    setExportProgress(null);
+  };
+
   const downloadReceipts = async () => {
     if (exportFromDate && exportToDate && exportFromDate > exportToDate) {
       toast.error("From date must be on or before the to date");
@@ -61,6 +68,8 @@ const Index = () => {
     }
 
     setIsExporting(true);
+    setMatchingReceiptCount(null);
+    setExportProgress({ completed: 0, total: 0, percentage: 0, phase: "fetching" });
     try {
       const allReceipts = await fetchAllReceipts();
       const filters = {
@@ -69,13 +78,16 @@ const Index = () => {
         categories: exportCategories,
       };
       const matchingReceipts = filterReceiptsForExport(allReceipts, filters);
+      setMatchingReceiptCount(matchingReceipts.length);
       if (matchingReceipts.length === 0) {
         throw new Error("No receipts match the selected filters");
       }
+      setExportProgress({ completed: 0, total: matchingReceipts.length, percentage: 0, phase: "fetching" });
 
       const zip = await buildReceiptExportZip(matchingReceipts, {
         ...filters,
         getImageUrl: (receipt) => fetchSignedReceiptImageUrl(receipt.id),
+        onProgress: setExportProgress,
       });
       const url = URL.createObjectURL(zip);
       const anchor = document.createElement("a");
@@ -88,6 +100,7 @@ const Index = () => {
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
       toast.success(`Downloaded ${matchingReceipts.length} receipt${matchingReceipts.length === 1 ? "" : "s"}`);
     } catch (error) {
+      setExportProgress(null);
       toast.error(error instanceof Error ? error.message : "Failed to download receipts");
     } finally {
       setIsExporting(false);
@@ -157,7 +170,11 @@ const Index = () => {
               <input
                 type="date"
                 value={exportFromDate}
-                onChange={(event) => setExportFromDate(event.target.value)}
+                onChange={(event) => {
+                  setExportFromDate(event.target.value);
+                  resetExportStatus();
+                }}
+                disabled={isExporting}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
               />
             </label>
@@ -166,7 +183,11 @@ const Index = () => {
               <input
                 type="date"
                 value={exportToDate}
-                onChange={(event) => setExportToDate(event.target.value)}
+                onChange={(event) => {
+                  setExportToDate(event.target.value);
+                  resetExportStatus();
+                }}
+                disabled={isExporting}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
               />
             </label>
@@ -176,13 +197,45 @@ const Index = () => {
             <select
               multiple
               value={exportCategories}
-              onChange={(event) => setExportCategories(Array.from(event.target.selectedOptions, (option) => option.value))}
+              onChange={(event) => {
+                setExportCategories(Array.from(event.target.selectedOptions, (option) => option.value));
+                resetExportStatus();
+              }}
+              disabled={isExporting}
               aria-label="Receipt categories"
               className="mt-1 min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
             >
               {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
           </label>
+          {matchingReceiptCount !== null && (
+            <p className="mt-3 text-xs text-muted-foreground" role="status">
+              {matchingReceiptCount} matching receipt{matchingReceiptCount === 1 ? "" : "s"}
+            </p>
+          )}
+          {exportProgress && (
+            <div className="mt-3 space-y-1.5" aria-live="polite">
+              <div
+                className="h-2 w-full overflow-hidden rounded-full bg-secondary"
+                role="progressbar"
+                aria-label="Receipt export progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={exportProgress.percentage}
+              >
+                <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${exportProgress.percentage}%` }} />
+              </div>
+              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{exportProgress.percentage}% · {exportProgress.completed} of {exportProgress.total} receipts</span>
+                <span className="capitalize">{exportProgress.phase}</span>
+              </div>
+              {exportProgress.filename && (
+                <p className="truncate text-xs text-muted-foreground" title={exportProgress.filename}>
+                  {exportProgress.filename}
+                </p>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => void downloadReceipts()}

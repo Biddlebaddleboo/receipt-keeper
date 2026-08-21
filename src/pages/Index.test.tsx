@@ -65,7 +65,10 @@ describe("Index receipt export", () => {
     ];
     mocks.fetchAllReceipts.mockResolvedValue(allReceipts);
     mocks.filterReceiptsForExport.mockImplementation((receipts: unknown[]) => receipts);
-    mocks.buildReceiptExportZip.mockResolvedValue(new Blob(["zip"], { type: "application/zip" }));
+    mocks.buildReceiptExportZip.mockImplementation(async (_receipts: unknown[], options: { onProgress?: (progress: unknown) => void }) => {
+      options.onProgress?.({ completed: 2, total: 2, percentage: 100, phase: "complete" });
+      return new Blob(["zip"], { type: "application/zip" });
+    });
     mocks.receiptExportZipFilename.mockReturnValue("receipts.zip");
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   });
@@ -80,5 +83,7 @@ describe("Index receipt export", () => {
     expect(mocks.filterReceiptsForExport).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ id: "older-not-loaded" }),
     ]), expect.objectContaining({ categories: [] }));
+    expect(screen.getByText("2 matching receipts")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
   });
 });
