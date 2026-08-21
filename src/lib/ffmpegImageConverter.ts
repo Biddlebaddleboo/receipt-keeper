@@ -197,9 +197,9 @@ export const convertReceiptImageFile = async (file: File): Promise<File> => {
   });
 };
 
-export const JPEG_DOWNLOAD_QUALITY = 7;
+export const JPEG_DOWNLOAD_QUALITY = 2;
 
-/** Encode downloaded images as readable JPEGs without resizing the source. */
+/** Preserve the known-working pre-resize JPEG download command. */
 export const buildJpegConversionArguments = (inputName: string, outputName: string): string[] => [
   "-i",
   inputName,
@@ -209,15 +209,11 @@ export const buildJpegConversionArguments = (inputName: string, outputName: stri
   "mjpeg",
   "-q:v",
   String(JPEG_DOWNLOAD_QUALITY),
-  "-f",
-  "image2",
-  "-update",
-  "1",
   "-y",
   outputName,
 ];
 
-/** Convert a downloaded image to a real, size-limited JPEG. */
+/** Convert a downloaded image to a real JPEG. */
 export const convertImageBlobToJpeg = async (blob: Blob): Promise<Blob> =>
   convertImageBlob(blob, {
     outputExtension: "jpg",

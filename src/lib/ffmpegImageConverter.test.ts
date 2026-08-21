@@ -45,22 +45,27 @@ describe("download JPEG conversion", () => {
     mocks.off.mockImplementation(() => undefined);
   });
 
-  it("does not resize JPEG downloads", () => {
+  it("uses the exact pre-resize JPEG command", () => {
     const args = buildJpegConversionArguments("input.webp", "output.jpg");
 
-    expect(args).not.toContain("-vf");
-    expect(args.some((argument) => argument.includes("scale="))).toBe(false);
-    expect(args).toContain("-frames:v");
-    expect(args).toContain("-f");
-    expect(args).toContain("image2");
-    expect(args).toContain("-update");
-    expect(args).toContain("1");
+    expect(args).toEqual([
+      "-i",
+      "input.webp",
+      "-frames:v",
+      "1",
+      "-c:v",
+      "mjpeg",
+      "-q:v",
+      "2",
+      "-y",
+      "output.jpg",
+    ]);
   });
 
-  it("encodes downloaded JPEGs with MJPEG quality 7", async () => {
+  it("encodes downloaded JPEGs with MJPEG quality 2", async () => {
     const output = await convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" }));
 
-    expect(JPEG_DOWNLOAD_QUALITY).toBe(7);
+    expect(JPEG_DOWNLOAD_QUALITY).toBe(2);
     expect(output.type).toBe("image/jpeg");
     const args = mocks.exec.mock.calls[0]?.[0] as string[];
     expect(args).toEqual(expect.arrayContaining([
@@ -69,13 +74,11 @@ describe("download JPEG conversion", () => {
       "-c:v",
       "mjpeg",
       "-q:v",
-      "7",
-      "-f",
-      "image2",
-      "-update",
-      "1",
+      "2",
     ]));
     expect(args).not.toContain("-vf");
+    expect(args).not.toContain("-f");
+    expect(args).not.toContain("-update");
     expect(args.some((argument) => argument.includes("scale="))).toBe(false);
     expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
     expect(mocks.on).toHaveBeenCalledTimes(1);
