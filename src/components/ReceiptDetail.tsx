@@ -46,6 +46,8 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [editValue, setEditValue] = useState("");
   const [localDownloadPending, setLocalDownloadPending] = useState(false);
   const [imageEditPending, setImageEditPending] = useState<"crop" | "replace" | null>(null);
+  const [cropPreviewFile, setCropPreviewFile] = useState<File | null>(null);
+  const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null);
   const [signedImageUrl, setSignedImageUrl] = useState<string | null>(null);
   const { categories } = useCategoryApi();
   const mirroredMetadataFields = useCallback(
@@ -96,6 +98,17 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     setSignedImageUrl(freshUrl);
   }, [fetchReceipt, fetchSignedImageUrl, receipt.id]);
 
+  const clearCropPreview = useCallback(() => {
+    setCropPreviewFile(null);
+    setCropPreviewUrl(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cropPreviewUrl) URL.revokeObjectURL(cropPreviewUrl);
+    };
+  }, [cropPreviewUrl]);
+
   const saveReplacementImage = useCallback(async (sourceFile: File, successMessage: string, shouldCrop = true) => {
     const croppedFile = shouldCrop ? await autoCropReceiptImage(sourceFile) : sourceFile;
     const webpFile = await convertReceiptImageFile(croppedFile);
@@ -122,10 +135,25 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
         toast.success("Image is already sufficiently cropped");
         return;
       }
-      await saveReplacementImage(croppedFile, "Receipt image cropped", false);
+      setCropPreviewFile(croppedFile);
+      setCropPreviewUrl(URL.createObjectURL(croppedFile));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to crop receipt image");
     } finally {
+      setImageEditPending(null);
+    }
+  };
+
+  const applyCropPreview = async () => {
+    if (!cropPreviewFile || imageEditPending) return;
+    const croppedFile = cropPreviewFile;
+    setImageEditPending("crop");
+    try {
+      await saveReplacementImage(croppedFile, "Receipt image cropped", false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to apply receipt crop");
+    } finally {
+      clearCropPreview();
       setImageEditPending(null);
     }
   };
@@ -396,7 +424,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                 <button
                   type="button"
                   onClick={() => void cropExistingImage()}
-                  disabled={imageEditPending !== null}
+                  disabled={imageEditPending !== null || cropPreviewFile !== null}
                   className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {imageEditPending === "crop" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Crop className="h-3.5 w-3.5" />}
@@ -410,7 +438,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                     accept="image/*"
                     capture="environment"
                     className="hidden"
-                    disabled={imageEditPending !== null}
+                    disabled={imageEditPending !== null || cropPreviewFile !== null}
                     onChange={(event) => {
                       const file = event.target.files?.[0];
                       event.target.value = "";
@@ -425,7 +453,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    disabled={imageEditPending !== null}
+                    disabled={imageEditPending !== null || cropPreviewFile !== null}
                     onChange={(event) => {
                       const file = event.target.files?.[0];
                       event.target.value = "";
@@ -742,6 +770,39 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
           )}
         </div>
       </div>
+
+      {cropPreviewFile && cropPreviewUrl && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/95 p-4">
+          <div className="flex max-h-full w-full max-w-xl flex-col gap-4 rounded-xl border bg-card p-4 shadow-xl">
+            <div>
+              <h3 className="text-base font-semibold">Preview Cropped Image</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Review the crop before replacing the stored receipt image.</p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg bg-muted">
+              <img src={cropPreviewUrl} alt="Cropped receipt preview" className="max-h-[65vh] w-full object-contain" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={clearCropPreview}
+                disabled={imageEditPending !== null}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyCropPreview()}
+                disabled={imageEditPending !== null}
+                className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {imageEditPending === "crop" && <Loader2 className="h-4 w-4 animate-spin" />}
+                Apply Crop
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

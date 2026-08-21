@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
   firestoreDoc: vi.fn(),
   updateDoc: vi.fn(),
+  createObjectURL: vi.fn(),
+  revokeObjectURL: vi.fn(),
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
   toastError: vi.fn(),
@@ -59,6 +61,8 @@ describe("ReceiptDetail download", () => {
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["webp"], "receipt.webp", { type: "image/webp" }));
     mocks.uploadReceiptImage.mockResolvedValue("receipts/u_owner/replacement.webp");
     mocks.replaceReceiptImage.mockResolvedValue({ receipt_id: receipt.id, storage_path: "receipts/u_owner/replacement.webp" });
+    mocks.createObjectURL.mockReturnValue("blob:crop-preview");
+    vi.stubGlobal("URL", { createObjectURL: mocks.createObjectURL, revokeObjectURL: mocks.revokeObjectURL });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       blob: async () => new Blob(["webp"], { type: "image/webp" }),
@@ -131,7 +135,14 @@ describe("ReceiptDetail download", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
 
+    expect(await screen.findByRole("img", { name: "Cropped receipt preview" })).toHaveAttribute("src", "blob:crop-preview");
+    expect(mocks.convertReceiptImageFile).not.toHaveBeenCalled();
+    expect(mocks.uploadReceiptImage).not.toHaveBeenCalled();
+    expect(mocks.replaceReceiptImage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply Crop" }));
+
     await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalledWith(receipt.id, "receipts/u_owner/replacement.webp"));
+    expect(mocks.autoCropReceiptImage).toHaveBeenCalledTimes(1);
     expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" }));
     expect(mocks.convertReceiptImageFile).toHaveBeenCalledWith(cropped);
     expect(mocks.uploadReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" }));
@@ -139,6 +150,7 @@ describe("ReceiptDetail download", () => {
     expect(fetchReceipt).toHaveBeenCalledWith(receipt.id);
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Receipt image cropped");
     expect(mocks.toastWarning).not.toHaveBeenCalled();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:crop-preview");
   });
 
   it("keeps a successful replacement successful while warning about old-image cleanup", async () => {
@@ -162,6 +174,9 @@ describe("ReceiptDetail download", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+    await screen.findByRole("img", { name: "Cropped receipt preview" });
+    expect(mocks.convertReceiptImageFile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply Crop" }));
 
     await waitFor(() => expect(mocks.toastWarning).toHaveBeenCalledWith(
       "New image saved successfully, but the previous GCS image could not be deleted: permission denied",
@@ -170,6 +185,52 @@ describe("ReceiptDetail download", () => {
     expect(mocks.toastError).not.toHaveBeenCalled();
     expect(fetchReceipt).toHaveBeenCalledWith(receipt.id);
     expect(mocks.fetchSignedReceiptImageUrl).toHaveBeenCalledWith(receipt.id);
+  });
+
+  it("cancels a crop preview without conversion, upload, or replacement", async () => {
+    mocks.autoCropReceiptImage.mockResolvedValue(new File(["cropped"], "cropped.jpg", { type: "image/jpeg" }));
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+    await screen.findByRole("img", { name: "Cropped receipt preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Cropped receipt preview" })).toBeNull());
+    expect(mocks.convertReceiptImageFile).not.toHaveBeenCalled();
+    expect(mocks.uploadReceiptImage).not.toHaveBeenCalled();
+    expect(mocks.replaceReceiptImage).not.toHaveBeenCalled();
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:crop-preview");
+  });
+
+  it("revokes the crop preview URL when the detail closes", async () => {
+    mocks.autoCropReceiptImage.mockResolvedValue(new File(["cropped"], "cropped.jpg", { type: "image/jpeg" }));
+    const { unmount } = render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+    await screen.findByRole("img", { name: "Cropped receipt preview" });
+    unmount();
+
+    expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:crop-preview");
   });
 
   it("does not create a replacement when the crop detector finds no worthwhile crop", async () => {
@@ -187,6 +248,7 @@ describe("ReceiptDetail download", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
     await waitFor(() => expect(mocks.autoCropReceiptImage).toHaveBeenCalled());
+    expect(screen.queryByRole("img", { name: "Cropped receipt preview" })).toBeNull();
     expect(mocks.uploadReceiptImage).not.toHaveBeenCalled();
     expect(mocks.replaceReceiptImage).not.toHaveBeenCalled();
   });
