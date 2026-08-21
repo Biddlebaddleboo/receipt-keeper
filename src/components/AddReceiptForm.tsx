@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { X, Camera, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
+import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
 
 interface AddReceiptFormProps {
   onSubmit: (file: File, onProgress?: (progress: number) => void) => Promise<void> | void;
@@ -215,7 +216,8 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
         });
       }, 220);
 
-      const convertedFile = await convertReceiptImageFile(file);
+      const croppedFile = await autoCropReceiptImage(file);
+      const convertedFile = await convertReceiptImageFile(croppedFile);
       if (conversionProgressTimer) {
         window.clearInterval(conversionProgressTimer);
         conversionProgressTimer = null;

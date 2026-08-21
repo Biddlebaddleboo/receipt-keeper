@@ -4,9 +4,11 @@ import { AddReceiptForm } from "@/components/AddReceiptForm";
 
 const mocks = vi.hoisted(() => ({
   convertReceiptImageFile: vi.fn(),
+  autoCropReceiptImage: vi.fn(),
 }));
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
+vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
 
 const baseCameraConstraints = {
   facingMode: { exact: "environment" },
@@ -43,6 +45,7 @@ describe("AddReceiptForm camera", () => {
     });
     Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, value: 1600 });
     Object.defineProperty(HTMLVideoElement.prototype, "videoHeight", { configurable: true, value: 1000 });
+    mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["converted"], "receipt.webp", { type: "image/webp" }));
   });
 
@@ -333,6 +336,7 @@ describe("AddReceiptForm camera", () => {
       expect.any(Function),
     ));
     expect(mocks.convertReceiptImageFile).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));
+    expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));
     expect(track.stop).toHaveBeenCalled();
   });
 });
