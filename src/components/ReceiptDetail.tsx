@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
+import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
@@ -247,7 +248,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const status = statusConfig[receipt.status];
   const imageUrl = receipt.localImageUrl || signedImageUrl || null;
   const purchaseDate = receipt.purchase_date
-    ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
+    ? formatReceiptPurchaseDate(receipt.purchase_date, {
         weekday: "long", month: "long", day: "numeric", year: "numeric",
       })
     : "—";

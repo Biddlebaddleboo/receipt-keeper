@@ -94,6 +94,7 @@ describe("AddPrepaidPurchaseFlow", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
 
     expect(mocks.createReceiptViaSignedUpload).toHaveBeenCalledTimes(1);
+    expect(mocks.uploadPrepaidImage).toHaveBeenCalledTimes(2);
     expect(mocks.createPurchase).toHaveBeenCalledTimes(2);
     expect(mocks.createPurchase).toHaveBeenLastCalledWith(expect.objectContaining({
       sales_receipt_id: "receipt-1",

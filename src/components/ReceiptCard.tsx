@@ -1,4 +1,5 @@
 import { Receipt } from "@/hooks/useReceiptApi";
+import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 import { ChevronRight, Tag } from "lucide-react";
 
 interface ReceiptCardProps {
@@ -9,7 +10,7 @@ interface ReceiptCardProps {
 
 export function ReceiptCard({ receipt, onClick, index }: ReceiptCardProps) {
   const displayDate = receipt.purchase_date
-    ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
+    ? formatReceiptPurchaseDate(receipt.purchase_date, {
         month: "short",
         day: "numeric",
         year: "numeric",

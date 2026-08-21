@@ -4,6 +4,7 @@ import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
+import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 
 export interface ExtractedField {
   label: string;
@@ -479,7 +480,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   // Group receipts by date
   const receiptsByDate = receipts.reduce<Record<string, Receipt[]>>((acc, receipt) => {
     const key = receipt.purchase_date
-      ? new Date(receipt.purchase_date).toLocaleDateString("en-US", {
+      ? formatReceiptPurchaseDate(receipt.purchase_date, {
           year: "numeric",
           month: "long",
           day: "numeric",

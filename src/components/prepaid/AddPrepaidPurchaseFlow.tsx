@@ -236,6 +236,9 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         if (!storagePath && item.file) {
           const webp = await convertReceiptImageFile(item.file);
           storagePath = await uploadPrepaidImage(webp, "activation_receipt");
+          setActivationReceipts((prev) =>
+            prev.map((entry) => (entry.id === item.id ? { ...entry, storagePath } : entry)),
+          );
         }
         if (storagePath) {
           uploadedActivations.push({
@@ -254,6 +257,9 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         if (!storagePath && card.file) {
           const webp = await convertReceiptImageFile(card.file);
           storagePath = await uploadPrepaidImage(webp, "package");
+          setCards((prev) =>
+            prev.map((entry) => (entry.id === card.id ? { ...entry, storagePath } : entry)),
+          );
         }
         cardPayload.push({
           activation_barcode: digitsOnly(card.activationBarcode),

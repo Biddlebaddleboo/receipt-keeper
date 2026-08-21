@@ -13,6 +13,7 @@ import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
 import { PrepaidActivationReceipt, PrepaidCard, PrepaidPurchase, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
+import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 
 interface SelectedCard {
   purchase: PrepaidPurchase;
@@ -234,9 +235,9 @@ function PrepaidPurchaseGroup({
 }) {
   const vendor = receipt?.vendor?.trim() || "Retailer";
   const date = receipt?.purchase_date
-    ? new Date(receipt.purchase_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    ? formatReceiptPurchaseDate(receipt.purchase_date, { month: "short", day: "numeric", year: "numeric" })
     : purchase.created_at
-      ? new Date(purchase.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      ? formatReceiptPurchaseDate(purchase.created_at, { month: "short", day: "numeric", year: "numeric" })
       : "";
 
   return (
