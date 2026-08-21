@@ -152,6 +152,41 @@ export const calculateReceiptCrop = (
   return crop;
 };
 
+/**
+ * Apply the already-cropped guard independently to each image side. A side
+ * with little remaining background keeps the original edge, while qualifying
+ * sides retain the normal padded detected boundary.
+ */
+export const calculateReceiptCropWithSideMarginGuard = (
+  corners: ReceiptCorners,
+  sourceWidth: number,
+  sourceHeight: number,
+): ReceiptCropRect | null => {
+  const paddedCrop = calculateReceiptCrop(corners, sourceWidth, sourceHeight);
+  if (!paddedCrop) return null;
+
+  const points = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
+  const detectedLeft = Math.min(...points.map((point) => point.x));
+  const detectedRight = Math.max(...points.map((point) => point.x));
+  const detectedTop = Math.min(...points.map((point) => point.y));
+  const detectedBottom = Math.max(...points.map((point) => point.y));
+  const margins = {
+    left: detectedLeft / sourceWidth,
+    right: (sourceWidth - detectedRight) / sourceWidth,
+    top: detectedTop / sourceHeight,
+    bottom: (sourceHeight - detectedBottom) / sourceHeight,
+  };
+  const crop = {
+    left: margins.left <= RECEIPT_ALREADY_CROPPED_MARGIN ? 0 : paddedCrop.left,
+    top: margins.top <= RECEIPT_ALREADY_CROPPED_MARGIN ? 0 : paddedCrop.top,
+    right: margins.right <= RECEIPT_ALREADY_CROPPED_MARGIN ? sourceWidth : paddedCrop.right,
+    bottom: margins.bottom <= RECEIPT_ALREADY_CROPPED_MARGIN ? sourceHeight : paddedCrop.bottom,
+  };
+  if (crop.right - crop.left >= sourceWidth && crop.bottom - crop.top >= sourceHeight) return null;
+  if (crop.right - crop.left < 2 || crop.bottom - crop.top < 2) return null;
+  return crop;
+};
+
 const luminance = (data: Uint8ClampedArray, index: number) =>
   Math.round(0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2]);
 
@@ -346,22 +381,13 @@ export const autoCropReceiptImage = async (file: File): Promise<File> => {
     const detection = detectReceiptCorners(analysisContext.getImageData(0, 0, analysisWidth, analysisHeight));
     if (!detection || detection.confidence < 0.72) return file;
 
-    const detectedPoints = Object.values(detection.corners);
-    const margins = {
-      left: Math.min(...detectedPoints.map((point) => point.x)) / analysisWidth,
-      right: (analysisWidth - Math.max(...detectedPoints.map((point) => point.x))) / analysisWidth,
-      top: Math.min(...detectedPoints.map((point) => point.y)) / analysisHeight,
-      bottom: (analysisHeight - Math.max(...detectedPoints.map((point) => point.y))) / analysisHeight,
-    };
-    if (Object.values(margins).every((margin) => margin <= RECEIPT_ALREADY_CROPPED_MARGIN)) return file;
-
     const mappedCorners = Object.fromEntries(
       Object.entries(detection.corners).map(([name, point]) => [name, {
         x: point.x / analysisWidth * decoded!.width,
         y: point.y / analysisHeight * decoded!.height,
       }]),
     ) as unknown as ReceiptCorners;
-    const crop = calculateReceiptCrop(mappedCorners, decoded.width, decoded.height);
+    const crop = calculateReceiptCropWithSideMarginGuard(mappedCorners, decoded.width, decoded.height);
     if (!crop) return file;
 
     cropCanvas = document.createElement("canvas");

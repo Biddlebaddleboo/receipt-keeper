@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   autoCropReceiptImage,
   calculateReceiptCrop,
+  calculateReceiptCropWithSideMarginGuard,
   detectReceiptCorners,
   RECEIPT_ALREADY_CROPPED_MARGIN,
   RECEIPT_CROP_MARGIN,
 } from "@/lib/receiptAutoCrop";
+import type { ReceiptCorners } from "@/lib/receiptAutoCrop";
 
 const makeImageData = (width: number, height: number, rectangle?: { left: number; top: number; right: number; bottom: number }) => {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -109,7 +111,7 @@ describe("receipt auto-cropping", () => {
 
     expect(output).not.toBe(input);
     expect(output.type).toBe("image/jpeg");
-    expect(cropContext.drawImage).toHaveBeenCalledWith(bitmap, 730, 14, 538, 970, 0, 0, 538, 970);
+    expect(cropContext.drawImage).toHaveBeenCalledWith(bitmap, 730, 0, 538, 1000, 0, 0, 538, 1000);
     expect(bitmap.close).toHaveBeenCalledTimes(1);
   });
 
@@ -150,6 +152,49 @@ describe("receipt auto-cropping", () => {
     expect(RECEIPT_ALREADY_CROPPED_MARGIN).toBe(0.06);
     expect(output).toBe(input);
     expect(bitmap.close).toHaveBeenCalledTimes(1);
+  });
+
+  const cornersFromMargins = (margins: { left: number; right: number; top: number; bottom: number }): ReceiptCorners => ({
+    topLeft: { x: margins.left * 1000, y: margins.top * 1000 },
+    topRight: { x: (1 - margins.right) * 1000, y: margins.top * 1000 },
+    bottomRight: { x: (1 - margins.right) * 1000, y: (1 - margins.bottom) * 1000 },
+    bottomLeft: { x: margins.left * 1000, y: (1 - margins.bottom) * 1000 },
+  });
+
+  it("crops only the bottom when only the bottom margin exceeds 6%", () => {
+    expect(calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0.04, right: 0.05, top: 0.04, bottom: 0.12 }), 1000, 1000)).toEqual({
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 914,
+    });
+  });
+
+  it("crops only one qualifying horizontal side", () => {
+    expect(calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0.12, right: 0.04, top: 0.04, bottom: 0.05 }), 1000, 1000)).toEqual({
+      left: 86,
+      top: 0,
+      right: 1000,
+      bottom: 1000,
+    });
+  });
+
+  it("crops multiple qualifying sides while preserving the others", () => {
+    expect(calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0.12, right: 0.04, top: 0.04, bottom: 0.12 }), 1000, 1000)).toEqual({
+      left: 86,
+      top: 0,
+      right: 1000,
+      bottom: 914,
+    });
+  });
+
+  it("preserves a side at exactly the 6% threshold", () => {
+    expect(calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0.06, right: 0.1, top: 0.1, bottom: 0.1 }), 1000, 1000)).toEqual({
+      left: 0,
+      top: 68,
+      right: 934,
+      bottom: 932,
+    });
   });
 
   it("leaves the original unchanged when corners are missing or geometry is invalid", async () => {
