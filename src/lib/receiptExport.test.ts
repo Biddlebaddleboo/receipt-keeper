@@ -102,6 +102,17 @@ describe("receipt export", () => {
     expect(receiptExportFilename(slashDate, new Map())).toBe("2026-07-23 - Slash Store.jpg");
   });
 
+  it("normalizes historical MM/DD/YY dates throughout export", () => {
+    const historical = receipt({ id: "walmart", purchase_date: "06/21/26", vendor: "Walmart" });
+
+    expect(filterReceiptsForExport([historical], {
+      fromDate: "2026-06-21",
+      toDate: "2026-06-21",
+    })).toHaveLength(1);
+    expect(receiptExportFilename(historical, new Map())).toBe("2026-06-21 - Walmart.jpg");
+    expect(receiptExportZipFilename({ fromDate: "06/21/26", toDate: "06/21/26" })).toBe("receipts-2026-06-21-to-2026-06-21.zip");
+  });
+
   it("exports all corrected canonical categories even when AI suggestions are stale", async () => {
     const correctedReceipts = Array.from({ length: 21 }, (_value, index) => receipt({
       id: `corrected-${index + 1}`,

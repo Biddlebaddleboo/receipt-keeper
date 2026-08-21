@@ -20,12 +20,24 @@ describe("formatReceiptPurchaseDate", () => {
   it.each([
     ["2026-07-23", "2026-07-23"],
     ["2026/07/23", "2026-07-23"],
+    ["06/21/26", "2026-06-21"],
+    ["06/07/26", "2026-06-07"],
   ])("normalizes %s to %s without changing the calendar date", (value, expected) => {
     expect(normalizeReceiptPurchaseDate(value)).toBe(expected);
-    expect(formatReceiptPurchaseDate(value, { year: "numeric", month: "2-digit", day: "2-digit" })).toBe("07/23/2026");
+    expect(formatReceiptPurchaseDate(value, { year: "numeric", month: "2-digit", day: "2-digit" })).toBe(
+      `${expected.slice(5, 7)}/${expected.slice(8, 10)}/${expected.slice(0, 4)}`,
+    );
   });
 
-  it.each(["", "2026/02/30", "2026-13-01", "not-a-date"]) ("rejects invalid canonical date %s", (value) => {
+  it.each(["02/29/25", "13/01/26", "06/31/26", "", "2026/02/30", "2026-13-01", "not-a-date"]) ("rejects invalid date %s", (value) => {
     expect(normalizeReceiptPurchaseDate(value)).toBeNull();
+  });
+
+  it("does not reinterpret an invalid supported date with native parsing", () => {
+    expect(formatReceiptPurchaseDate("02/29/25", { year: "numeric", month: "2-digit", day: "2-digit" })).toBe("02/29/25");
+  });
+
+  it("accepts a leap day in a short US date", () => {
+    expect(normalizeReceiptPurchaseDate("02/29/24")).toBe("2024-02-29");
   });
 });
