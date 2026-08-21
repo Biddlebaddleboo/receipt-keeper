@@ -387,6 +387,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
             </div>
             {receipt.status === "success" && (
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+                <span className="basis-full text-xs font-semibold text-muted-foreground">Edit Receipt</span>
                 <button
                   type="button"
                   onClick={() => void cropExistingImage()}
