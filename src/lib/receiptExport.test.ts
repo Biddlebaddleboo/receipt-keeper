@@ -187,6 +187,6 @@ describe("receipt export", () => {
       getImageUrl: async () => "https://signed/bad",
       fetchImage: async () => ({ ok: true, status: 200, blob: async () => new Blob(["webp"], { type: "image/webp" }) } as Response),
       convert: async () => { throw new Error("FFmpeg unavailable"); },
-    })).rejects.toThrow("FFmpeg unavailable");
+    })).rejects.toThrow("Failed to export 2026-08-20 - Store.jpg (receipt bad): FFmpeg unavailable");
   });
 });

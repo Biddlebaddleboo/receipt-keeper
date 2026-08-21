@@ -5,9 +5,11 @@ type FFmpegInstance = {
   loaded: boolean;
   load: (args: { coreURL: string; wasmURL: string; workerURL?: string }) => Promise<void>;
   writeFile: (path: string, data: Uint8Array) => Promise<void>;
-  exec: (args: string[]) => Promise<void>;
+  exec: (args: string[]) => Promise<number>;
   readFile: (path: string) => Promise<Uint8Array>;
   deleteFile: (path: string) => Promise<void>;
+  on: (event: "log", callback: (event: { type: string; message: string }) => void) => void;
+  off: (event: "log", callback: (event: { type: string; message: string }) => void) => void;
 };
 
 type ImageConversionOptions = {
@@ -60,6 +62,54 @@ const fileExtensionFromType = (type: string) => {
   return "jpg";
 };
 
+/** Preserve useful details when a browser/worker rejects with a non-Error value. */
+export const normalizeErrorMessage = (value: unknown): string => {
+  if (value instanceof Error) {
+    const message = value.message.trim();
+    const name = value.name.trim();
+    if (message && name && name !== "Error") return `${name}: ${message}`;
+    if (message) return message;
+    if (name) return name;
+  }
+
+  if (typeof value === "string") return value.trim() || "empty error string";
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") return String(value);
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+
+  if (typeof value === "object") {
+    const record = value as { name?: unknown; message?: unknown };
+    const name = typeof record.name === "string" ? record.name.trim() : "";
+    const message = typeof record.message === "string" ? record.message.trim() : "";
+    if (message && name && name !== "Error") return `${name}: ${message}`;
+    if (message) return message;
+    if (name) return name;
+
+    try {
+      const serialized = JSON.stringify(value);
+      if (serialized && serialized !== "{}") return serialized;
+    } catch {
+      // Fall through to String() for objects that cannot be serialized.
+    }
+  }
+
+  const stringified = String(value);
+  return stringified === "[object Object]" ? "unknown error object" : stringified;
+};
+
+const MAX_FFMPEG_LOG_MESSAGES = 24;
+const MAX_FFMPEG_LOG_LENGTH = 320;
+const relevantLogPattern = /error|fail|invalid|unable|cannot|could not|not found|unsupported|corrupt/i;
+
+const summarizeRecentLogs = (logs: string[]): string => {
+  const selected = [...logs].reverse().find((log) => relevantLogPattern.test(log)) ?? logs.at(-1);
+  if (!selected) return "";
+  const concise = selected.length > MAX_FFMPEG_LOG_LENGTH
+    ? `${selected.slice(0, MAX_FFMPEG_LOG_LENGTH - 1)}…`
+    : selected;
+  return `FFmpeg log: ${concise}`;
+};
+
 const temporaryFileNames = (inputExtension: string, outputExtension: string) => {
   const sequence = conversionSequence++;
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -78,16 +128,38 @@ const convertImageBlob = (blob: Blob, options: ImageConversionOptions): Promise<
   const operation = ffmpegOperationQueue.then(async () => {
     const { ffmpeg, fetchFile } = await loadFFmpeg();
     const { inputName, outputName } = temporaryFileNames(fileExtensionFromType(blob.type), options.outputExtension);
+    const recentLogs: string[] = [];
+    const logListener = ({ type, message }: { type: string; message: string }) => {
+      const normalizedMessage = normalizeErrorMessage(message);
+      if (!normalizedMessage) return;
+      const entry = type && type !== "stdout" ? `${type}: ${normalizedMessage}` : normalizedMessage;
+      recentLogs.push(entry);
+      if (recentLogs.length > MAX_FFMPEG_LOG_MESSAGES) recentLogs.shift();
+    };
 
     try {
+      ffmpeg.on("log", logListener);
       await ffmpeg.writeFile(inputName, await fetchFile(blob));
-      await ffmpeg.exec(options.buildArguments(inputName, outputName));
+      const exitCode = await ffmpeg.exec(options.buildArguments(inputName, outputName));
+      if (exitCode !== 0) {
+        throw new Error(`FFmpeg exited with code ${exitCode}`);
+      }
       const outputData = await ffmpeg.readFile(outputName);
       return new Blob([outputData as BlobPart], { type: options.outputType });
     } catch (error) {
-      throw new Error(`${options.failureLabel} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      const detail = normalizeErrorMessage(error);
+      const logContext = summarizeRecentLogs(recentLogs);
+      const suffix = logContext && !detail.includes(logContext.replace(/^FFmpeg log: /, ""))
+        ? `; ${logContext}`
+        : "";
+      throw new Error(`${options.failureLabel} failed: ${detail}${suffix}`);
     } finally {
       await Promise.allSettled([ffmpeg.deleteFile(inputName), ffmpeg.deleteFile(outputName)]);
+      try {
+        ffmpeg.off("log", logListener);
+      } catch {
+        // Listener cleanup is best effort; the FFmpeg implementation supports off().
+      }
     }
   });
   ffmpegOperationQueue = operation.then(() => undefined, () => undefined);

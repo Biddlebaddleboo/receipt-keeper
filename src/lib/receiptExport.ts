@@ -1,5 +1,5 @@
 import type { Receipt } from "@/hooks/useReceiptApi";
-import { convertImageBlobToJpeg } from "@/lib/ffmpegImageConverter";
+import { convertImageBlobToJpeg, normalizeErrorMessage } from "@/lib/ffmpegImageConverter";
 import { createStoredZip, type StoredZipEntry } from "@/lib/zipStore";
 
 export interface ReceiptExportFilters {
@@ -131,6 +131,8 @@ export const buildReceiptExportZip = async (receipts: Receipt[], options: Receip
       const data = await readBlobBytes(jpegBlob);
       entries.push({ name: filename, data });
       reportProgress(index + 1, "packaging", filename);
+    } catch (error) {
+      throw new Error(`Failed to export ${filename} (receipt ${receipt.id}): ${normalizeErrorMessage(error)}`);
     } finally {
       // The ZIP keeps only `data`; release the source and converted Blob
       // references immediately after this receipt has been added.
