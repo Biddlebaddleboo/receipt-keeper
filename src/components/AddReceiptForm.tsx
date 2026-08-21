@@ -21,21 +21,21 @@ type CameraConstraintSet = MediaTrackConstraintSet & {
   torch?: boolean;
 };
 
-function mergeCameraConstraints(track: MediaStreamTrack, additional: CameraConstraintSet): MediaTrackConstraints {
-  let existing: MediaTrackConstraints = {};
-  try {
-    existing = track.getConstraints?.() ?? {};
-  } catch {
-    // Browsers without readable track constraints can still apply the enhancement.
-  }
+const BASE_CAMERA_CONSTRAINTS: MediaTrackConstraints = {
+  facingMode: { exact: "environment" },
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+};
+
+function buildCameraConstraints(additional: CameraConstraintSet): MediaTrackConstraints {
   return {
-    ...existing,
-    advanced: [...(existing.advanced ?? []), additional],
+    ...BASE_CAMERA_CONSTRAINTS,
+    advanced: [additional],
   };
 }
 
 function applyCameraConstraints(track: MediaStreamTrack, additional: CameraConstraintSet) {
-  return track.applyConstraints(mergeCameraConstraints(track, additional));
+  return track.applyConstraints(buildCameraConstraints(additional));
 }
 
 export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormProps) {
@@ -112,11 +112,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
     try {
       stream = await getUserMedia.call(navigator.mediaDevices, {
         audio: false,
-        video: {
-          facingMode: { exact: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
+        video: BASE_CAMERA_CONSTRAINTS,
       });
       const track = stream.getVideoTracks()[0];
       const capabilities = track?.getCapabilities?.() as CameraTrackCapabilities | undefined;
