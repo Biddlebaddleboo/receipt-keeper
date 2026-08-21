@@ -6,6 +6,10 @@ import type { Receipt } from "@/hooks/useReceiptApi";
 const mocks = vi.hoisted(() => ({
   fetchSignedReceiptImageUrl: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
+  autoCropReceiptImage: vi.fn(),
+  convertReceiptImageFile: vi.fn(),
+  uploadReceiptImage: vi.fn(),
+  replaceReceiptImage: vi.fn(),
   apiFetch: vi.fn(),
   firestoreDoc: vi.fn(),
   updateDoc: vi.fn(),
@@ -14,6 +18,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: [] }) }));
 vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSignedReceiptImageUrl }));
 vi.mock("@/lib/nativeImageConverter", () => ({ convertImageBlobToJpeg: mocks.convertImageBlobToJpeg }));
+vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
+vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
 vi.mock("@/lib/api", () => ({ apiFetch: mocks.apiFetch }));
 vi.mock("@/lib/firebase", () => ({ db: {} }));
 vi.mock("firebase/firestore/lite", () => ({ doc: mocks.firestoreDoc, updateDoc: mocks.updateDoc, FieldPath: class {} }));
@@ -46,6 +52,10 @@ describe("ReceiptDetail download", () => {
     mocks.convertImageBlobToJpeg.mockImplementation(async () => new Blob([
       new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
     ], { type: "image/jpeg" }));
+    mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
+    mocks.convertReceiptImageFile.mockResolvedValue(new File(["webp"], "receipt.webp", { type: "image/webp" }));
+    mocks.uploadReceiptImage.mockResolvedValue("receipts/u_owner/replacement.webp");
+    mocks.replaceReceiptImage.mockResolvedValue({ receipt_id: receipt.id, storage_path: "receipts/u_owner/replacement.webp" });
     vi.stubGlobal("fetch", vi.fn(async () => ({
       ok: true,
       blob: async () => new Blob(["webp"], { type: "image/webp" }),
@@ -65,6 +75,8 @@ describe("ReceiptDetail download", () => {
         onRemove={vi.fn()}
         onRetry={vi.fn()}
         fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
       />,
     );
 
@@ -83,6 +95,8 @@ describe("ReceiptDetail download", () => {
         onRemove={vi.fn()}
         onRetry={vi.fn()}
         fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
       />,
     );
 
@@ -94,5 +108,74 @@ describe("ReceiptDetail download", () => {
 
     await waitFor(() => expect(mocks.updateDoc).toHaveBeenCalled());
     expect(mocks.updateDoc.mock.calls[0][1]).toEqual({ purchase_date: "2026-07-23" });
+  });
+
+  it("crops and replaces only the existing image without OCR or finalize-upload", async () => {
+    const cropped = new File(["cropped"], "cropped.jpg", { type: "image/jpeg" });
+    mocks.autoCropReceiptImage.mockResolvedValue(cropped);
+    const fetchReceipt = vi.fn().mockResolvedValue(receipt);
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={fetchReceipt}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+
+    await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalledWith(receipt.id, "receipts/u_owner/replacement.webp"));
+    expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" }));
+    expect(mocks.convertReceiptImageFile).toHaveBeenCalledWith(cropped);
+    expect(mocks.uploadReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" }));
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    expect(fetchReceipt).toHaveBeenCalledWith(receipt.id);
+  });
+
+  it("does not create a replacement when the crop detector finds no worthwhile crop", async () => {
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+    await waitFor(() => expect(mocks.autoCropReceiptImage).toHaveBeenCalled());
+    expect(mocks.uploadReceiptImage).not.toHaveBeenCalled();
+    expect(mocks.replaceReceiptImage).not.toHaveBeenCalled();
+  });
+
+  it("replaces an image selected from the file input through the WebP pipeline", async () => {
+    const replacement = new File(["replacement"], "replacement.png", { type: "image/png" });
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Crop Image" });
+    const replacementInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(replacementInput).not.toBeNull();
+    fireEvent.change(replacementInput, { target: { files: [replacement] } });
+
+    await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalled());
+    expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(replacement);
+    expect(mocks.convertReceiptImageFile).toHaveBeenCalled();
   });
 });

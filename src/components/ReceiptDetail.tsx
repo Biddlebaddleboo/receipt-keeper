@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
-import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download } from "lucide-react";
+import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download, Crop, Camera, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
@@ -8,6 +8,8 @@ import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate, normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
 import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
+import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
+import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
@@ -17,6 +19,8 @@ interface ReceiptDetailProps {
   onRemove: (id: string) => void;
   onRetry: (id: string) => void;
   fetchReceipt: (id: string) => Promise<Receipt | null>;
+  uploadReceiptImage: (file: File) => Promise<string>;
+  replaceReceiptImage: (receiptID: string, storagePath: string) => Promise<unknown>;
 }
 
 const statusConfig = {
@@ -33,7 +37,7 @@ interface EditingItem {
   price: string;
 }
 
-export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt }: ReceiptDetailProps) {
+export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRetry, fetchReceipt, uploadReceiptImage, replaceReceiptImage }: ReceiptDetailProps) {
   const [receipt, setReceipt] = useState(initialReceipt);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
@@ -41,6 +45,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [localDownloadPending, setLocalDownloadPending] = useState(false);
+  const [imageEditPending, setImageEditPending] = useState<"crop" | "replace" | null>(null);
   const [signedImageUrl, setSignedImageUrl] = useState<string | null>(null);
   const { categories } = useCategoryApi();
   const mirroredMetadataFields = useCallback(
@@ -75,6 +80,66 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   }, [mirroredMetadataFields, receipt.id, receipt.shard_doc_id]);
 
   const fetchSignedImageUrl = useCallback(fetchSignedReceiptImageUrl, []);
+
+  const fetchCurrentImageBlob = useCallback(async () => {
+    const imageEndpoint = receipt.localImageUrl || signedImageUrl || (await fetchSignedImageUrl(receipt.id));
+    if (!imageEndpoint) throw new Error("Signed URL not available");
+    const response = await fetch(imageEndpoint, { credentials: "omit" });
+    if (!response.ok) throw new Error(`Image download failed (${response.status})`);
+    return response.blob();
+  }, [fetchSignedImageUrl, receipt.id, receipt.localImageUrl, signedImageUrl]);
+
+  const refreshReceiptImage = useCallback(async () => {
+    const freshReceipt = await fetchReceipt(receipt.id);
+    if (freshReceipt) setReceipt(freshReceipt);
+    const freshUrl = await fetchSignedImageUrl(receipt.id);
+    setSignedImageUrl(freshUrl);
+  }, [fetchReceipt, fetchSignedImageUrl, receipt.id]);
+
+  const saveReplacementImage = useCallback(async (sourceFile: File, successMessage: string, shouldCrop = true) => {
+    const croppedFile = shouldCrop ? await autoCropReceiptImage(sourceFile) : sourceFile;
+    const webpFile = await convertReceiptImageFile(croppedFile);
+    if (webpFile.type !== "image/webp") throw new Error("Image conversion to WebP failed");
+    const storagePath = await uploadReceiptImage(webpFile);
+    await replaceReceiptImage(receipt.id, storagePath);
+    await refreshReceiptImage();
+    toast.success(successMessage);
+  }, [receipt.id, refreshReceiptImage, replaceReceiptImage, uploadReceiptImage]);
+
+  const cropExistingImage = async () => {
+    if (imageEditPending) return;
+    setImageEditPending("crop");
+    try {
+      const sourceBlob = await fetchCurrentImageBlob();
+      const sourceFile = new File([sourceBlob], `receipt-${receipt.id}.webp`, { type: sourceBlob.type || "image/webp" });
+      const croppedFile = await autoCropReceiptImage(sourceFile);
+      if (croppedFile === sourceFile) {
+        toast.success("Image is already sufficiently cropped");
+        return;
+      }
+      await saveReplacementImage(croppedFile, "Receipt image cropped", false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to crop receipt image");
+    } finally {
+      setImageEditPending(null);
+    }
+  };
+
+  const replaceExistingImage = async (sourceFile: File) => {
+    if (imageEditPending) return;
+    if (!sourceFile.type.startsWith("image/")) {
+      toast.error("Only image files are allowed");
+      return;
+    }
+    setImageEditPending("replace");
+    try {
+      await saveReplacementImage(sourceFile, "Receipt image replaced");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to replace receipt image");
+    } finally {
+      setImageEditPending(null);
+    }
+  };
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
@@ -305,20 +370,67 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
       <div className="flex-1 overflow-y-auto">
         {imageUrl && (
-          <div className="aspect-[3/4] max-h-[50vh] bg-muted overflow-hidden">
-            <img
-              src={imageUrl}
-              alt="Receipt"
-              className="w-full h-full object-contain"
-              onError={() => {
-                if (!receipt.localImageUrl) {
-                  void fetchSignedImageUrl(receipt.id).then((freshUrl) => {
-                    if (freshUrl) setSignedImageUrl(freshUrl);
-                  });
-                }
-              }}
-            />
-          </div>
+          <>
+            <div className="aspect-[3/4] max-h-[50vh] bg-muted overflow-hidden">
+              <img
+                src={imageUrl}
+                alt="Receipt"
+                className="w-full h-full object-contain"
+                onError={() => {
+                  if (!receipt.localImageUrl) {
+                    void fetchSignedImageUrl(receipt.id).then((freshUrl) => {
+                      if (freshUrl) setSignedImageUrl(freshUrl);
+                    });
+                  }
+                }}
+              />
+            </div>
+            {receipt.status === "success" && (
+              <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => void cropExistingImage()}
+                  disabled={imageEditPending !== null}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {imageEditPending === "crop" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Crop className="h-3.5 w-3.5" />}
+                  Crop Image
+                </button>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+                  <Camera className="h-3.5 w-3.5" />
+                  Replace Image (Camera)
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    disabled={imageEditPending !== null}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) void replaceExistingImage(file);
+                    }}
+                  />
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+                  <Upload className="h-3.5 w-3.5" />
+                  Replace Image (File)
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={imageEditPending !== null}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) void replaceExistingImage(file);
+                    }}
+                  />
+                </label>
+                {imageEditPending && <span className="text-xs text-muted-foreground">Processing image…</span>}
+              </div>
+            )}
+          </>
         )}
 
         <div className="p-4 space-y-3">

@@ -173,7 +173,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return response.json();
   };
 
-  const createReceiptViaSignedUpload = async (file: File, meta?: ReceiptUploadMeta, onProgress?: UploadProgressCallback) => {
+  const uploadReceiptImage = async (file: File, onProgress?: UploadProgressCallback): Promise<string> => {
     if (file.type !== "image/webp") {
       throw new Error(`Only WebP uploads are allowed. Received: ${file.type || "unknown"}`);
     }
@@ -202,10 +202,25 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
 
     onProgress?.(15);
     await uploadToGCSViaPolicy(signed.upload_url, file, resolvedFields, onProgress);
+    return signed.storage_path;
+  };
+
+  const createReceiptViaSignedUpload = async (file: File, meta?: ReceiptUploadMeta, onProgress?: UploadProgressCallback) => {
+    const storagePath = await uploadReceiptImage(file, onProgress);
     onProgress?.(96);
-    const finalized = await finalizeUpload(signed.storage_path, meta);
+    const finalized = await finalizeUpload(storagePath, meta);
     onProgress?.(100);
     return finalized;
+  };
+
+  const replaceReceiptImage = async (receiptID: string, storagePath: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/receipts/${encodeURIComponent(receiptID)}/replace-image`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storage_path: storagePath }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json() as Promise<{ receipt_id: string; storage_path: string }>;
   };
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -671,6 +686,8 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     isLoadingMore,
     hasMore,
     uploadReceipt,
+    uploadReceiptImage,
+    replaceReceiptImage,
     createReceiptViaSignedUpload,
     removeReceipt,
     retryUpload,

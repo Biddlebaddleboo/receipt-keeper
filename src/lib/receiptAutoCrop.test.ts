@@ -3,6 +3,7 @@ import {
   autoCropReceiptImage,
   calculateReceiptCrop,
   detectReceiptCorners,
+  RECEIPT_ALREADY_CROPPED_MARGIN,
   RECEIPT_CROP_MARGIN,
 } from "@/lib/receiptAutoCrop";
 
@@ -127,6 +128,28 @@ describe("receipt auto-cropping", () => {
       right: 350,
       bottom: 294,
     });
+  });
+
+  it("leaves an image unchanged when all detected margins are already within 6%", async () => {
+    const bitmap = { width: 800, height: 400, close: vi.fn() } as unknown as ImageBitmap;
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+    const analysisContext = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => makeImageData(800, 400, { left: 30, top: 24, right: 770, bottom: 376 })),
+    };
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const element = createElement(tagName, options);
+      if (tagName === "canvas") vi.spyOn(element as HTMLCanvasElement, "getContext").mockReturnValue(analysisContext as unknown as CanvasRenderingContext2D);
+      return element;
+    }) as typeof document.createElement);
+
+    const input = new File(["source"], "receipt.webp", { type: "image/webp" });
+    const output = await autoCropReceiptImage(input);
+
+    expect(RECEIPT_ALREADY_CROPPED_MARGIN).toBe(0.06);
+    expect(output).toBe(input);
+    expect(bitmap.close).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the original unchanged when corners are missing or geometry is invalid", async () => {

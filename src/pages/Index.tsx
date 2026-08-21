@@ -19,7 +19,7 @@ const Index = () => {
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const shouldPausePolling = Boolean(selectedReceiptId) || showAddForm;
-  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, fetchAllReceipts, loadNextPage, refreshLatest } =
+  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, uploadReceiptImage, replaceReceiptImage, removeReceipt, retryUpload, fetchReceipt, fetchAllReceipts, loadNextPage, refreshLatest } =
     useReceiptApi({ pollingPaused: shouldPausePolling });
   const { categories } = useCategoryApi();
   const { enabled: prepaidEnabled } = usePrepaidStatus();
@@ -271,6 +271,8 @@ const Index = () => {
           onRemove={removeReceipt}
           onRetry={retryUpload}
           fetchReceipt={fetchReceipt}
+          uploadReceiptImage={uploadReceiptImage}
+          replaceReceiptImage={replaceReceiptImage}
         />
       )}
 

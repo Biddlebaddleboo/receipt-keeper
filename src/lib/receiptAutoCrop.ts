@@ -1,5 +1,6 @@
 export const RECEIPT_CROP_ANALYSIS_MAX_DIMENSION = 800;
 export const RECEIPT_CROP_MARGIN = 0.04;
+export const RECEIPT_ALREADY_CROPPED_MARGIN = 0.06;
 
 export interface ReceiptCorner {
   x: number;
@@ -344,6 +345,15 @@ export const autoCropReceiptImage = async (file: File): Promise<File> => {
     analysisContext.drawImage(decoded.source, 0, 0, analysisWidth, analysisHeight);
     const detection = detectReceiptCorners(analysisContext.getImageData(0, 0, analysisWidth, analysisHeight));
     if (!detection || detection.confidence < 0.72) return file;
+
+    const detectedPoints = Object.values(detection.corners);
+    const margins = {
+      left: Math.min(...detectedPoints.map((point) => point.x)) / analysisWidth,
+      right: (analysisWidth - Math.max(...detectedPoints.map((point) => point.x))) / analysisWidth,
+      top: Math.min(...detectedPoints.map((point) => point.y)) / analysisHeight,
+      bottom: (analysisHeight - Math.max(...detectedPoints.map((point) => point.y))) / analysisHeight,
+    };
+    if (Object.values(margins).every((margin) => margin <= RECEIPT_ALREADY_CROPPED_MARGIN)) return file;
 
     const mappedCorners = Object.fromEntries(
       Object.entries(detection.corners).map(([name, point]) => [name, {
