@@ -166,64 +166,67 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in">
-      <header className="flex items-center justify-between px-4 py-3 border-b">
-        <button onClick={handleClose} className="p-2 -ml-2 rounded-md hover:bg-secondary transition-colors active:scale-95">
-          <X className="w-5 h-5" />
-        </button>
-        <h2 className="text-sm font-semibold">New Receipt</h2>
-        <button
-          onClick={handleSubmit}
-          disabled={!file || disabled || isQueueingUpload}
-          className={cn(
-            "px-4 py-1.5 rounded-md text-sm font-medium transition-all active:scale-95",
-            file ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground pointer-events-none"
-          )}
-        >
-          Upload
-        </button>
-      </header>
+    <div className={cameraStream ? "fixed inset-0 z-50 h-[100dvh] w-full overflow-hidden bg-black" : "fixed inset-0 z-50 flex flex-col bg-background animate-fade-in"}>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleInputChange} />
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleInputChange} />
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleInputChange} />
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleInputChange} />
+      {cameraStream ? (
+        <div className="relative h-[100dvh] w-full overflow-hidden bg-black">
+          <video
+            ref={cameraVideoRef}
+            autoPlay
+            playsInline
+            muted
+            aria-label="Rear camera preview"
+            className="absolute inset-0 h-full w-full bg-black object-cover"
+          />
+          <div className="absolute inset-x-0 top-0 flex items-start justify-between px-4 pt-[env(safe-area-inset-top)]">
+            <button
+              type="button"
+              onClick={stopCamera}
+              aria-label="Cancel camera"
+              className="mt-3 rounded-full bg-black/55 p-3 text-white backdrop-blur-sm transition-colors hover:bg-black/70 active:scale-95"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="absolute inset-x-0 bottom-0 flex justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16">
+            <button
+              type="button"
+              onClick={captureCameraFrame}
+              className="rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition-transform active:scale-95"
+            >
+              Capture photo
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <header className="flex items-center justify-between px-4 py-3 border-b">
+            <button onClick={handleClose} className="p-2 -ml-2 rounded-md hover:bg-secondary transition-colors active:scale-95">
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-sm font-semibold">New Receipt</h2>
+            <button
+              onClick={handleSubmit}
+              disabled={!file || disabled || isQueueingUpload}
+              className={cn(
+                "px-4 py-1.5 rounded-md text-sm font-medium transition-all active:scale-95",
+                file ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground pointer-events-none"
+              )}
+            >
+              Upload
+            </button>
+          </header>
 
+          <div className="flex-1 overflow-y-auto p-4">
         {submitError && (
           <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {submitError}
           </div>
         )}
 
-        {cameraStream ? (
-          <div className="space-y-3">
-            <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-black ring-1 ring-border">
-              <video
-                ref={cameraVideoRef}
-                autoPlay
-                playsInline
-                muted
-                aria-label="Rear camera preview"
-                className="h-full w-full object-cover"
-              />
-              <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10">
-                <button
-                  type="button"
-                  onClick={captureCameraFrame}
-                  className="rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition-transform active:scale-95"
-                >
-                  Capture photo
-                </button>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={stopCamera}
-              className="w-full rounded-md border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : preview ? (
+        {preview ? (
           <div className="space-y-3">
             <div className="relative aspect-[4/3] rounded-lg overflow-hidden bg-muted ring-1 ring-border">
               <img src={preview} alt="Receipt preview" className="w-full h-full object-cover" />
@@ -262,7 +265,9 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
             </button>
           </div>
         )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

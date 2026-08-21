@@ -57,7 +57,19 @@ describe("AddReceiptForm camera", () => {
     render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Camera" }));
 
-    expect(await screen.findByLabelText("Rear camera preview")).toBeInTheDocument();
+    const preview = await screen.findByLabelText("Rear camera preview");
+    expect(preview).toBeInTheDocument();
+    expect(preview).toHaveClass("absolute", "inset-0", "h-full", "w-full", "object-cover");
+    expect(preview.parentElement).toHaveClass("h-[100dvh]", "w-full", "bg-black");
+    expect(screen.getByRole("button", { name: "Cancel camera" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Capture photo" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel camera" }).parentElement).toHaveClass(
+      "pt-[env(safe-area-inset-top)]",
+    );
+    expect(screen.getByRole("button", { name: "Capture photo" }).parentElement).toHaveClass(
+      "pb-[calc(1rem+env(safe-area-inset-bottom))]",
+    );
     expect(getUserMedia).toHaveBeenCalledWith({
       audio: false,
       video: { facingMode: { exact: "environment" } },
@@ -75,7 +87,7 @@ describe("AddReceiptForm camera", () => {
     render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Camera" }));
     await screen.findByLabelText("Rear camera preview");
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel camera" }));
 
     expect(track.stop).toHaveBeenCalled();
     expect(screen.queryByLabelText("Rear camera preview")).not.toBeInTheDocument();
