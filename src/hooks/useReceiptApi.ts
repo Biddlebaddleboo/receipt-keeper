@@ -34,6 +34,12 @@ interface SignedUploadResponse {
   expires_at: string;
 }
 
+export interface ReplaceReceiptImageResponse {
+  receipt_id: string;
+  storage_path: string;
+  old_image_delete_error?: string;
+}
+
 type UploadProgressCallback = (progress: number) => void;
 
 export interface Receipt {
@@ -213,14 +219,14 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return finalized;
   };
 
-  const replaceReceiptImage = async (receiptID: string, storagePath: string) => {
+  const replaceReceiptImage = async (receiptID: string, storagePath: string): Promise<ReplaceReceiptImageResponse> => {
     const response = await apiFetch(`${API_BASE_URL}/receipts/${encodeURIComponent(receiptID)}/replace-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ storage_path: storagePath }),
     });
     if (!response.ok) throw new Error(await response.text());
-    return response.json() as Promise<{ receipt_id: string; storage_path: string }>;
+    return response.json() as Promise<ReplaceReceiptImageResponse>;
   };
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);

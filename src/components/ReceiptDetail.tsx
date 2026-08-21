@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import type { Receipt, ReceiptItem } from "@/hooks/useReceiptApi";
+import type { Receipt, ReceiptItem, ReplaceReceiptImageResponse } from "@/hooks/useReceiptApi";
 import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download, Crop, Camera, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
@@ -20,7 +20,7 @@ interface ReceiptDetailProps {
   onRetry: (id: string) => void;
   fetchReceipt: (id: string) => Promise<Receipt | null>;
   uploadReceiptImage: (file: File) => Promise<string>;
-  replaceReceiptImage: (receiptID: string, storagePath: string) => Promise<unknown>;
+  replaceReceiptImage: (receiptID: string, storagePath: string) => Promise<ReplaceReceiptImageResponse>;
 }
 
 const statusConfig = {
@@ -101,9 +101,14 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const webpFile = await convertReceiptImageFile(croppedFile);
     if (webpFile.type !== "image/webp") throw new Error("Image conversion to WebP failed");
     const storagePath = await uploadReceiptImage(webpFile);
-    await replaceReceiptImage(receipt.id, storagePath);
+    const replacement = await replaceReceiptImage(receipt.id, storagePath);
     await refreshReceiptImage();
-    toast.success(successMessage);
+    const oldImageDeleteError = replacement.old_image_delete_error?.trim();
+    if (oldImageDeleteError) {
+      toast.warning(`New image saved successfully, but the previous GCS image could not be deleted: ${oldImageDeleteError}`);
+    } else {
+      toast.success(successMessage);
+    }
   }, [receipt.id, refreshReceiptImage, replaceReceiptImage, uploadReceiptImage]);
 
   const cropExistingImage = async () => {

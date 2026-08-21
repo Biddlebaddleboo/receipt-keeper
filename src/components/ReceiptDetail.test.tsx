@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   apiFetch: vi.fn(),
   firestoreDoc: vi.fn(),
   updateDoc: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: [] }) }));
@@ -23,7 +26,7 @@ vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.co
 vi.mock("@/lib/api", () => ({ apiFetch: mocks.apiFetch }));
 vi.mock("@/lib/firebase", () => ({ db: {} }));
 vi.mock("firebase/firestore/lite", () => ({ doc: mocks.firestoreDoc, updateDoc: mocks.updateDoc, FieldPath: class {} }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: mocks.toastSuccess, warning: mocks.toastWarning, error: mocks.toastError } }));
 
 const receipt: Receipt = {
   id: "receipt-1",
@@ -134,6 +137,39 @@ describe("ReceiptDetail download", () => {
     expect(mocks.uploadReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" }));
     expect(mocks.apiFetch).not.toHaveBeenCalled();
     expect(fetchReceipt).toHaveBeenCalledWith(receipt.id);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Receipt image cropped");
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
+  });
+
+  it("keeps a successful replacement successful while warning about old-image cleanup", async () => {
+    mocks.autoCropReceiptImage.mockResolvedValue(new File(["cropped"], "cropped.jpg", { type: "image/jpeg" }));
+    mocks.replaceReceiptImage.mockResolvedValue({
+      receipt_id: receipt.id,
+      storage_path: "receipts/u_owner/replacement.webp",
+      old_image_delete_error: "permission denied",
+    });
+    const fetchReceipt = vi.fn().mockResolvedValue(receipt);
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={fetchReceipt}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+
+    await waitFor(() => expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "New image saved successfully, but the previous GCS image could not be deleted: permission denied",
+    ));
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(mocks.toastError).not.toHaveBeenCalled();
+    expect(fetchReceipt).toHaveBeenCalledWith(receipt.id);
+    expect(mocks.fetchSignedReceiptImageUrl).toHaveBeenCalledWith(receipt.id);
   });
 
   it("does not create a replacement when the crop detector finds no worthwhile crop", async () => {
