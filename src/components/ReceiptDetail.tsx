@@ -6,6 +6,7 @@ import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
+import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 
@@ -72,19 +73,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     );
   }, [mirroredMetadataFields, receipt.id, receipt.shard_doc_id]);
 
-  const fetchSignedImageUrl = useCallback(async (receiptID: string): Promise<string | null> => {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/receipts/sign-image`, {
-        method: "POST",
-        body: JSON.stringify({ receipt_id: receiptID }),
-      });
-      if (!response.ok) return null;
-      const payload = (await response.json()) as { image_url?: string };
-      return typeof payload.image_url === "string" && payload.image_url.trim() ? payload.image_url : null;
-    } catch {
-      return null;
-    }
-  }, []);
+  const fetchSignedImageUrl = useCallback(fetchSignedReceiptImageUrl, []);
 
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};

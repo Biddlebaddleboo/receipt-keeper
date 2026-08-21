@@ -367,6 +367,16 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }));
   }, []);
 
+  // The visible list intentionally pages through shards. Exports need the
+  // complete owner-owned metadata set, so they use this separate all-doc path.
+  const fetchAllReceipts = useCallback(async (): Promise<Receipt[]> => {
+    if (authLoading || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return [];
+    const ownerDocs = await fetchOwnerReceiptDocs();
+    const uniqueReceipts = new Map<string, Receipt>();
+    expandReceiptDocs(ownerDocs).forEach((receipt) => uniqueReceipts.set(receipt.id, receipt));
+    return Array.from(uniqueReceipts.values());
+  }, [authLoading, expandReceiptDocs, fetchOwnerReceiptDocs, firebaseUID, isFirebaseReady]);
+
   const toShardCatalog = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
     return ownerDocs
       .filter((d) => (typeof d.data._schema === "string" ? d.data._schema : "") === "receipt_shard")
@@ -632,6 +642,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     removeReceipt,
     retryUpload,
     fetchReceipt,
+    fetchAllReceipts,
     loadNextPage,
     refreshLatest,
   };

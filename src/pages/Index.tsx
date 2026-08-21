@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
@@ -6,8 +6,12 @@ import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi } from "@/hooks/useReceiptApi";
 import { usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { useAuth } from "@/contexts/AuthContext";
-import { CreditCard, ScanLine, Plus, Settings, LogOut, RefreshCw } from "lucide-react";
+import { CreditCard, ScanLine, Plus, Settings, LogOut, RefreshCw, Download, Loader2 } from "lucide-react";
 import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
+import { useCategoryApi } from "@/hooks/useCategoryApi";
+import { buildReceiptExportZip, filterReceiptsForExport, receiptExportZipFilename } from "@/lib/receiptExport";
+import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
+import { toast } from "sonner";
 
 const Index = () => {
   const { token, isLoading: authLoading, signOut } = useAuth();
@@ -15,10 +19,20 @@ const Index = () => {
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const shouldPausePolling = Boolean(selectedReceiptId) || showAddForm;
-  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage, refreshLatest } =
+  const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, fetchAllReceipts, loadNextPage, refreshLatest } =
     useReceiptApi({ pollingPaused: shouldPausePolling });
+  const { categories } = useCategoryApi();
   const { enabled: prepaidEnabled } = usePrepaidStatus();
   const didInitialLoadRef = useRef(false);
+  const [exportFromDate, setExportFromDate] = useState("");
+  const [exportToDate, setExportToDate] = useState("");
+  const [exportCategories, setExportCategories] = useState<string[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const categoryOptions = useMemo(
+    () => Array.from(new Set([...categories.map((category) => category.name), ...receipts.map((receipt) => receipt.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b)),
+    [categories, receipts]
+  );
 
   useEffect(() => {
     preloadReceiptImageConverter();
@@ -39,6 +53,46 @@ const Index = () => {
   const selectedReceipt = selectedReceiptId
     ? receipts.find((receipt) => receipt.id === selectedReceiptId) ?? null
     : null;
+
+  const downloadReceipts = async () => {
+    if (exportFromDate && exportToDate && exportFromDate > exportToDate) {
+      toast.error("From date must be on or before the to date");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const allReceipts = await fetchAllReceipts();
+      const filters = {
+        fromDate: exportFromDate,
+        toDate: exportToDate,
+        categories: exportCategories,
+      };
+      const matchingReceipts = filterReceiptsForExport(allReceipts, filters);
+      if (matchingReceipts.length === 0) {
+        throw new Error("No receipts match the selected filters");
+      }
+
+      const zip = await buildReceiptExportZip(matchingReceipts, {
+        ...filters,
+        getImageUrl: (receipt) => fetchSignedReceiptImageUrl(receipt.id),
+      });
+      const url = URL.createObjectURL(zip);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = receiptExportZipFilename(filters);
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      toast.success(`Downloaded ${matchingReceipts.length} receipt${matchingReceipts.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to download receipts");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -92,6 +146,53 @@ const Index = () => {
 
       {/* Main content */}
       <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
+        <section className="mb-6 rounded-xl border bg-card p-4 shadow-sm" aria-label="Download receipts">
+          <div className="mb-3">
+            <h2 className="text-sm font-semibold">Download Receipts</h2>
+            <p className="text-xs text-muted-foreground">Export matching receipts as JPEG images in one ZIP.</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              From date
+              <input
+                type="date"
+                value={exportFromDate}
+                onChange={(event) => setExportFromDate(event.target.value)}
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+              />
+            </label>
+            <label className="text-xs font-medium text-muted-foreground">
+              To date
+              <input
+                type="date"
+                value={exportToDate}
+                onChange={(event) => setExportToDate(event.target.value)}
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+              />
+            </label>
+          </div>
+          <label className="mt-3 block text-xs font-medium text-muted-foreground">
+            Categories <span className="font-normal">(all by default)</span>
+            <select
+              multiple
+              value={exportCategories}
+              onChange={(event) => setExportCategories(Array.from(event.target.selectedOptions, (option) => option.value))}
+              aria-label="Receipt categories"
+              className="mt-1 min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+            >
+              {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void downloadReceipts()}
+            disabled={isExporting}
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {isExporting ? "Preparing ZIP…" : "Download Receipts"}
+          </button>
+        </section>
         <ReceiptList
           receiptsByDate={receiptsByDate}
           onReceiptClick={(receipt) => setSelectedReceiptId(receipt.id)}
