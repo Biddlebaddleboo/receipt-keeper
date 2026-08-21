@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Archive, Camera, CreditCard, Download, Eye, FileImage, Loader2, Plus, RefreshCw, ScanLine, Search, Upload, X } from "lucide-react";
+import { ArrowLeft, Archive, Camera, CreditCard, Download, Eye, FileImage, Loader2, Plus, RefreshCw, ScanLine, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AddPrepaidPurchaseFlow } from "@/components/prepaid/AddPrepaidPurchaseFlow";
 import { convertImageBlobToJpeg, convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
-import { PrepaidActivationReceipt, PrepaidCard, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
+import { PrepaidActivationReceipt, PrepaidCard, PrepaidCleanupSummary, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
@@ -77,7 +77,7 @@ function cardImageFilename(kind: "package" | "opened-card", card: PrepaidCard) {
 const PrepaidCards = () => {
   const navigate = useNavigate();
   const { enabled, isLoading: statusLoading } = usePrepaidStatus();
-  const { listPurchases, searchCards, signActivationReceiptImage } = usePrepaidApi();
+  const { cleanupArchivedImages, listPurchases, searchCards, signActivationReceiptImage } = usePrepaidApi();
   const { fetchReceipt } = useReceiptApi({ pollingPaused: true });
   const [activePurchases, setActivePurchases] = useState<PrepaidPurchase[]>([]);
   const [archivedPurchases, setArchivedPurchases] = useState<PrepaidPurchase[]>([]);
@@ -92,6 +92,7 @@ const PrepaidCards = () => {
   const [searchResults, setSearchResults] = useState<PrepaidSearchResult[]>([]);
   const [searchSubmitted, setSearchSubmitted] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
 
   const loadReceiptSummaries = useCallback(async (purchases: PrepaidPurchase[]) => {
     const ids = Array.from(new Set(purchases.map((purchase) => purchase.sales_receipt_id).filter(Boolean)));
@@ -220,6 +221,24 @@ const PrepaidCards = () => {
     setSelected({ purchase, card });
   };
 
+  const handleCleanupArchivedImages = async () => {
+    const confirmed = window.confirm(
+      "Package and opened-card photos for archived cards will be permanently deleted. Activation receipt photos will also be deleted for purchases where every card is archived. Original sales receipts and all extracted card information will be kept.",
+    );
+    if (!confirmed) return;
+
+    setCleanupBusy(true);
+    try {
+      const summary = await cleanupArchivedImages();
+      await load();
+      toast.success(formatCleanupSummary(summary));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to clean up archived photos");
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
   if (!statusLoading && !enabled) {
     return (
       <div className="min-h-screen bg-background">
@@ -284,6 +303,19 @@ const PrepaidCards = () => {
             )}
           </section>
         )}
+
+        <section className="mt-4 rounded-lg border bg-card p-4 space-y-3" aria-label="Archive photo management">
+          <div>
+            <h2 className="text-sm font-semibold">Archive photo management</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Remove photos from archived cards while keeping sales receipts and extracted card information.
+            </p>
+          </div>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => void handleCleanupArchivedImages()} disabled={cleanupBusy || isLoading}>
+            {cleanupBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+            Clean Up Archived Photos
+          </Button>
+        </section>
 
         <Tabs defaultValue="active" className="space-y-4">
           <TabsList className="grid w-full grid-cols-2">
@@ -372,6 +404,12 @@ const PrepaidCards = () => {
   );
 };
 
+function formatCleanupSummary(summary: PrepaidCleanupSummary) {
+  const failures = summary.image_deletion_failures ?? 0;
+  const failureText = failures > 0 ? ` ${failures} image${failures === 1 ? "" : "s"} could not be deleted.` : "";
+  return `Archived photo cleanup complete: ${summary.package_images_deleted} package, ${summary.opened_card_images_deleted} opened-card, and ${summary.activation_receipt_images_deleted} activation receipt image${summary.activation_receipt_images_deleted === 1 ? "" : "s"} deleted. ${summary.sales_receipts_preserved} sales receipt${summary.sales_receipts_preserved === 1 ? "" : "s"} preserved.${failureText}`;
+}
+
 function Header({ onBack, onRefresh, refreshing }: { onBack: () => void; onRefresh: () => void; refreshing: boolean }) {
   return (
     <header className="sticky top-0 z-10 border-b bg-background/80 px-4 py-4 backdrop-blur-md">
@@ -441,9 +479,9 @@ function PrepaidPurchaseGroup({
             Activation receipts ({purchase.activation_receipts.length})
           </span>
         </div>
-        {purchase.activation_receipts.length > 0 && (
+        {purchase.activation_receipts.some((entry) => entry.storage_path?.trim()) && (
           <div className="grid gap-2 sm:grid-cols-2">
-            {purchase.activation_receipts.map((activationReceipt, index) => (
+            {purchase.activation_receipts.map((activationReceipt, index) => activationReceipt.storage_path?.trim() ? (
               <div
                 key={activationReceipt.id}
                 className="rounded-md border bg-background p-2 space-y-2"
@@ -465,7 +503,7 @@ function PrepaidPurchaseGroup({
                   </Button>
                 </div>
               </div>
-            ))}
+            ) : null)}
           </div>
         )}
       </div>
@@ -560,9 +598,9 @@ function RelatedReceiptActions({
           Download sales
         </Button>
       </div>
-      {purchase.activation_receipts.length > 0 && (
+      {purchase.activation_receipts.some((entry) => entry.storage_path?.trim()) && (
         <div className="grid gap-2 sm:grid-cols-2">
-          {purchase.activation_receipts.map((receipt, index) => (
+          {purchase.activation_receipts.map((receipt, index) => receipt.storage_path?.trim() ? (
             <div key={receipt.id} className="rounded-md border bg-background p-2 space-y-2" role="group" aria-label={`Activation receipt ${index + 1}`}>
               <p className="text-xs text-muted-foreground">Activation {index + 1}</p>
               <div className="grid grid-cols-2 gap-2">
@@ -576,7 +614,7 @@ function RelatedReceiptActions({
                 </Button>
               </div>
             </div>
-          ))}
+          ) : null)}
         </div>
       )}
     </section>

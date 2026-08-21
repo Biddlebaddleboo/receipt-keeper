@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   signCardImage: vi.fn(),
   getCardDetail: vi.fn(),
   fetchReceipt: vi.fn(),
+  cleanupArchivedImages: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
   apiFetch: vi.fn(),
   toastSuccess: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/usePrepaidApi", () => ({
   usePrepaidStatus: () => ({ enabled: true, isLoading: false }),
   usePrepaidApi: () => ({
+    cleanupArchivedImages: mocks.cleanupArchivedImages,
     listPurchases: mocks.listPurchases,
     searchCards: mocks.searchCards,
     signActivationReceiptImage: mocks.signActivationReceiptImage,
@@ -116,6 +118,13 @@ describe("PrepaidCards", () => {
       status: "success",
     });
     mocks.searchCards.mockResolvedValue([]);
+    mocks.cleanupArchivedImages.mockResolvedValue({
+      package_images_deleted: 1,
+      opened_card_images_deleted: 1,
+      activation_receipt_images_deleted: 0,
+      sales_receipts_preserved: 1,
+      image_deletion_failures: 0,
+    });
     mocks.getCardDetail.mockResolvedValue({
       id: "card-1",
       activation_barcode: "123456789012345678901234567890",
@@ -407,5 +416,29 @@ describe("PrepaidCards", () => {
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Failed to download sales receipt"));
     expect(anchorClick).not.toHaveBeenCalled();
     expect(objectURL).not.toHaveBeenCalled();
+  });
+
+  it("confirms archived photo cleanup and refreshes purchases", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    const cleanupButton = screen.getByRole("button", { name: "Clean Up Archived Photos" });
+    const initialListCalls = mocks.listPurchases.mock.calls.length;
+    fireEvent.click(cleanupButton);
+    expect(confirm).toHaveBeenCalledWith(
+      "Package and opened-card photos for archived cards will be permanently deleted. Activation receipt photos will also be deleted for purchases where every card is archived. Original sales receipts and all extracted card information will be kept.",
+    );
+    expect(mocks.cleanupArchivedImages).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(cleanupButton);
+    await waitFor(() => expect(mocks.cleanupArchivedImages).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.listPurchases).toHaveBeenCalledTimes(initialListCalls + 2));
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(expect.stringContaining("1 package, 1 opened-card, and 0 activation receipt images deleted"));
   });
 });

@@ -61,6 +61,14 @@ export interface PrepaidSearchResult {
   updated_at?: string;
 }
 
+export interface PrepaidCleanupSummary {
+  package_images_deleted: number;
+  opened_card_images_deleted: number;
+  activation_receipt_images_deleted: number;
+  sales_receipts_preserved: number;
+  image_deletion_failures?: number;
+}
+
 export interface PrepaidPackageExtraction {
   activation_barcode: string;
   serial_number: string;
@@ -150,6 +158,14 @@ export function usePrepaidStatus() {
 }
 
 export function usePrepaidApi() {
+  const cleanupArchivedImages = useCallback(async () => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/cleanup-archived-images`, {
+      method: "POST",
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidCleanupSummary>;
+  }, []);
+
   const searchCards = useCallback(async (value: string) => {
     const response = await apiFetch(`${API_BASE_URL}/prepaid/search`, {
       method: "POST",
@@ -271,6 +287,7 @@ export function usePrepaidApi() {
   }, []);
 
   return {
+    cleanupArchivedImages,
     searchCards,
     listPurchases,
     uploadPrepaidImage,
