@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AddPrepaidPurchaseFlow } from "@/components/prepaid/AddPrepaidPurchaseFlow";
-import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
+import { convertImageBlobToJpeg, convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
 import { PrepaidActivationReceipt, PrepaidCard, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
@@ -44,11 +44,13 @@ async function signedSalesReceiptUrl(receiptID: string) {
 async function downloadImageFromSignedURL(imageUrl: string, filename: string) {
   const response = await fetch(imageUrl, { credentials: "omit" });
   if (!response.ok) throw new Error("Download failed");
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
+  const sourceBlob = await response.blob();
+  const jpegBlob = await convertImageBlobToJpeg(sourceBlob);
+  if (jpegBlob.type !== "image/jpeg") throw new Error("Image conversion to JPEG failed");
+  const url = URL.createObjectURL(jpegBlob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = filename.replace(/\.[^.]+$/, "") + ".jpg";
   anchor.hidden = true;
   document.body.appendChild(anchor);
   anchor.click();
@@ -68,7 +70,8 @@ function safeCardIdentifier(card: PrepaidCard) {
 }
 
 function cardImageFilename(kind: "package" | "opened-card", card: PrepaidCard) {
-  return `${kind}-card-${safeCardIdentifier(card)}.webp`;
+  const prefix = kind === "package" ? "package-card" : "opened-card";
+  return `${prefix}-${safeCardIdentifier(card)}.jpg`;
 }
 
 const PrepaidCards = () => {
@@ -148,7 +151,7 @@ const PrepaidCards = () => {
   const openActivationReceipt = async (purchaseID: string, receipt: PrepaidActivationReceipt, index: number) => {
     try {
       const url = await signActivationReceiptImage(purchaseID, receipt.id);
-      setActivationImage({ title: `Activation receipt ${index + 1}`, url, filename: `activation-receipt-${index + 1}.webp` });
+      setActivationImage({ title: `Activation receipt ${index + 1}`, url, filename: `activation-receipt-${index + 1}.jpg` });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Activation receipt image is unavailable");
     }
@@ -156,7 +159,7 @@ const PrepaidCards = () => {
 
   const downloadSalesReceipt = async (receiptID: string) => {
     try {
-      await downloadFromSignedURL(() => signedSalesReceiptUrl(receiptID), "sales-receipt.webp");
+      await downloadFromSignedURL(() => signedSalesReceiptUrl(receiptID), "sales-receipt.jpg");
     } catch {
       toast.error("Failed to download sales receipt");
     }
@@ -166,7 +169,7 @@ const PrepaidCards = () => {
     try {
       await downloadFromSignedURL(
         () => signActivationReceiptImage(purchaseID, receipt.id),
-        `activation-receipt-${index + 1}.webp`,
+        `activation-receipt-${index + 1}.jpg`,
       );
     } catch {
       toast.error("Failed to download activation receipt");
@@ -965,7 +968,7 @@ function SalesReceiptViewer({ receipt, onClose }: { receipt: Receipt; onClose: (
   const downloadSalesImage = async () => {
     try {
       setDownloadPending(true);
-      await downloadFromSignedURL(() => signedSalesReceiptUrl(receipt.id), "sales-receipt.webp");
+      await downloadFromSignedURL(() => signedSalesReceiptUrl(receipt.id), "sales-receipt.jpg");
     } catch {
       toast.error("Failed to download sales receipt");
     } finally {

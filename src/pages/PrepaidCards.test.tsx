@@ -1,6 +1,6 @@
 import { MemoryRouter } from "react-router-dom";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PrepaidCards from "@/pages/PrepaidCards";
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   signCardImage: vi.fn(),
   getCardDetail: vi.fn(),
   fetchReceipt: vi.fn(),
+  convertImageBlobToJpeg: vi.fn(),
+  apiFetch: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("@/hooks/usePrepaidApi", () => ({
@@ -35,16 +39,26 @@ vi.mock("@/hooks/useReceiptApi", () => ({
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({
   convertReceiptImageFile: vi.fn(),
+  convertImageBlobToJpeg: mocks.convertImageBlobToJpeg,
+}));
+
+vi.mock("@/lib/api", () => ({
+  apiFetch: mocks.apiFetch,
 }));
 
 vi.mock("sonner", () => ({
   toast: {
-    success: vi.fn(),
-    error: vi.fn(),
+    success: mocks.toastSuccess,
+    error: mocks.toastError,
   },
 }));
 
 describe("PrepaidCards", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listPurchases.mockImplementation((state: string) => {
@@ -119,6 +133,16 @@ describe("PrepaidCards", () => {
     mocks.signCardImage.mockImplementation((_purchaseID: string, _cardID: string, kind: string) => {
       return Promise.resolve(kind === "package" ? "https://signed.example/package.webp" : "https://signed.example/opened.webp");
     });
+    mocks.signActivationReceiptImage.mockResolvedValue("https://signed.example/activation.webp");
+    mocks.convertImageBlobToJpeg.mockImplementation(() => Promise.resolve(new Blob(["jpeg-bytes"], { type: "image/jpeg" })));
+    mocks.apiFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ image_url: "https://signed.example/sales.webp" }),
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response("webp-bytes", {
+      status: 200,
+      headers: { "Content-Type": "image/webp" },
+    }))));
   });
 
   it("groups active cards by purchase with receipt metadata and activation count", async () => {
@@ -322,5 +346,66 @@ describe("PrepaidCards", () => {
     expect(screen.getByText("Vanilla serial: 22222222222")).toBeInTheDocument();
     expect(screen.getByText("Package barcode: 222222222222222222222222222222")).toBeInTheDocument();
     expect(mocks.listPurchases).not.toHaveBeenCalledWith("all");
+  });
+
+  it("converts every prepaid document download to JPEG before saving", async () => {
+    const downloadedFilenames: string[] = [];
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloadedFilenames.push(this.download);
+    });
+    const objectURL = vi.fn().mockReturnValue("blob:download");
+    vi.stubGlobal("URL", { createObjectURL: objectURL, revokeObjectURL: vi.fn() });
+
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /download sales/i }));
+    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(screen.getByRole("group", { name: "Activation receipt 1" })).getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByAltText("Package image")).toBeInTheDocument());
+
+    fireEvent.click(within(screen.getByRole("region", { name: "Package image" })).getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledTimes(3));
+    fireEvent.click(within(screen.getByRole("region", { name: "Opened-card image" })).getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledTimes(4));
+
+    expect(mocks.convertImageBlobToJpeg.mock.calls.every(([blob]) => blob.type === "image/webp")).toBe(true);
+    expect(objectURL.mock.calls.every(([blob]) => blob.type === "image/jpeg")).toBe(true);
+    expect(downloadedFilenames).toEqual([
+      "sales-receipt.jpg",
+      "activation-receipt-1.jpg",
+      "package-card-1234.jpg",
+      "opened-card-1234.jpg",
+    ]);
+    expect(anchorClick).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not save the source WebP when JPEG conversion fails", async () => {
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const objectURL = vi.fn().mockReturnValue("blob:download");
+    vi.stubGlobal("URL", { createObjectURL: objectURL, revokeObjectURL: vi.fn() });
+    mocks.convertImageBlobToJpeg.mockRejectedValueOnce(new Error("decoder unavailable"));
+
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /download sales/i }));
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Failed to download sales receipt"));
+    expect(anchorClick).not.toHaveBeenCalled();
+    expect(objectURL).not.toHaveBeenCalled();
   });
 });
