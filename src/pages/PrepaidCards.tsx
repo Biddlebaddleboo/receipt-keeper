@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Archive, Camera, CreditCard, Download, Eye, FileImage, Loader2, Plus, RefreshCw, ScanLine, Upload, X } from "lucide-react";
+import { ArrowLeft, Archive, Camera, CreditCard, Download, Eye, FileImage, Loader2, Plus, RefreshCw, ScanLine, Search, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AddPrepaidPurchaseFlow } from "@/components/prepaid/AddPrepaidPurchaseFlow";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
-import { PrepaidActivationReceipt, PrepaidCard, PrepaidPurchase, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
+import { PrepaidActivationReceipt, PrepaidCard, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
@@ -74,7 +74,7 @@ function cardImageFilename(kind: "package" | "opened-card", card: PrepaidCard) {
 const PrepaidCards = () => {
   const navigate = useNavigate();
   const { enabled, isLoading: statusLoading } = usePrepaidStatus();
-  const { listPurchases, signActivationReceiptImage } = usePrepaidApi();
+  const { listPurchases, searchCards, signActivationReceiptImage } = usePrepaidApi();
   const { fetchReceipt } = useReceiptApi({ pollingPaused: true });
   const [activePurchases, setActivePurchases] = useState<PrepaidPurchase[]>([]);
   const [archivedPurchases, setArchivedPurchases] = useState<PrepaidPurchase[]>([]);
@@ -84,6 +84,11 @@ const PrepaidCards = () => {
   const [selected, setSelected] = useState<SelectedCard | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<Receipt | null>(null);
   const [activationImage, setActivationImage] = useState<ImageModalState | null>(null);
+  const [searchValue, setSearchValue] = useState("");
+  const [searchError, setSearchError] = useState("");
+  const [searchResults, setSearchResults] = useState<PrepaidSearchResult[]>([]);
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
+  const [searching, setSearching] = useState(false);
 
   const loadReceiptSummaries = useCallback(async (purchases: PrepaidPurchase[]) => {
     const ids = Array.from(new Set(purchases.map((purchase) => purchase.sales_receipt_id).filter(Boolean)));
@@ -168,6 +173,48 @@ const PrepaidCards = () => {
     }
   };
 
+  const submitSearch = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = digitsOnly(searchValue);
+    setSearchValue(normalized);
+    if (normalized.length !== 4 && normalized.length !== 16) {
+      setSearchError("Enter exactly 4 or 16 digits.");
+      setSearchResults([]);
+      setSearchSubmitted(true);
+      return;
+    }
+    setSearchError("");
+    setSearchSubmitted(true);
+    setSearching(true);
+    try {
+      setSearchResults(await searchCards(normalized));
+    } catch (error) {
+      setSearchResults([]);
+      setSearchError(error instanceof Error ? error.message : "Search failed");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const openSearchResult = async (result: PrepaidSearchResult) => {
+    let purchase = [...activePurchases, ...archivedPurchases].find((entry) => entry.id === result.purchase_id);
+    if (!purchase) {
+      try {
+        const allPurchases = await listPurchases("all");
+        purchase = allPurchases.find((entry) => entry.id === result.purchase_id);
+      } catch {
+        purchase = undefined;
+      }
+    }
+    const card = purchase?.cards.find((entry) => entry.id === result.card_id);
+    if (!purchase || !card) {
+      toast.error("Card details are unavailable");
+      return;
+    }
+    void loadReceiptSummaries([purchase]);
+    setSelected({ purchase, card });
+  };
+
   if (!statusLoading && !enabled) {
     return (
       <div className="min-h-screen bg-background">
@@ -186,6 +233,53 @@ const PrepaidCards = () => {
       <Header onBack={() => navigate("/")} onRefresh={load} refreshing={isLoading} />
 
       <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
+        <form onSubmit={submitSearch} className="rounded-lg border bg-card p-3 space-y-2" aria-label="Search prepaid cards">
+          <div className="flex gap-2">
+            <Input
+              value={searchValue}
+              onChange={(event) => {
+                setSearchValue(digitsOnly(event.target.value));
+                setSearchError("");
+              }}
+              inputMode="numeric"
+              maxLength={23}
+              placeholder="Search full card number or last 4"
+              aria-label="Search full card number or last 4"
+            />
+            <Button type="submit" disabled={searching}>
+              {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
+              Search
+            </Button>
+          </div>
+          {searchError && <p className="text-sm text-destructive" role="alert">{searchError}</p>}
+        </form>
+
+        {searchSubmitted && !searchError && (
+          <section className="mt-4 rounded-lg border bg-card p-4 space-y-3" aria-label="Search results">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold">Search results</h2>
+              <span className="text-xs text-muted-foreground">{searchResults.length} match{searchResults.length === 1 ? "" : "es"}</span>
+            </div>
+            {searchResults.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No prepaid cards found.</p>
+            ) : (
+              <div className="space-y-2">
+                {searchResults.map((result) => {
+                  const receipt = receiptMap[result.sales_receipt_id];
+                  return (
+                    <PrepaidSearchResultRow
+                      key={`${result.purchase_id}-${result.card_id}`}
+                      result={result}
+                      receipt={receipt}
+                      onClick={() => void openSearchResult(result)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
         <Tabs defaultValue="active" className="space-y-4">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="active">Active</TabsTrigger>
@@ -253,6 +347,11 @@ const PrepaidCards = () => {
       {selected && (
         <PrepaidCardDetail
           entry={selected}
+          receipt={receiptMap[selected.purchase.sales_receipt_id]}
+          onViewSalesReceipt={() => void openSalesReceipt(selected.purchase.sales_receipt_id)}
+          onDownloadSalesReceipt={() => void downloadSalesReceipt(selected.purchase.sales_receipt_id)}
+          onViewActivationReceipt={(receipt, index) => void openActivationReceipt(selected.purchase.id, receipt, index)}
+          onDownloadActivationReceipt={(receipt, index) => void downloadActivationReceipt(selected.purchase.id, receipt, index)}
           onClose={() => setSelected(null)}
           onUpdated={(purchase) => {
             setSelected(null);
@@ -395,6 +494,90 @@ function PrepaidCardRow({ card, onClick }: { card: PrepaidCard; onClick: () => v
   );
 }
 
+function PrepaidSearchResultRow({
+  result,
+  receipt,
+  onClick,
+}: {
+  result: PrepaidSearchResult;
+  receipt?: Receipt | null;
+  onClick: () => void;
+}) {
+  const vendor = receipt?.vendor?.trim() || "Retailer unavailable";
+  const dateValue = receipt?.purchase_date || result.created_at;
+  const date = dateValue
+    ? formatReceiptPurchaseDate(dateValue, { month: "short", day: "numeric", year: "numeric" })
+    : "Date unavailable";
+  const state = result.state === "archived" ? "Archived" : "Active";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-md bg-secondary/45 p-3 text-left transition-colors hover:bg-secondary active:scale-[0.99]"
+      aria-label={`Open ${state} ${result.last4 ? `card ending ${result.last4}` : "prepaid card"}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">${(result.denomination ?? 0).toFixed(2)} Vanilla</p>
+          <p className="mt-1 text-xs text-muted-foreground">•••• {result.last4 || "unknown"}</p>
+          <p className="mt-1 text-xs text-muted-foreground truncate">{vendor} · {date}</p>
+        </div>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{state}</span>
+      </div>
+    </button>
+  );
+}
+
+function RelatedReceiptActions({
+  purchase,
+  onViewSalesReceipt,
+  onDownloadSalesReceipt,
+  onViewActivationReceipt,
+  onDownloadActivationReceipt,
+}: {
+  purchase: PrepaidPurchase;
+  onViewSalesReceipt: () => void;
+  onDownloadSalesReceipt: () => void;
+  onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+}) {
+  return (
+    <section className="rounded-lg border bg-card p-4 space-y-3" aria-label="Related receipts">
+      <p className="text-sm font-medium">Related receipts</p>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Sales receipt actions">
+        <Button variant="outline" size="sm" onClick={onViewSalesReceipt}>
+          <Eye className="w-4 h-4 mr-2" />
+          View sales
+        </Button>
+        <Button variant="outline" size="sm" onClick={onDownloadSalesReceipt}>
+          <Download className="w-4 h-4 mr-2" />
+          Download sales
+        </Button>
+      </div>
+      {purchase.activation_receipts.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {purchase.activation_receipts.map((receipt, index) => (
+            <div key={receipt.id} className="rounded-md border bg-background p-2 space-y-2" role="group" aria-label={`Activation receipt ${index + 1}`}>
+              <p className="text-xs text-muted-foreground">Activation {index + 1}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" size="sm" onClick={() => onViewActivationReceipt(receipt, index)}>
+                  <Eye className="w-4 h-4 mr-2" />
+                  View
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => onDownloadActivationReceipt(receipt, index)}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Download
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function shortBarcode(value: string) {
   if (value.length <= 12) return value;
   return `...${value.slice(-12)}`;
@@ -436,7 +619,25 @@ function EmptyState({ label }: { label: string }) {
   );
 }
 
-function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard; onClose: () => void; onUpdated: (purchase: PrepaidPurchase) => void }) {
+function PrepaidCardDetail({
+  entry,
+  receipt,
+  onViewSalesReceipt,
+  onDownloadSalesReceipt,
+  onViewActivationReceipt,
+  onDownloadActivationReceipt,
+  onClose,
+  onUpdated,
+}: {
+  entry: SelectedCard;
+  receipt?: Receipt | null;
+  onViewSalesReceipt: () => void;
+  onDownloadSalesReceipt: () => void;
+  onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onClose: () => void;
+  onUpdated: (purchase: PrepaidPurchase) => void;
+}) {
   const { uploadPrepaidImage, extractOpenedCard, updateCard, archiveCard, getCardDetail, signCardImage } = usePrepaidApi();
   const [detailCard, setDetailCard] = useState(entry.card);
   const [pan, setPan] = useState("");
@@ -602,7 +803,17 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
             <p className="text-sm font-semibold">${(detailCard.denomination ?? 0).toFixed(2)} Vanilla</p>
             <p className="text-xs text-muted-foreground break-all">Package barcode: {detailCard.activation_barcode}</p>
             <p className="text-xs text-muted-foreground">Vanilla serial: {detailCard.vanilla_serial}</p>
+            <p className="text-xs text-muted-foreground">State: {detailCard.state === "archived" ? "Archived" : "Active"}</p>
+            {receipt?.vendor && <p className="text-xs text-muted-foreground">Retailer: {receipt.vendor}</p>}
           </div>
+
+          <RelatedReceiptActions
+            purchase={entry.purchase}
+            onViewSalesReceipt={onViewSalesReceipt}
+            onDownloadSalesReceipt={onDownloadSalesReceipt}
+            onViewActivationReceipt={onViewActivationReceipt}
+            onDownloadActivationReceipt={onDownloadActivationReceipt}
+          />
 
           {(detailCard.package_image_storage_path || detailCard.opened_card_image_storage_path) && (
             <div className="grid gap-3 sm:grid-cols-2">

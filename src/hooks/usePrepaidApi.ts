@@ -46,6 +46,21 @@ export interface PrepaidPurchase {
   updated_at?: string;
 }
 
+export interface PrepaidSearchResult {
+  purchase_id: string;
+  card_id: string;
+  last4: string;
+  denomination?: number;
+  state: PrepaidCardState;
+  activation_barcode: string;
+  vanilla_serial: string;
+  sales_receipt_id: string;
+  activation_receipt_count: number;
+  details_captured: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface PrepaidPackageExtraction {
   activation_barcode: string;
   serial_number: string;
@@ -135,6 +150,16 @@ export function usePrepaidStatus() {
 }
 
 export function usePrepaidApi() {
+  const searchCards = useCallback(async (value: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/search`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    const payload = (await response.json()) as { results?: PrepaidSearchResult[] };
+    return Array.isArray(payload.results) ? payload.results : [];
+  }, []);
+
   const listPurchases = useCallback(async (state: "active" | "archived" | "all" = "active") => {
     const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases?state=${state}`);
     if (!response.ok) throw new Error(await readError(response));
@@ -246,6 +271,7 @@ export function usePrepaidApi() {
   }, []);
 
   return {
+    searchCards,
     listPurchases,
     uploadPrepaidImage,
     extractPackage,
