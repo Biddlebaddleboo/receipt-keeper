@@ -1,7 +1,7 @@
 import { normalizeErrorMessage } from "@/lib/imageErrors";
 
-export const NATIVE_JPEG_MAX_WIDTH = 1200;
-export const NATIVE_JPEG_QUALITY = 0.8;
+export const NATIVE_JPEG_MAX_WIDTH = 1000;
+export const NATIVE_JPEG_QUALITY = 0.75;
 
 type DecodedImage = {
   source: CanvasImageSource;

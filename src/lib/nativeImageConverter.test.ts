@@ -25,7 +25,7 @@ describe("native JPEG conversion", () => {
     vi.unstubAllGlobals();
   });
 
-  it("caps wide images at 1200px without upscaling and preserves aspect ratio", async () => {
+  it("caps wide images at 1000px without upscaling and preserves aspect ratio", async () => {
     const close = vi.fn();
     const bitmap = { width: 2400, height: 1200, close } as unknown as ImageBitmap;
     vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
@@ -33,14 +33,14 @@ describe("native JPEG conversion", () => {
     const output = await convertImageBlobToJpeg(sourceBlob());
 
     expect(output.type).toBe("image/jpeg");
-    expect(NATIVE_JPEG_MAX_WIDTH).toBe(1200);
-    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1200, 600);
+    expect(NATIVE_JPEG_MAX_WIDTH).toBe(1000);
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1000, 500);
     expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/jpeg", NATIVE_JPEG_QUALITY);
-    expect(NATIVE_JPEG_QUALITY).toBe(0.8);
+    expect(NATIVE_JPEG_QUALITY).toBe(0.75);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("does not upscale images smaller than 1200px", async () => {
+  it("does not upscale images smaller than 1000px", async () => {
     const bitmap = { width: 800, height: 600, close: vi.fn() } as unknown as ImageBitmap;
     vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
 
