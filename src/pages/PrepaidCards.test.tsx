@@ -51,6 +51,17 @@ vi.mock("@/lib/api", () => ({
   apiFetch: mocks.apiFetch,
 }));
 
+vi.mock("@/components/BrowserCamera", () => ({
+  BrowserCamera: ({ open, onCapture, onClose }: { open: boolean; onCapture: (file: File) => void; onClose: () => void }) => (
+    open ? (
+      <div>
+        <button type="button" onClick={() => onCapture(new File(["camera"], "camera.jpg", { type: "image/jpeg" }))}>Shared camera capture</button>
+        <button type="button" onClick={onClose}>Cancel camera</button>
+      </div>
+    ) : null
+  ),
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     success: mocks.toastSuccess,
@@ -272,6 +283,25 @@ describe("PrepaidCards", () => {
     expect(within(relatedReceipts).getByRole("group", { name: "Activation receipt 2" })).toBeInTheDocument();
     expect(screen.getByAltText("Package image")).toBeInTheDocument();
     expect(screen.getByAltText("Opened-card image")).toBeInTheDocument();
+  });
+
+  it("forwards the opened-card camera capture into the existing image handler", async () => {
+    const createObjectURL = vi.fn().mockReturnValue("blob:opened-camera");
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Camera" })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shared camera capture" }));
+
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledWith(expect.objectContaining({ name: "camera.jpg" })));
   });
 
   it("validates search length before submitting", async () => {

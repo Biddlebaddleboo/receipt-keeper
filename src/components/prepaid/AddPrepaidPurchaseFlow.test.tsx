@@ -28,6 +28,17 @@ vi.mock("@/lib/ffmpegImageConverter", () => ({
   convertReceiptImageFile: mocks.convertReceiptImageFile,
 }));
 
+vi.mock("@/components/BrowserCamera", () => ({
+  BrowserCamera: ({ open, onCapture, onClose }: { open: boolean; onCapture: (file: File) => void; onClose: () => void }) => (
+    open ? (
+      <div>
+        <button type="button" onClick={() => { onCapture(imageFile("camera.jpg")); onClose(); }}>Shared camera capture</button>
+        <button type="button" onClick={onClose}>Cancel camera</button>
+      </div>
+    ) : null
+  ),
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
@@ -132,5 +143,38 @@ describe("AddPrepaidPurchaseFlow", () => {
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(mocks.createPurchase).toHaveBeenCalledWith(expect.objectContaining({ activation_receipts: [] }));
+  });
+
+  it("forwards sales, activation, and package camera captures to their existing handlers", async () => {
+    render(<AddPrepaidPurchaseFlow onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shared camera capture" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Shared camera capture" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await screen.findByText(/sales receipt saved/i);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add activation receipt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shared camera capture" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Shared camera capture" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shared camera capture" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Shared camera capture" })).toBeNull());
+    fireEvent.change(screen.getByPlaceholderText("30-digit package barcode"), {
+      target: { value: "123456789012345678901234567890" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("11-digit Vanilla serial"), {
+      target: { value: "12345678901" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Denomination"), { target: { value: "75" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save purchase/i }));
+
+    await waitFor(() => expect(mocks.createPurchase).toHaveBeenCalled());
+    expect(mocks.convertReceiptImageFile).toHaveBeenCalledTimes(3);
+    expect(mocks.uploadPrepaidImage).toHaveBeenCalledTimes(2);
   });
 });

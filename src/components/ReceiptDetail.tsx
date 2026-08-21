@@ -12,6 +12,7 @@ import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
+import { BrowserCamera } from "@/components/BrowserCamera";
 
 interface ReceiptDetailProps {
   receipt: Receipt;
@@ -48,6 +49,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [imageEditPending, setImageEditPending] = useState<"crop" | "replace" | null>(null);
   const [cropPreviewFile, setCropPreviewFile] = useState<File | null>(null);
   const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [signedImageUrl, setSignedImageUrl] = useState<string | null>(null);
   const { categories } = useCategoryApi();
   const mirroredMetadataFields = useCallback(
@@ -430,22 +432,15 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                   {imageEditPending === "crop" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Crop className="h-3.5 w-3.5" />}
                   Crop Image
                 </button>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+                <button
+                  type="button"
+                  onClick={() => setCameraOpen(true)}
+                  disabled={imageEditPending !== null || cropPreviewFile !== null}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
                   <Camera className="h-3.5 w-3.5" />
                   Replace Image (Camera)
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    disabled={imageEditPending !== null || cropPreviewFile !== null}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      event.target.value = "";
-                      if (file) void replaceExistingImage(file);
-                    }}
-                  />
-                </label>
+                </button>
                 <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
                   <Upload className="h-3.5 w-3.5" />
                   Replace Image (File)
@@ -770,6 +765,12 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
           )}
         </div>
       </div>
+
+      <BrowserCamera
+        open={cameraOpen}
+        onCapture={(file) => void replaceExistingImage(file)}
+        onClose={() => setCameraOpen(false)}
+      />
 
       {cropPreviewFile && cropPreviewUrl && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/95 p-4">

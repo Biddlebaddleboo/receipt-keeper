@@ -1,5 +1,6 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Camera, Upload } from "lucide-react";
+import { BrowserCamera } from "@/components/BrowserCamera";
 
 interface CaptureButtonProps {
   onCapture: (file: File) => void;
@@ -7,7 +8,7 @@ interface CaptureButtonProps {
 }
 
 export function CaptureButton({ onCapture, disabled }: CaptureButtonProps) {
-  const cameraRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -21,14 +22,6 @@ export function CaptureButton({ onCapture, disabled }: CaptureButtonProps) {
   return (
     <div className="flex gap-3">
       <input
-        ref={cameraRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={handleFile}
-      />
-      <input
         ref={fileRef}
         type="file"
         accept="image/*"
@@ -37,7 +30,7 @@ export function CaptureButton({ onCapture, disabled }: CaptureButtonProps) {
       />
 
       <button
-        onClick={() => cameraRef.current?.click()}
+        onClick={() => setCameraOpen(true)}
         disabled={disabled}
         className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-primary text-primary-foreground rounded-lg font-medium text-base transition-all duration-200 ease-out hover:brightness-110 active:scale-[0.97] disabled:opacity-50 disabled:pointer-events-none receipt-shadow"
       >
@@ -53,6 +46,7 @@ export function CaptureButton({ onCapture, disabled }: CaptureButtonProps) {
         <Upload className="w-5 h-5" />
         Gallery
       </button>
+      <BrowserCamera open={cameraOpen} onCapture={onCapture} onClose={() => setCameraOpen(false)} />
     </div>
   );
 }

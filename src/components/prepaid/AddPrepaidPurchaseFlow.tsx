@@ -9,6 +9,7 @@ import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { useReceiptApi } from "@/hooks/useReceiptApi";
 import { PrepaidCardInput, usePrepaidApi } from "@/hooks/usePrepaidApi";
 import { cn } from "@/lib/utils";
+import { BrowserCamera } from "@/components/BrowserCamera";
 
 type Step = 0 | 1 | 2 | 3;
 
@@ -76,8 +77,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   const [cards, setCards] = useState<CardDraft[]>([newCardDraft()]);
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const salesCameraRef = useRef<HTMLInputElement>(null);
   const salesFileRef = useRef<HTMLInputElement>(null);
+  const [salesCameraOpen, setSalesCameraOpen] = useState(false);
   const { createReceiptViaSignedUpload } = useReceiptApi({ pollingPaused: true });
   const { uploadPrepaidImage, extractPackage, createPurchase } = usePrepaidApi();
 
@@ -328,11 +329,6 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
 
           {step === 0 && (
             <section className="space-y-4">
-              <input ref={salesCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) setSalesImage(file);
-                event.target.value = "";
-              }} />
               <input ref={salesFileRef} type="file" accept="image/*" className="hidden" onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) setSalesImage(file);
@@ -348,7 +344,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
                   });
                 }} locked={!!salesReceiptID} />
               ) : (
-                <CaptureChoices onCamera={() => salesCameraRef.current?.click()} onGallery={() => salesFileRef.current?.click()} />
+                <CaptureChoices onCamera={() => setSalesCameraOpen(true)} onGallery={() => salesFileRef.current?.click()} />
               )}
               {salesReceiptID && (
                 <Alert>
@@ -447,6 +443,11 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
           </Button>
         </div>
       </footer>
+      <BrowserCamera
+        open={salesCameraOpen}
+        onCapture={setSalesImage}
+        onClose={() => setSalesCameraOpen(false)}
+      />
     </div>
   );
 }
@@ -480,7 +481,7 @@ function ImagePreview({ preview, onClear, locked = false }: { preview: string; o
 }
 
 function ImageSlot({ title, draft, onFile, onRemove }: { title: string; draft: ImageDraft; onFile: (file: File) => void; onRemove: () => void }) {
-  const cameraRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="rounded-lg border bg-card p-3 space-y-3">
@@ -490,17 +491,13 @@ function ImageSlot({ title, draft, onFile, onRemove }: { title: string; draft: I
           <X className="w-4 h-4" />
         </button>
       </div>
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => {
-        const file = event.target.files?.[0];
-        if (file) onFile(file);
-        event.target.value = "";
-      }} />
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(event) => {
         const file = event.target.files?.[0];
         if (file) onFile(file);
         event.target.value = "";
       }} />
-      {draft.preview ? <ImagePreview preview={draft.preview} onClear={onRemove} /> : <CaptureChoices onCamera={() => cameraRef.current?.click()} onGallery={() => fileRef.current?.click()} />}
+      {draft.preview ? <ImagePreview preview={draft.preview} onClear={onRemove} /> : <CaptureChoices onCamera={() => setCameraOpen(true)} onGallery={() => fileRef.current?.click()} />}
+      <BrowserCamera open={cameraOpen} onCapture={onFile} onClose={() => setCameraOpen(false)} />
     </div>
   );
 }

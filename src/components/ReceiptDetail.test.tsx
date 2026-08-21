@@ -25,6 +25,16 @@ vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSi
 vi.mock("@/lib/nativeImageConverter", () => ({ convertImageBlobToJpeg: mocks.convertImageBlobToJpeg }));
 vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
+vi.mock("@/components/BrowserCamera", () => ({
+  BrowserCamera: ({ open, onCapture, onClose }: { open: boolean; onCapture: (file: File) => void; onClose: () => void }) => (
+    open ? (
+      <div>
+        <button type="button" onClick={() => onCapture(new File(["camera"], "camera.jpg", { type: "image/jpeg" }))}>Shared camera capture</button>
+        <button type="button" onClick={onClose}>Cancel camera</button>
+      </div>
+    ) : null
+  ),
+}));
 vi.mock("@/lib/api", () => ({ apiFetch: mocks.apiFetch }));
 vi.mock("@/lib/firebase", () => ({ db: {} }));
 vi.mock("firebase/firestore/lite", () => ({ doc: mocks.firestoreDoc, updateDoc: mocks.updateDoc, FieldPath: class {} }));
@@ -151,6 +161,28 @@ describe("ReceiptDetail download", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Receipt image cropped");
     expect(mocks.toastWarning).not.toHaveBeenCalled();
     expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:crop-preview");
+  });
+
+  it("forwards Replace Image camera captures through the existing replacement flow", async () => {
+    const cameraFile = new File(["camera"], "camera.jpg", { type: "image/jpeg" });
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Replace Image (Camera)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Shared camera capture" }));
+
+    await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalled());
+    expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ name: cameraFile.name, type: cameraFile.type }));
+    expect(mocks.convertReceiptImageFile).toHaveBeenCalled();
   });
 
   it("keeps a successful replacement successful while warning about old-image cleanup", async () => {

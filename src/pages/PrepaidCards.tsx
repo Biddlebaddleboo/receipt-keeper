@@ -15,6 +15,7 @@ import { PrepaidActivationReceipt, PrepaidCard, PrepaidCleanupSummary, PrepaidPu
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
+import { BrowserCamera } from "@/components/BrowserCamera";
 
 interface SelectedCard {
   purchase: PrepaidPurchase;
@@ -696,7 +697,7 @@ function PrepaidCardDetail({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [detailLoading, setDetailLoading] = useState(true);
-  const cameraRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -888,11 +889,6 @@ function PrepaidCardDetail({
                 Extract
               </Button>
             </div>
-            <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) setImage(file);
-              event.target.value = "";
-            }} />
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) setImage(file);
@@ -904,7 +900,7 @@ function PrepaidCardDetail({
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                <Button variant="outline" className="h-24 flex-col gap-2" onClick={() => cameraRef.current?.click()}>
+                <Button variant="outline" className="h-24 flex-col gap-2" onClick={() => setCameraOpen(true)}>
                   <Camera className="w-5 h-5" />
                   Camera
                 </Button>
@@ -915,6 +911,8 @@ function PrepaidCardDetail({
               </div>
             )}
           </div>
+
+          <BrowserCamera open={cameraOpen} onCapture={setImage} onClose={() => setCameraOpen(false)} />
 
           {warnings.length > 0 && (
             <Alert>
