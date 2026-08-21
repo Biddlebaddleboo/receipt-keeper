@@ -9,6 +9,12 @@ interface AddReceiptFormProps {
   disabled?: boolean;
 }
 
+type CameraTrackCapabilities = MediaTrackCapabilities & {
+  focusMode?: string[];
+  pointsOfInterest?: unknown;
+  torch?: boolean;
+};
+
 export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -20,12 +26,18 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null);
+  const cameraContinuousFocusRef = useRef(false);
+  const cameraTapFocusSupportedRef = useRef(false);
   const cameraRequestRef = useRef(0);
 
   const stopCamera = useCallback(() => {
     cameraRequestRef.current += 1;
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
+    cameraTrackRef.current = null;
+    cameraContinuousFocusRef.current = false;
+    cameraTapFocusSupportedRef.current = false;
     setCameraStream(null);
     if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
   }, []);
@@ -77,23 +89,64 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
     try {
       stream = await getUserMedia.call(navigator.mediaDevices, {
         audio: false,
-        video: { facingMode: { exact: "environment" } },
+        video: {
+          facingMode: { exact: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
       });
       const track = stream.getVideoTracks()[0];
-      const capabilities = track?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+      const capabilities = track?.getCapabilities?.() as CameraTrackCapabilities | undefined;
       if (!track || !capabilities?.torch) throw new Error("Rear camera torch is unavailable");
 
-      await track.applyConstraints({ advanced: [{ torch: true }] } as unknown as MediaTrackConstraints);
+      const supportsContinuousFocus = capabilities.focusMode?.includes("continuous") === true;
+      const supportsTapFocus = capabilities.pointsOfInterest !== undefined;
+      const torchConstraints = { advanced: [{ torch: true }] } as unknown as MediaTrackConstraints;
+      if (supportsContinuousFocus) {
+        try {
+          await track.applyConstraints({
+            advanced: [{ torch: true, focusMode: "continuous" }],
+          } as unknown as MediaTrackConstraints);
+        } catch {
+          // Some browsers report focus support but reject the combined constraint.
+          // Keep the camera available by retrying the required torch constraint alone.
+          await track.applyConstraints(torchConstraints);
+        }
+      } else {
+        await track.applyConstraints(torchConstraints);
+      }
       if (requestId !== cameraRequestRef.current) {
         stream.getTracks().forEach((activeTrack) => activeTrack.stop());
         return;
       }
+      cameraTrackRef.current = track;
+      cameraContinuousFocusRef.current = supportsContinuousFocus;
+      cameraTapFocusSupportedRef.current = supportsTapFocus;
       cameraStreamRef.current = stream;
       setCameraStream(stream);
     } catch {
       stream?.getTracks().forEach((track) => track.stop());
       if (requestId === cameraRequestRef.current) fallbackToCaptureInput();
     }
+  };
+
+  const handleCameraPreviewTap = (event: React.MouseEvent<HTMLVideoElement>) => {
+    if (!cameraTapFocusSupportedRef.current) return;
+    const track = cameraTrackRef.current;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!track || rect.width <= 0 || rect.height <= 0) return;
+
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    const focusPoint = {
+      torch: true,
+      ...(cameraContinuousFocusRef.current ? { focusMode: "continuous" } : {}),
+      pointsOfInterest: [{ x, y }],
+    };
+    void track.applyConstraints({ advanced: [focusPoint] } as unknown as MediaTrackConstraints).catch(() => {
+      // Tap-to-focus is an enhancement; unsupported or rejected points must not
+      // interrupt the active camera preview or trigger the file-input fallback.
+    });
   };
 
   const captureCameraFrame = () => {
@@ -178,6 +231,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
             playsInline
             muted
             aria-label="Rear camera preview"
+            onClick={handleCameraPreviewTap}
             className="absolute inset-0 h-full w-full bg-black object-cover"
           />
           <div className="absolute inset-x-0 top-0 flex items-start justify-between px-4 pt-[env(safe-area-inset-top)]">

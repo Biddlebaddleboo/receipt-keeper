@@ -72,7 +72,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   const [salesPreview, setSalesPreview] = useState<string | null>(null);
   const [salesReceiptID, setSalesReceiptID] = useState<string | null>(null);
   const [salesReceiptUploading, setSalesReceiptUploading] = useState(false);
-  const [activationReceipts, setActivationReceipts] = useState<ImageDraft[]>([newImageDraft()]);
+  const [activationReceipts, setActivationReceipts] = useState<ImageDraft[]>([]);
   const [cards, setCards] = useState<CardDraft[]>([newCardDraft()]);
   const [isSaving, setIsSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -83,7 +83,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
 
   const canContinue = useMemo(() => {
     if (step === 0) return !!salesFile || !!salesReceiptID;
-    if (step === 1) return activationReceipts.some((item) => item.file || item.storagePath);
+    if (step === 1) return true;
     if (step === 2) {
       return cards.some((card) => card.file || card.storagePath)
         && cards.every((card) => {
@@ -95,7 +95,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         });
     }
     return true;
-  }, [activationReceipts, cards, salesFile, salesReceiptID, step]);
+  }, [cards, salesFile, salesReceiptID, step]);
 
   const setSalesImage = (file: File) => {
     if (salesReceiptID) {
@@ -363,6 +363,10 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
 
           {step === 1 && (
             <section className="space-y-3">
+              <div className="rounded-lg border bg-card p-4">
+                <p className="text-sm font-medium">Activation receipts <span className="text-muted-foreground">(optional)</span></p>
+                <p className="mt-1 text-xs text-muted-foreground">Add one or more activation receipt images if available, or continue without them.</p>
+              </div>
               {activationReceipts.map((item, index) => (
                 <ImageSlot
                   key={item.id}
@@ -373,15 +377,14 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
                     setActivationReceipts((prev) => {
                       const target = prev.find((entry) => entry.id === item.id);
                       if (target) revokeDraft(target);
-                      const next = prev.filter((entry) => entry.id !== item.id);
-                      return next.length > 0 ? next : [newImageDraft()];
+                      return prev.filter((entry) => entry.id !== item.id);
                     });
                   }}
                 />
               ))}
               <Button variant="outline" className="w-full" onClick={() => setActivationReceipts((prev) => [...prev, newImageDraft()])}>
                 <Plus className="w-4 h-4 mr-2" />
-                Add another activation receipt
+                {activationReceipts.length > 0 ? "Add another activation receipt" : "Add activation receipt"}
               </Button>
             </section>
           )}

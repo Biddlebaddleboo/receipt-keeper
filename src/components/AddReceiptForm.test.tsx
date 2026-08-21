@@ -8,8 +8,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
 
-const createTrack = (torch: boolean) => ({
-  getCapabilities: vi.fn(() => ({ torch })),
+const createTrack = (torch: boolean, capabilities: Record<string, unknown> = {}) => ({
+  getCapabilities: vi.fn(() => ({ torch, ...capabilities })),
   applyConstraints: vi.fn().mockResolvedValue(undefined),
   stop: vi.fn(),
 });
@@ -72,9 +72,106 @@ describe("AddReceiptForm camera", () => {
     );
     expect(getUserMedia).toHaveBeenCalledWith({
       audio: false,
-      video: { facingMode: { exact: "environment" } },
+      video: {
+        facingMode: { exact: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
     });
     expect(track.applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] });
+  });
+
+  it("enables continuous autofocus while preserving the default torch", async () => {
+    const track = createTrack(true, { focusMode: ["continuous", "manual"] });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+
+    render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    await screen.findByLabelText("Rear camera preview");
+
+    expect(track.applyConstraints).toHaveBeenCalledWith({
+      advanced: [{ torch: true, focusMode: "continuous" }],
+    });
+  });
+
+  it("keeps the preview available when focus capabilities are unsupported", async () => {
+    const track = createTrack(true, { focusMode: ["manual"] });
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+
+    render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    await screen.findByLabelText("Rear camera preview");
+
+    expect(inputClick).not.toHaveBeenCalled();
+    expect(track.applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] });
+  });
+
+  it("uses supported points of interest for tap-to-focus", async () => {
+    const track = createTrack(true, { focusMode: ["continuous"], pointsOfInterest: [] });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+
+    render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    const preview = await screen.findByLabelText("Rear camera preview");
+    vi.spyOn(preview, "getBoundingClientRect").mockReturnValue({
+      left: 10,
+      top: 20,
+      width: 100,
+      height: 200,
+      right: 110,
+      bottom: 220,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.click(preview, { clientX: 35, clientY: 120 });
+
+    await waitFor(() => expect(track.applyConstraints).toHaveBeenCalledTimes(2));
+    expect(track.applyConstraints).toHaveBeenLastCalledWith({
+      advanced: [{
+        torch: true,
+        focusMode: "continuous",
+        pointsOfInterest: [{ x: 0.25, y: 0.5 }],
+      }],
+    });
+  });
+
+  it("does not apply tap-to-focus constraints when points are unsupported", async () => {
+    const track = createTrack(true, { focusMode: ["continuous"] });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+
+    render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    const preview = await screen.findByLabelText("Rear camera preview");
+    vi.spyOn(preview, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 100,
+      right: 100,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.click(preview, { clientX: 50, clientY: 50 });
+
+    expect(track.applyConstraints).toHaveBeenCalledTimes(1);
   });
 
   it("stops all camera tracks after closing the preview", async () => {
@@ -91,6 +188,21 @@ describe("AddReceiptForm camera", () => {
 
     expect(track.stop).toHaveBeenCalled();
     expect(screen.queryByLabelText("Rear camera preview")).not.toBeInTheDocument();
+  });
+
+  it("stops all camera tracks when the form unmounts", async () => {
+    const track = createTrack(true);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+
+    const { unmount } = render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    await screen.findByLabelText("Rear camera preview");
+    unmount();
+
+    expect(track.stop).toHaveBeenCalled();
   });
 
   it("falls back to the existing camera input when camera or torch setup is unavailable", async () => {

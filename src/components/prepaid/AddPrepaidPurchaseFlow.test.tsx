@@ -72,6 +72,7 @@ describe("AddPrepaidPurchaseFlow", () => {
     await screen.findByText(/sales receipt saved/i);
     expect(mocks.createReceiptViaSignedUpload).toHaveBeenCalledTimes(1);
 
+    fireEvent.click(screen.getByRole("button", { name: "Add activation receipt" }));
     await addFileToFirstInput(container, imageFile("activation.jpg"));
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
@@ -99,5 +100,37 @@ describe("AddPrepaidPurchaseFlow", () => {
     expect(mocks.createPurchase).toHaveBeenLastCalledWith(expect.objectContaining({
       sales_receipt_id: "receipt-1",
     }));
+  });
+
+  it("allows skipping optional activation receipts and saves an empty array", async () => {
+    const onSaved = vi.fn();
+    mocks.uploadPrepaidImage.mockReset();
+    mocks.uploadPrepaidImage.mockResolvedValue("receipts/u_owner/prepaid/package/one.webp");
+    mocks.createPurchase.mockReset();
+    mocks.createPurchase.mockResolvedValue({ id: "purchase-2" });
+    const { container } = render(<AddPrepaidPurchaseFlow onClose={vi.fn()} onSaved={onSaved} />);
+
+    await addFileToFirstInput(container, imageFile("sales.jpg"));
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await screen.findByText(/sales receipt saved/i);
+
+    expect(screen.getByText(/add one or more activation receipt images if available/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await addFileToFirstInput(container, imageFile("package.jpg"));
+    fireEvent.change(screen.getByPlaceholderText("30-digit package barcode"), {
+      target: { value: "123456789012345678901234567890" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("11-digit Vanilla serial"), {
+      target: { value: "12345678901" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Denomination"), {
+      target: { value: "75" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save purchase/i }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(mocks.createPurchase).toHaveBeenCalledWith(expect.objectContaining({ activation_receipts: [] }));
   });
 });
