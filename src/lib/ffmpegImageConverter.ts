@@ -1,5 +1,8 @@
 import coreURL from "@ffmpeg/core?url";
 import wasmURL from "@ffmpeg/core/wasm?url";
+import { normalizeErrorMessage } from "@/lib/imageErrors";
+
+export { normalizeErrorMessage } from "@/lib/imageErrors";
 
 type FFmpegInstance = {
   loaded: boolean;
@@ -60,41 +63,6 @@ const fileExtensionFromType = (type: string) => {
   if (normalizedType === "image/png") return "png";
   if (normalizedType === "image/webp") return "webp";
   return "jpg";
-};
-
-/** Preserve useful details when a browser/worker rejects with a non-Error value. */
-export const normalizeErrorMessage = (value: unknown): string => {
-  if (value instanceof Error) {
-    const message = value.message.trim();
-    const name = value.name.trim();
-    if (message && name && name !== "Error") return `${name}: ${message}`;
-    if (message) return message;
-    if (name) return name;
-  }
-
-  if (typeof value === "string") return value.trim() || "empty error string";
-  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") return String(value);
-  if (value === null) return "null";
-  if (value === undefined) return "undefined";
-
-  if (typeof value === "object") {
-    const record = value as { name?: unknown; message?: unknown };
-    const name = typeof record.name === "string" ? record.name.trim() : "";
-    const message = typeof record.message === "string" ? record.message.trim() : "";
-    if (message && name && name !== "Error") return `${name}: ${message}`;
-    if (message) return message;
-    if (name) return name;
-
-    try {
-      const serialized = JSON.stringify(value);
-      if (serialized && serialized !== "{}") return serialized;
-    } catch {
-      // Fall through to String() for objects that cannot be serialized.
-    }
-  }
-
-  const stringified = String(value);
-  return stringified === "[object Object]" ? "unknown error object" : stringified;
 };
 
 const MAX_FFMPEG_LOG_MESSAGES = 24;
@@ -196,28 +164,3 @@ export const convertReceiptImageFile = async (file: File): Promise<File> => {
     lastModified: Date.now(),
   });
 };
-
-export const JPEG_DOWNLOAD_QUALITY = 2;
-
-/** Preserve the known-working pre-resize JPEG download command. */
-export const buildJpegConversionArguments = (inputName: string, outputName: string): string[] => [
-  "-i",
-  inputName,
-  "-frames:v",
-  "1",
-  "-c:v",
-  "mjpeg",
-  "-q:v",
-  String(JPEG_DOWNLOAD_QUALITY),
-  "-y",
-  outputName,
-];
-
-/** Convert a downloaded image to a real JPEG. */
-export const convertImageBlobToJpeg = async (blob: Blob): Promise<Blob> =>
-  convertImageBlob(blob, {
-    outputExtension: "jpg",
-    outputType: "image/jpeg",
-    failureLabel: "Image conversion to JPEG",
-    buildArguments: buildJpegConversionArguments,
-  });

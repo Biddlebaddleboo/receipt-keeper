@@ -7,7 +7,7 @@ import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
-import { convertImageBlobToJpeg } from "@/lib/ffmpegImageConverter";
+import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 

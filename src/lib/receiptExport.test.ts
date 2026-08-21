@@ -8,6 +8,14 @@ import {
 } from "@/lib/receiptExport";
 import { createStoredZip } from "@/lib/zipStore";
 
+const mocks = vi.hoisted(() => ({
+  nativeConvert: vi.fn(),
+}));
+
+vi.mock("@/lib/nativeImageConverter", () => ({
+  convertImageBlobToJpeg: mocks.nativeConvert,
+}));
+
 const receipt = (overrides: Partial<Receipt>): Receipt => ({
   id: "receipt-id",
   vendor: "Store",
@@ -51,6 +59,23 @@ const readZipEntries = async (zip: Blob) => {
 };
 
 describe("receipt export", () => {
+  it("uses the native JPEG converter by default", async () => {
+    vi.clearAllMocks();
+    mocks.nativeConvert.mockResolvedValue(jpeg());
+    const source = new Blob(["webp"], { type: "image/webp" });
+
+    await buildReceiptExportZip([receipt({ id: "native-default" })], {
+      getImageUrl: async () => "https://signed/native-default",
+      fetchImage: async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => source,
+      } as Response),
+    });
+
+    expect(mocks.nativeConvert).toHaveBeenCalledWith(source);
+  });
+
   it("filters both dates inclusively and applies selected categories", () => {
     const receipts = [
       receipt({ id: "before", purchase_date: "2026-08-19" }),

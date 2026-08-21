@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: [] }) }));
 vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSignedReceiptImageUrl }));
-vi.mock("@/lib/ffmpegImageConverter", () => ({ convertImageBlobToJpeg: mocks.convertImageBlobToJpeg }));
+vi.mock("@/lib/nativeImageConverter", () => ({ convertImageBlobToJpeg: mocks.convertImageBlobToJpeg }));
 vi.mock("@/lib/api", () => ({ apiFetch: mocks.apiFetch }));
 vi.mock("@/lib/firebase", () => ({ db: {} }));
 vi.mock("firebase/firestore/lite", () => ({ doc: vi.fn(), updateDoc: vi.fn(), FieldPath: class {} }));

@@ -1,5 +1,6 @@
 import type { Receipt } from "@/hooks/useReceiptApi";
-import { convertImageBlobToJpeg, normalizeErrorMessage } from "@/lib/ffmpegImageConverter";
+import { normalizeErrorMessage } from "@/lib/imageErrors";
+import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
 import { createStoredZip, type StoredZipEntry } from "@/lib/zipStore";
 
 export interface ReceiptExportFilters {

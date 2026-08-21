@@ -41,6 +41,9 @@ vi.mock("@/hooks/useReceiptApi", () => ({
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({
   convertReceiptImageFile: vi.fn(),
+}));
+
+vi.mock("@/lib/nativeImageConverter", () => ({
   convertImageBlobToJpeg: mocks.convertImageBlobToJpeg,
 }));
 

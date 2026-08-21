@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  buildJpegConversionArguments,
-  convertImageBlobToJpeg,
-  convertReceiptImageFile,
-  JPEG_DOWNLOAD_QUALITY,
-  normalizeErrorMessage,
-} from "@/lib/ffmpegImageConverter";
+import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
+import { normalizeErrorMessage } from "@/lib/imageErrors";
 
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
@@ -33,7 +28,9 @@ vi.mock("@ffmpeg/ffmpeg", () => ({
 
 vi.mock("@ffmpeg/util", () => ({ fetchFile: mocks.fetchFile }));
 
-describe("download JPEG conversion", () => {
+const uploadFile = () => new File(["image"], "receipt.jpg", { type: "image/jpeg" });
+
+describe("upload WebP conversion", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.load.mockResolvedValue(undefined);
@@ -45,61 +42,14 @@ describe("download JPEG conversion", () => {
     mocks.off.mockImplementation(() => undefined);
   });
 
-  it("uses the exact pre-resize JPEG command", () => {
-    const args = buildJpegConversionArguments("input.webp", "output.jpg");
-
-    expect(args).toEqual([
-      "-i",
-      "input.webp",
-      "-frames:v",
-      "1",
-      "-c:v",
-      "mjpeg",
-      "-q:v",
-      "2",
-      "-y",
-      "output.jpg",
-    ]);
-  });
-
-  it("encodes downloaded JPEGs with MJPEG quality 2", async () => {
-    const output = await convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" }));
-
-    expect(JPEG_DOWNLOAD_QUALITY).toBe(2);
-    expect(output.type).toBe("image/jpeg");
-    const args = mocks.exec.mock.calls[0]?.[0] as string[];
-    expect(args).toEqual(expect.arrayContaining([
-      "-frames:v",
-      "1",
-      "-c:v",
-      "mjpeg",
-      "-q:v",
-      "2",
-    ]));
-    expect(args).not.toContain("-vf");
-    expect(args).not.toContain("-f");
-    expect(args).not.toContain("-update");
-    expect(args.some((argument) => argument.includes("scale="))).toBe(false);
-    expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
-    expect(mocks.on).toHaveBeenCalledTimes(1);
-    expect(mocks.off).toHaveBeenCalledTimes(1);
-  });
-
-  it("treats an FFmpeg exit code of zero as success", async () => {
-    mocks.exec.mockResolvedValue(0);
-
-    await expect(convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" }))).resolves.toMatchObject({
-      type: "image/jpeg",
-    });
-    expect(mocks.readFile).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps WebP upload conversion separate from JPEG download settings", async () => {
-    const output = await convertReceiptImageFile(new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+  it("keeps the existing WebP upload conversion unchanged", async () => {
+    const output = await convertReceiptImageFile(uploadFile());
 
     expect(output.type).toBe("image/webp");
     expect(output.name).toBe("receipt.webp");
     expect(mocks.exec).toHaveBeenCalledWith(expect.arrayContaining([
+      "-vf",
+      "scale='if(gt(iw,2000),2000,iw)':-2",
       "-c:v",
       "libwebp",
       "-q:v",
@@ -110,12 +60,22 @@ describe("download JPEG conversion", () => {
       "picture",
       "-y",
     ]));
+    expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
+    expect(mocks.on).toHaveBeenCalledTimes(1);
+    expect(mocks.off).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an FFmpeg exit code of zero as success", async () => {
+    await expect(convertReceiptImageFile(uploadFile())).resolves.toMatchObject({
+      type: "image/webp",
+    });
+    expect(mocks.readFile).toHaveBeenCalledTimes(1);
   });
 
   it("reports a non-zero FFmpeg exit code without reading a missing output", async () => {
     mocks.exec.mockResolvedValue(7);
 
-    await expect(convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" })))
+    await expect(convertReceiptImageFile(uploadFile()))
       .rejects.toThrow(/FFmpeg exited with code 7/);
     expect(mocks.readFile).not.toHaveBeenCalled();
     expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
@@ -129,7 +89,7 @@ describe("download JPEG conversion", () => {
   ])("preserves non-Error FFmpeg failures (%s)", async (rejection, expected) => {
     mocks.exec.mockRejectedValue(rejection);
 
-    await expect(convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" })))
+    await expect(convertReceiptImageFile(uploadFile()))
       .rejects.toThrow(expected);
     expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
   });
@@ -141,14 +101,14 @@ describe("download JPEG conversion", () => {
       callback({ type: "fferr", message: "Invalid data found when processing input" });
     });
 
-    await expect(convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" })))
+    await expect(convertReceiptImageFile(uploadFile()))
       .rejects.toThrow(/FFmpeg log: fferr: Invalid data found when processing input/);
     expect(mocks.off).toHaveBeenCalledTimes(1);
   });
 
   it("does not accumulate log listeners across conversions", async () => {
-    await convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" }));
-    await convertImageBlobToJpeg(new Blob(["webp"], { type: "image/webp" }));
+    await convertReceiptImageFile(uploadFile());
+    await convertReceiptImageFile(uploadFile());
 
     expect(mocks.on).toHaveBeenCalledTimes(2);
     expect(mocks.off).toHaveBeenCalledTimes(2);
