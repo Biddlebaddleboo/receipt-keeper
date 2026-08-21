@@ -1,6 +1,7 @@
 import type { Receipt } from "@/hooks/useReceiptApi";
 import { normalizeErrorMessage } from "@/lib/imageErrors";
 import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
+import { normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { createStoredZip, type StoredZipEntry } from "@/lib/zipStore";
 
 export interface ReceiptExportFilters {
@@ -27,8 +28,7 @@ export interface ReceiptExportOptions extends ReceiptExportFilters {
 }
 
 const receiptDate = (value: string): string | null => {
-  const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
-  return match?.[1] ?? null;
+  return normalizeReceiptPurchaseDate(value);
 };
 
 const cleanFilenamePart = (value: string, fallback: string): string => {
@@ -44,8 +44,8 @@ const cleanFilenamePart = (value: string, fallback: string): string => {
 };
 
 export const filterReceiptsForExport = (receipts: Receipt[], filters: ReceiptExportFilters = {}): Receipt[] => {
-  const fromDate = filters.fromDate?.trim() || "";
-  const toDate = filters.toDate?.trim() || "";
+  const fromDate = normalizeReceiptPurchaseDate(filters.fromDate?.trim() || "") ?? "";
+  const toDate = normalizeReceiptPurchaseDate(filters.toDate?.trim() || "") ?? "";
   const categories = new Set((filters.categories ?? []).map((category) => category.trim()).filter(Boolean));
 
   return receipts.filter((receipt) => {
@@ -66,7 +66,10 @@ export const receiptExportFilename = (receipt: Receipt, usedNames: Map<string, n
   return `${base}${nextNumber > 1 ? ` (${nextNumber})` : ""}.jpg`;
 };
 
-const safeRangePart = (value?: string) => value?.trim().match(/^\d{4}-\d{2}-\d{2}$/)?.[0];
+const safeRangePart = (value?: string) => {
+  const trimmed = value?.trim() || "";
+  return trimmed ? normalizeReceiptPurchaseDate(trimmed) ?? undefined : undefined;
+};
 
 export const receiptExportZipFilename = (filters: ReceiptExportFilters): string => {
   const from = safeRangePart(filters.fromDate);

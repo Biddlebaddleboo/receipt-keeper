@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   fetchSignedReceiptImageUrl: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
   apiFetch: vi.fn(),
+  firestoreDoc: vi.fn(),
+  updateDoc: vi.fn(),
 }));
 
 vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: [] }) }));
@@ -14,7 +16,7 @@ vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSi
 vi.mock("@/lib/nativeImageConverter", () => ({ convertImageBlobToJpeg: mocks.convertImageBlobToJpeg }));
 vi.mock("@/lib/api", () => ({ apiFetch: mocks.apiFetch }));
 vi.mock("@/lib/firebase", () => ({ db: {} }));
-vi.mock("firebase/firestore/lite", () => ({ doc: vi.fn(), updateDoc: vi.fn(), FieldPath: class {} }));
+vi.mock("firebase/firestore/lite", () => ({ doc: mocks.firestoreDoc, updateDoc: mocks.updateDoc, FieldPath: class {} }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const receipt: Receipt = {
@@ -71,5 +73,26 @@ describe("ReceiptDetail download", () => {
 
     await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" })));
     expect(downloadedName).toBe("receipt-Example Store.jpg");
+  });
+
+  it("writes purchase dates through the canonical normalization boundary", async () => {
+    render(
+      <ReceiptDetail
+        receipt={{ ...receipt, purchase_date: "2026-07-23", shard_doc_id: "shard-1" }}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(receipt)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Purchase Date/ }));
+    const dateInput = document.querySelector('input[type="date"]');
+    expect(dateInput).not.toBeNull();
+    fireEvent.change(dateInput, { target: { value: "2026-07-23" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateDoc).toHaveBeenCalled());
+    expect(mocks.updateDoc.mock.calls[0][1]).toEqual({ purchase_date: "2026-07-23" });
   });
 });

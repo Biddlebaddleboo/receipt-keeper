@@ -53,7 +53,7 @@ describe("useReceiptApi canonical export fields", () => {
             tax: 1,
             total: 11,
             category: "Corrected category",
-            purchase_date: "2026-08-20",
+            purchase_date: "2026/08/20",
             created_at: "2026-08-20T00:00:00.000Z",
           },
           fallback: {
@@ -152,7 +152,7 @@ describe("useReceiptApi canonical export fields", () => {
       tax: 1,
       total: 11,
       category: "Corrected category",
-      purchase_date: "2026-08-20",
+      purchase_date: "2026/08/20",
     });
     expect(fallback).toMatchObject({
       vendor: "Detail fallback store",

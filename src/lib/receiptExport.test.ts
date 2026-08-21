@@ -92,6 +92,16 @@ describe("receipt export", () => {
     }).map((item) => item.id)).toEqual(["start", "end"]);
   });
 
+  it("normalizes slash dates for filenames and inclusive filtering", () => {
+    const slashDate = receipt({ id: "slash", purchase_date: "2026/07/23", vendor: "Slash Store" });
+    const hyphenDate = receipt({ id: "hyphen", purchase_date: "2026-07-23", vendor: "Hyphen Store" });
+    const filters = { fromDate: "2026-07-23", toDate: "2026-07-23" };
+
+    expect(filterReceiptsForExport([slashDate, hyphenDate], filters).map((item) => item.id)).toEqual(["slash", "hyphen"]);
+    expect(filterReceiptsForExport([slashDate], { fromDate: "2026/07/23", toDate: "2026/07/23" })).toHaveLength(1);
+    expect(receiptExportFilename(slashDate, new Map())).toBe("2026-07-23 - Slash Store.jpg");
+  });
+
   it("exports all corrected canonical categories even when AI suggestions are stale", async () => {
     const correctedReceipts = Array.from({ length: 21 }, (_value, index) => receipt({
       id: `corrected-${index + 1}`,
@@ -150,6 +160,7 @@ describe("receipt export", () => {
     expect(receiptExportFilename(receipt({ vendor: "ACME / West?" }), used)).toBe("2026-08-20 - ACME - West-.jpg");
     expect(receiptExportFilename(receipt({ vendor: "ACME / West?" }), used)).toBe("2026-08-20 - ACME - West- (2).jpg");
     expect(receiptExportFilename(receipt({ purchase_date: "", vendor: "" }), used)).toBe("unknown-date - Unknown retailer.jpg");
+    expect(receiptExportFilename(receipt({ purchase_date: "2026/02/30" }), used)).toBe("unknown-date - Store.jpg");
   });
 
   it("converts each fetched WebP before writing JPEG STORE entries", async () => {
@@ -179,6 +190,7 @@ describe("receipt export", () => {
     expect(progress.some((item) => item.phase === "packaging")).toBe(true);
     expect(progress.at(-1)).toEqual({ percentage: 100, completed: 2, total: 2, phase: "complete" });
     expect(receiptExportZipFilename({ fromDate: "2026-08-01", toDate: "2026-08-20" })).toBe("receipts-2026-08-01-to-2026-08-20.zip");
+    expect(receiptExportZipFilename({ fromDate: "2026/08/01", toDate: "2026/08/20" })).toBe("receipts-2026-08-01-to-2026-08-20.zip");
   });
 
   it("passes JPEG parts directly to the ZIP Blob without a giant local-data buffer", async () => {

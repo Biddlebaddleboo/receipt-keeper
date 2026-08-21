@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
-import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
+import { formatReceiptPurchaseDate, normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
 import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
@@ -83,7 +83,15 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     else if (field === "subtotal") payload.subtotal = parseFloat(value);
     else if (field === "tax") payload.tax = parseFloat(value);
     else if (field === "category") payload.category = value;
-    else if (field === "purchase_date") payload.purchase_date = value;
+    else if (field === "purchase_date") {
+      const trimmedDate = value.trim();
+      const normalizedDate = trimmedDate ? normalizeReceiptPurchaseDate(trimmedDate) : "";
+      if (normalizedDate === null) {
+        toast.error("Invalid purchase date");
+        return;
+      }
+      payload.purchase_date = normalizedDate;
+    }
 
     if ((field === "total" || field === "subtotal" || field === "tax") && isNaN(payload[field] as number)) {
       toast.error(`Invalid ${field}`);
