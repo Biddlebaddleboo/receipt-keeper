@@ -70,6 +70,42 @@ const canonicalEditableText = (metadataValue: unknown, detailValue: unknown): st
   return "";
 };
 
+const canonicalNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const hasCanonicalNumber = (value: unknown): boolean => canonicalNumber(value) !== null;
+
+const hasCompleteCanonicalMetadata = (metadata: Record<string, unknown>): boolean =>
+  Boolean(
+    canonicalEditableText(metadata.vendor, undefined) &&
+    hasCanonicalNumber(metadata.subtotal) &&
+    hasCanonicalNumber(metadata.tax) &&
+    hasCanonicalNumber(metadata.total) &&
+    canonicalEditableText(metadata.category, undefined) &&
+    canonicalEditableText(metadata.purchase_date, undefined)
+  );
+
+const hasCompleteCanonicalSources = (
+  metadata: Record<string, unknown>,
+  detail?: Record<string, unknown>,
+): boolean => {
+  const detailData = detail ?? {};
+  return Boolean(
+    canonicalEditableText(metadata.vendor, detailData.vendor) &&
+    (canonicalNumber(metadata.subtotal) ?? canonicalNumber(detailData.subtotal)) !== null &&
+    (canonicalNumber(metadata.tax) ?? canonicalNumber(detailData.tax)) !== null &&
+    (canonicalNumber(metadata.total) ?? canonicalNumber(detailData.total)) !== null &&
+    canonicalEditableText(metadata.category, detailData.category) &&
+    canonicalEditableText(metadata.purchase_date, detailData.purchase_date)
+  );
+};
+
 export function useReceiptApi(options?: UseReceiptApiOptions) {
   const pollingPaused = options?.pollingPaused ?? false;
   const { token, user, isLoading: authLoading, firebaseUID, isFirebaseReady } = useAuth();
@@ -207,23 +243,14 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return "";
   };
 
-  const toNumber = (value: unknown): number | null => {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string") {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return null;
-  };
-
   const toItems = (value: unknown): ReceiptItem[] => {
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry) => {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
       const record = entry as Record<string, unknown>;
       const name = typeof record.name === "string" ? record.name : "";
-      const quantity = toNumber(record.quantity) ?? 0;
-      const price = toNumber(record.price) ?? 0;
+      const quantity = canonicalNumber(record.quantity) ?? 0;
+      const price = canonicalNumber(record.price) ?? 0;
       return [{ name, quantity, price }];
     });
   };
@@ -238,23 +265,15 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     });
   };
 
-  const getAiSuggestions = (data: Record<string, unknown>) => {
-    const extractedFields = data.extracted_fields;
-    if (!extractedFields || typeof extractedFields !== "object" || Array.isArray(extractedFields)) return null;
-    const aiSuggestions = (extractedFields as Record<string, unknown>).ai_suggestions;
-    if (!aiSuggestions || typeof aiSuggestions !== "object" || Array.isArray(aiSuggestions)) return null;
-    return aiSuggestions as Record<string, unknown>;
-  };
-
   const fromShardMetadataEntry = useCallback((shardDocId: string, receiptId: string, raw: Record<string, unknown>): Receipt => {
     return normalizeReceipt({
       id: receiptId,
-      vendor: typeof raw.vendor === "string" ? raw.vendor : "",
-      subtotal: typeof raw.subtotal === "number" ? raw.subtotal : 0,
-      tax: typeof raw.tax === "number" ? raw.tax : 0,
-      total: typeof raw.total === "number" ? raw.total : 0,
-      category: typeof raw.category === "string" ? raw.category : "",
-      purchase_date: typeof raw.purchase_date === "string" ? raw.purchase_date : "",
+      vendor: canonicalEditableText(raw.vendor, undefined),
+      subtotal: canonicalNumber(raw.subtotal) ?? 0,
+      tax: canonicalNumber(raw.tax) ?? 0,
+      total: canonicalNumber(raw.total) ?? 0,
+      category: canonicalEditableText(raw.category, undefined),
+      purchase_date: canonicalEditableText(raw.purchase_date, undefined),
       extracted_text: typeof raw.extracted_text === "string" ? raw.extracted_text : "",
       extracted_fields: Array.isArray(raw.extracted_fields) ? (raw.extracted_fields as ExtractedField[]) : [],
       items: Array.isArray(raw.items) ? (raw.items as ReceiptItem[]) : [],
@@ -271,13 +290,12 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     metadata: Record<string, unknown>,
     detailData: Record<string, unknown>
   ): Receipt => {
-    const aiSuggestions = getAiSuggestions(detailData);
     const items =
       toItems(detailData.items).length > 0
         ? toItems(detailData.items)
         : toItems(metadata.items).length > 0
           ? toItems(metadata.items)
-          : toItems(aiSuggestions?.items);
+          : [];
     const extractedFields =
       toExtractedFields(detailData.extracted_fields).length > 0
         ? toExtractedFields(detailData.extracted_fields)
@@ -285,29 +303,10 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
 
     return normalizeReceipt({
       id: receiptId,
-      vendor:
-        typeof detailData.vendor === "string"
-          ? detailData.vendor
-          : typeof metadata.vendor === "string"
-            ? metadata.vendor
-            : typeof aiSuggestions?.vendor === "string"
-              ? aiSuggestions.vendor
-              : "",
-      subtotal:
-        toNumber(detailData.subtotal)
-        ?? toNumber(metadata.subtotal)
-        ?? toNumber(aiSuggestions?.subtotal)
-        ?? 0,
-      tax:
-        toNumber(detailData.tax)
-        ?? toNumber(metadata.tax)
-        ?? toNumber(aiSuggestions?.tax)
-        ?? 0,
-      total:
-        toNumber(detailData.total)
-        ?? toNumber(metadata.total)
-        ?? toNumber(aiSuggestions?.total)
-        ?? 0,
+      vendor: canonicalEditableText(metadata.vendor, detailData.vendor),
+      subtotal: canonicalNumber(metadata.subtotal) ?? canonicalNumber(detailData.subtotal) ?? 0,
+      tax: canonicalNumber(metadata.tax) ?? canonicalNumber(detailData.tax) ?? 0,
+      total: canonicalNumber(metadata.total) ?? canonicalNumber(detailData.total) ?? 0,
       category: canonicalEditableText(metadata.category, detailData.category),
       purchase_date: canonicalEditableText(metadata.purchase_date, detailData.purchase_date),
       extracted_text:
@@ -367,10 +366,49 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   const fetchAllReceipts = useCallback(async (): Promise<Receipt[]> => {
     if (authLoading || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return [];
     const ownerDocs = await fetchOwnerReceiptDocs();
-    const uniqueReceipts = new Map<string, Receipt>();
-    expandReceiptDocs(ownerDocs).forEach((receipt) => uniqueReceipts.set(receipt.id, receipt));
-    return Array.from(uniqueReceipts.values());
-  }, [authLoading, expandReceiptDocs, fetchOwnerReceiptDocs, firebaseUID, isFirebaseReady]);
+    const uniqueReceipts = new Map<string, { receipt: Receipt; canonicalComplete: boolean }>();
+
+    for (const shardDoc of ownerDocs) {
+      const schema = typeof shardDoc.data._schema === "string" ? shardDoc.data._schema : "";
+      if (schema !== "receipt_shard") continue;
+      const receiptMetadata = shardDoc.data.receipt_metadata as { [key: string]: unknown } | undefined;
+      if (!receiptMetadata || typeof receiptMetadata !== "object" || Array.isArray(receiptMetadata)) continue;
+
+      for (const [receiptId, rawMeta] of Object.entries(receiptMetadata)) {
+        if (!receiptId.trim() || !rawMeta || typeof rawMeta !== "object" || Array.isArray(rawMeta)) continue;
+        const metadata = rawMeta as Record<string, unknown>;
+        const existing = uniqueReceipts.get(receiptId);
+        if (existing?.canonicalComplete) continue;
+
+        let receipt = fromShardMetadataEntry(shardDoc.id, receiptId, metadata);
+        let canonicalComplete = hasCompleteCanonicalMetadata(metadata);
+        if (!canonicalComplete) {
+          try {
+            const detailSnapshot = await getDoc(doc(db, "receipts", shardDoc.id, "details", receiptId));
+            if (detailSnapshot.exists()) {
+              const detailData = detailSnapshot.data() as Record<string, unknown>;
+              receipt = fromShardDetailDoc(shardDoc.id, receiptId, metadata, detailData);
+              canonicalComplete = hasCompleteCanonicalSources(metadata, detailData);
+            }
+          } catch {
+            // Preserve metadata-only values when an optional detail fallback is unavailable.
+          }
+        }
+
+        if (!existing || !existing.canonicalComplete || canonicalComplete) {
+          uniqueReceipts.set(receiptId, { receipt, canonicalComplete });
+        }
+      }
+    }
+
+    return Array.from(uniqueReceipts.values())
+      .map(({ receipt }) => receipt)
+      .sort((a, b) => {
+        const at = a.created_at ? Date.parse(a.created_at) : 0;
+        const bt = b.created_at ? Date.parse(b.created_at) : 0;
+        return bt - at;
+      });
+  }, [authLoading, fetchOwnerReceiptDocs, firebaseUID, fromShardDetailDoc, fromShardMetadataEntry, isFirebaseReady]);
 
   const toShardCatalog = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
     return ownerDocs
