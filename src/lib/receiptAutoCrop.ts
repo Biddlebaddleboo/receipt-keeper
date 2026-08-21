@@ -202,7 +202,8 @@ const medianFromHistogram = (histogram: Uint32Array, count: number): number => {
 
 /**
  * Conservative bright-paper detector. It deliberately rejects low-contrast,
- * edge-touching, fragmented, or nearly full-frame candidates.
+ * fragmented, or nearly full-frame candidates. Edge-touching candidates are
+ * retained so the crop stage can protect those individual image sides.
  */
 export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetection | null => {
   const { width, height, data } = imageData;
@@ -298,9 +299,7 @@ export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetecti
   const imageArea = width * height;
   const fillRatio = boxArea ? bestCount / boxArea : 0;
   const areaRatio = imageArea ? boxArea / imageArea : 0;
-  const edgeMargin = Math.max(2, Math.round(Math.min(width, height) * 0.015));
-  const touchesEdge = bestLeft <= edgeMargin || bestTop <= edgeMargin || bestRight >= width - 1 - edgeMargin || bestBottom >= height - 1 - edgeMargin;
-  if (!bestCount || touchesEdge || fillRatio < 0.45 || areaRatio < 0.02 || areaRatio > 0.92) return null;
+  if (!bestCount || fillRatio < 0.45 || areaRatio < 0.02 || areaRatio > 0.92) return null;
 
   const confidence = Math.min(1, fillRatio * 0.65 + Math.min(1, (threshold - borderMedian) / 100) * 0.35);
   const targets = [

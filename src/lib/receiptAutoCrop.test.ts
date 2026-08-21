@@ -197,6 +197,28 @@ describe("receipt auto-cropping", () => {
     });
   });
 
+  it("detects an edge-touching side and still crops the eligible opposite side", () => {
+    const detection = detectReceiptCorners(makeImageData(400, 300, { left: 0, top: 30, right: 339, bottom: 269 }));
+    expect(detection).not.toBeNull();
+    const crop = calculateReceiptCropWithSideMarginGuard(detection!.corners, 400, 300);
+    expect(crop?.left).toBe(0);
+    expect(crop?.right).toBeLessThan(400);
+    expect(crop?.top).toBeLessThan(30);
+    expect(crop?.bottom).toBeGreaterThan(269);
+  });
+
+  it("preserves two edge-touching sides while cropping only the other eligible sides", () => {
+    const detection = detectReceiptCorners(makeImageData(400, 300, { left: 0, top: 0, right: 339, bottom: 269 }));
+    expect(detection).not.toBeNull();
+    const crop = calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0, right: 0.15, top: 0, bottom: 0.18 }), 1000, 1000);
+    expect(crop).toEqual({
+      left: 0,
+      top: 0,
+      right: 884,
+      bottom: 853,
+    });
+  });
+
   it("leaves the original unchanged when corners are missing or geometry is invalid", async () => {
     expect(detectReceiptCorners(makeImageData(400, 300))).toBeNull();
     const invalid = calculateReceiptCrop({
