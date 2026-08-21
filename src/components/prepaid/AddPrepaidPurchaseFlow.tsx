@@ -70,6 +70,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   const [step, setStep] = useState<Step>(0);
   const [salesFile, setSalesFile] = useState<File | null>(null);
   const [salesPreview, setSalesPreview] = useState<string | null>(null);
+  const [salesReceiptID, setSalesReceiptID] = useState<string | null>(null);
+  const [salesReceiptUploading, setSalesReceiptUploading] = useState(false);
   const [activationReceipts, setActivationReceipts] = useState<ImageDraft[]>([newImageDraft()]);
   const [cards, setCards] = useState<CardDraft[]>([newCardDraft()]);
   const [isSaving, setIsSaving] = useState(false);
@@ -80,7 +82,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   const { uploadPrepaidImage, extractPackage, createPurchase } = usePrepaidApi();
 
   const canContinue = useMemo(() => {
-    if (step === 0) return !!salesFile;
+    if (step === 0) return !!salesFile || !!salesReceiptID;
     if (step === 1) return activationReceipts.some((item) => item.file || item.storagePath);
     if (step === 2) {
       return cards.some((card) => card.file || card.storagePath)
@@ -93,9 +95,13 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         });
     }
     return true;
-  }, [activationReceipts, cards, salesFile, step]);
+  }, [activationReceipts, cards, salesFile, salesReceiptID, step]);
 
   const setSalesImage = (file: File) => {
+    if (salesReceiptID) {
+      setSubmitError("The sales receipt is already saved and cannot be replaced from this flow.");
+      return;
+    }
     if (!file.type.startsWith("image/")) {
       setSubmitError("Only image files are allowed.");
       return;
@@ -106,6 +112,37 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(file);
     });
+  };
+
+  const ensureSalesReceipt = async () => {
+    if (salesReceiptID) return salesReceiptID;
+    if (!salesFile) throw new Error("Sales receipt is required.");
+    setSalesReceiptUploading(true);
+    try {
+      const salesWebp = await convertReceiptImageFile(salesFile);
+      const salesReceipt = (await createReceiptViaSignedUpload(salesWebp)) as { id?: unknown };
+      const nextSalesReceiptID = typeof salesReceipt.id === "string" ? salesReceipt.id : "";
+      if (!nextSalesReceiptID) throw new Error("Sales receipt upload did not return a receipt ID.");
+      setSalesReceiptID(nextSalesReceiptID);
+      return nextSalesReceiptID;
+    } finally {
+      setSalesReceiptUploading(false);
+    }
+  };
+
+  const continueFlow = async () => {
+    if (step === 0 && !salesReceiptID) {
+      setSubmitError(null);
+      try {
+        await ensureSalesReceipt();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to save sales receipt";
+        setSubmitError(message);
+        toast.error(message);
+        return;
+      }
+    }
+    setStep((Math.min(3, step + 1) as Step));
   };
 
   const updateActivationFile = (id: string, file: File) => {
@@ -187,14 +224,10 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   };
 
   const savePurchase = async () => {
-    if (!salesFile) return;
     setIsSaving(true);
     setSubmitError(null);
     try {
-      const salesWebp = await convertReceiptImageFile(salesFile);
-      const salesReceipt = (await createReceiptViaSignedUpload(salesWebp)) as { id?: unknown };
-      const salesReceiptID = typeof salesReceipt.id === "string" ? salesReceipt.id : "";
-      if (!salesReceiptID) throw new Error("Sales receipt upload did not return a receipt ID.");
+      const savedSalesReceiptID = await ensureSalesReceipt();
 
       const uploadedActivations = [];
       for (const item of activationReceipts) {
@@ -232,7 +265,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
       }
 
       await createPurchase({
-        sales_receipt_id: salesReceiptID,
+        sales_receipt_id: savedSalesReceiptID,
         activation_receipts: uploadedActivations,
         cards: cardPayload,
       });
@@ -258,8 +291,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
           <h2 className="text-sm font-semibold">Add Purchase</h2>
           <p className="text-xs text-muted-foreground">{steps[step]}</p>
         </div>
-        <Button size="sm" onClick={step === 3 ? savePurchase : () => setStep((Math.min(3, step + 1) as Step))} disabled={!canContinue || isSaving}>
-          {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : step === 3 ? "Save" : "Next"}
+        <Button size="sm" onClick={step === 3 ? savePurchase : continueFlow} disabled={!canContinue || isSaving || salesReceiptUploading}>
+          {isSaving || salesReceiptUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : step === 3 ? "Save" : "Next"}
         </Button>
       </header>
 
@@ -301,14 +334,20 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
               }} />
               {salesPreview ? (
                 <ImagePreview preview={salesPreview} onClear={() => {
+                  if (salesReceiptID) return;
                   setSalesFile(null);
                   setSalesPreview((prev) => {
                     if (prev) URL.revokeObjectURL(prev);
                     return null;
                   });
-                }} />
+                }} locked={!!salesReceiptID} />
               ) : (
                 <CaptureChoices onCamera={() => salesCameraRef.current?.click()} onGallery={() => salesFileRef.current?.click()} />
+              )}
+              {salesReceiptID && (
+                <Alert>
+                  <AlertDescription>Sales receipt saved in Receipt Keeper. Retries will reuse this receipt.</AlertDescription>
+                </Alert>
               )}
               <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">
                 The sales receipt is uploaded through normal Receipt Keeper and will appear in your regular receipt list.
@@ -370,7 +409,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
 
           {step === 3 && (
             <section className="space-y-3">
-              <ReviewRow icon={<ReceiptText className="w-4 h-4" />} label="Sales receipt" value={salesFile?.name || "Missing"} />
+              <ReviewRow icon={<ReceiptText className="w-4 h-4" />} label="Sales receipt" value={salesReceiptID ? "Saved in Receipt Keeper" : salesFile?.name || "Missing"} />
               <ReviewRow icon={<ScanLine className="w-4 h-4" />} label="Activation receipts" value={String(activationReceipts.filter((item) => item.file || item.storagePath).length)} />
               {cards.filter((card) => card.activationBarcode || card.vanillaSerial).map((card, index) => (
                 <div key={card.id} className="rounded-lg border bg-card p-4 space-y-1">
@@ -393,8 +432,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
-          <Button onClick={step === 3 ? savePurchase : () => setStep((Math.min(3, step + 1) as Step))} disabled={!canContinue || isSaving}>
-            {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : step === 3 ? <Check className="w-4 h-4 mr-2" /> : null}
+          <Button onClick={step === 3 ? savePurchase : continueFlow} disabled={!canContinue || isSaving || salesReceiptUploading}>
+            {isSaving || salesReceiptUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : step === 3 ? <Check className="w-4 h-4 mr-2" /> : null}
             {step === 3 ? "Save purchase" : "Continue"}
           </Button>
         </div>
@@ -418,13 +457,15 @@ function CaptureChoices({ onCamera, onGallery }: { onCamera: () => void; onGalle
   );
 }
 
-function ImagePreview({ preview, onClear }: { preview: string; onClear: () => void }) {
+function ImagePreview({ preview, onClear, locked = false }: { preview: string; onClear: () => void; locked?: boolean }) {
   return (
     <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted ring-1 ring-border">
       <img src={preview} alt="" className="h-full w-full object-cover" />
-      <button onClick={onClear} className="absolute right-2 top-2 rounded-md bg-card/90 p-1.5">
-        <X className="w-4 h-4" />
-      </button>
+      {!locked && (
+        <button onClick={onClear} className="absolute right-2 top-2 rounded-md bg-card/90 p-1.5">
+          <X className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 }

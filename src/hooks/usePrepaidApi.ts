@@ -22,6 +22,8 @@ export interface PrepaidCard {
   pan?: string;
   expiry?: string;
   cvv?: string;
+  last4?: string;
+  details_captured: boolean;
   state: PrepaidCardState;
   archived_at?: string;
   package_image_storage_path?: string;
@@ -217,6 +219,22 @@ export function usePrepaidApi() {
     return response.json() as Promise<PrepaidPurchase>;
   }, []);
 
+  const getCardDetail = useCallback(async (purchaseID: string, cardID: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}`);
+    if (!response.ok) throw new Error(await readError(response));
+    const payload = (await response.json()) as { card?: PrepaidCard };
+    if (!payload.card) throw new Error("Card not found");
+    return payload.card;
+  }, []);
+
+  const signActivationReceiptImage = useCallback(async (purchaseID: string, activationReceiptID: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/activation-receipts/${activationReceiptID}/image`);
+    if (!response.ok) throw new Error(await readError(response));
+    const payload = (await response.json()) as { image_url?: string };
+    if (!payload.image_url) throw new Error("Activation receipt image is unavailable");
+    return payload.image_url;
+  }, []);
+
   return {
     listPurchases,
     uploadPrepaidImage,
@@ -225,5 +243,7 @@ export function usePrepaidApi() {
     createPurchase,
     updateCard,
     archiveCard,
+    getCardDetail,
+    signActivationReceiptImage,
   };
 }

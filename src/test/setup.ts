@@ -13,3 +13,21 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => {},
   }),
 });
+
+if (!window.crypto.randomUUID) {
+  Object.defineProperty(window.crypto, "randomUUID", {
+    value: () => "00000000-0000-4000-8000-000000000000",
+  });
+}
+
+if (!URL.createObjectURL) {
+  Object.defineProperty(URL, "createObjectURL", {
+    value: () => "blob:test",
+  });
+}
+
+if (!URL.revokeObjectURL) {
+  Object.defineProperty(URL, "revokeObjectURL", {
+    value: () => undefined,
+  });
+}
