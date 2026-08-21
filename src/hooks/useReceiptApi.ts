@@ -368,55 +368,14 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
   }, []);
 
   // The visible list intentionally pages through shards. Exports need the
-  // complete owner-owned set, including authoritative detail documents, so
-  // they use this separate all-shard path before applying any filters.
+  // complete owner-owned metadata set, so they use this separate all-doc path.
   const fetchAllReceipts = useCallback(async (): Promise<Receipt[]> => {
     if (authLoading || !tokenRef.current || !userEmailRef.current || !isFirebaseReady || !firebaseUID) return [];
     const ownerDocs = await fetchOwnerReceiptDocs();
-    const uniqueReceipts = new Map<string, { receipt: Receipt; hasDetail: boolean }>();
-
-    for (const shardDoc of ownerDocs) {
-      const schema = typeof shardDoc.data._schema === "string" ? shardDoc.data._schema : "";
-      if (schema !== "receipt_shard") continue;
-
-      const rawMetadata = shardDoc.data.receipt_metadata;
-      const metadataByID = new Map<string, Record<string, unknown>>();
-      if (rawMetadata && typeof rawMetadata === "object" && !Array.isArray(rawMetadata)) {
-        Object.entries(rawMetadata).forEach(([receiptID, metadata]) => {
-          if (!receiptID.trim() || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) return;
-          metadataByID.set(receiptID, metadata as Record<string, unknown>);
-        });
-      }
-
-      const detailSnapshot = await getDocs(collection(db, "receipts", shardDoc.id, "details"));
-      const detailsByID = new Map(
-        detailSnapshot.docs
-          .filter((detailDoc) => detailDoc.id.trim())
-          .map((detailDoc) => [detailDoc.id, detailDoc.data() as Record<string, unknown>]),
-      );
-      const receiptIDs = new Set([...metadataByID.keys(), ...detailsByID.keys()]);
-
-      receiptIDs.forEach((receiptID) => {
-        const metadata = metadataByID.get(receiptID) ?? {};
-        const detail = detailsByID.get(receiptID);
-        const receipt = detail
-          ? fromShardDetailDoc(shardDoc.id, receiptID, metadata, detail)
-          : fromShardMetadataEntry(shardDoc.id, receiptID, metadata);
-        const existing = uniqueReceipts.get(receiptID);
-        if (!existing || (detail && !existing.hasDetail)) {
-          uniqueReceipts.set(receiptID, { receipt, hasDetail: !!detail });
-        }
-      });
-    }
-
-    return Array.from(uniqueReceipts.values())
-      .map(({ receipt }) => receipt)
-      .sort((a, b) => {
-        const at = a.created_at ? Date.parse(a.created_at) : 0;
-        const bt = b.created_at ? Date.parse(b.created_at) : 0;
-        return bt - at;
-      });
-  }, [authLoading, fetchOwnerReceiptDocs, firebaseUID, fromShardDetailDoc, fromShardMetadataEntry, isFirebaseReady]);
+    const uniqueReceipts = new Map<string, Receipt>();
+    expandReceiptDocs(ownerDocs).forEach((receipt) => uniqueReceipts.set(receipt.id, receipt));
+    return Array.from(uniqueReceipts.values());
+  }, [authLoading, expandReceiptDocs, fetchOwnerReceiptDocs, firebaseUID, isFirebaseReady]);
 
   const toShardCatalog = useCallback((ownerDocs: Array<{ id: string; data: Record<string, unknown> }>) => {
     return ownerDocs

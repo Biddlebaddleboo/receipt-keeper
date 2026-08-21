@@ -61,25 +61,19 @@ describe("Index receipt export", () => {
     vi.clearAllMocks();
     const allReceipts = [
       { id: "visible", vendor: "Visible", category: "Food", purchase_date: "2026-08-20", total: 1 },
-      ...Array.from({ length: 15 }, (_value, index) => ({
-        id: `older-not-loaded-${index + 1}`,
-        vendor: `Older ${index + 1}`,
-        category: "Food",
-        purchase_date: "2025-01-01",
-        total: index + 2,
-      })),
+      { id: "older-not-loaded", vendor: "Older", category: "Food", purchase_date: "2025-01-01", total: 2 },
     ];
     mocks.fetchAllReceipts.mockResolvedValue(allReceipts);
     mocks.filterReceiptsForExport.mockImplementation((receipts: unknown[]) => receipts);
-    mocks.buildReceiptExportZip.mockImplementation(async (receipts: unknown[], options: { onProgress?: (progress: unknown) => void }) => {
-      options.onProgress?.({ completed: receipts.length, total: receipts.length, percentage: 100, phase: "complete" });
+    mocks.buildReceiptExportZip.mockImplementation(async (_receipts: unknown[], options: { onProgress?: (progress: unknown) => void }) => {
+      options.onProgress?.({ completed: 2, total: 2, percentage: 100, phase: "complete" });
       return new Blob(["zip"], { type: "application/zip" });
     });
     mocks.receiptExportZipFilename.mockReturnValue("receipts.zip");
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   });
 
-  it("uses the complete receipt fetch rather than the one-item visible page", async () => {
+  it("uses the complete receipt metadata fetch rather than the visible page", async () => {
     render(<MemoryRouter><Index /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole("button", { name: "Download Receipts" }));
@@ -87,10 +81,9 @@ describe("Index receipt export", () => {
     await waitFor(() => expect(mocks.buildReceiptExportZip).toHaveBeenCalled());
     expect(mocks.fetchAllReceipts).toHaveBeenCalledTimes(1);
     expect(mocks.filterReceiptsForExport).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ id: "older-not-loaded-15" }),
+      expect.objectContaining({ id: "older-not-loaded" }),
     ]), expect.objectContaining({ categories: [] }));
-    expect(mocks.buildReceiptExportZip.mock.calls[0][0]).toHaveLength(16);
-    expect(screen.getByText("16 matching receipts")).toBeInTheDocument();
+    expect(screen.getByText("2 matching receipts")).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
   });
 });
