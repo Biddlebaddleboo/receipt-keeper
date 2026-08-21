@@ -197,11 +197,13 @@ const PrepaidCards = () => {
   };
 
   const openSearchResult = async (result: PrepaidSearchResult) => {
-    let purchase = [...activePurchases, ...archivedPurchases].find((entry) => entry.id === result.purchase_id);
+    const containsResultCard = (entry: PrepaidPurchase) =>
+      entry.id === result.purchase_id && entry.cards.some((card) => card.id === result.card_id);
+    let purchase = [...activePurchases, ...archivedPurchases].find(containsResultCard);
     if (!purchase) {
       try {
         const allPurchases = await listPurchases("all");
-        purchase = allPurchases.find((entry) => entry.id === result.purchase_id);
+        purchase = allPurchases.find(containsResultCard);
       } catch {
         purchase = undefined;
       }

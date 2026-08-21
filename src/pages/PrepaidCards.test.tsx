@@ -252,4 +252,75 @@ describe("PrepaidCards", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Enter exactly 4 or 16 digits.");
     expect(mocks.searchCards).not.toHaveBeenCalled();
   });
+
+  it("opens an archived result when the active purchase copy is loaded first", async () => {
+    const activeCard = {
+      id: "card-active",
+      activation_barcode: "111111111111111111111111111111",
+      vanilla_serial: "11111111111",
+      denomination: 75,
+      state: "active" as const,
+      last4: "1111",
+      details_captured: true,
+    };
+    const archivedCard = {
+      id: "card-archived",
+      activation_barcode: "222222222222222222222222222222",
+      vanilla_serial: "22222222222",
+      denomination: 50,
+      state: "archived" as const,
+      last4: "7777",
+      details_captured: true,
+    };
+    const purchaseSummary = {
+      id: "purchase-mixed",
+      owner_email: "owner@example.com",
+      sales_receipt_id: "receipt-1",
+      activation_receipts: [],
+      active_card_count: 1,
+      archived_card_count: 1,
+      created_at: "2026-08-20T12:00:00Z",
+    };
+    mocks.listPurchases.mockImplementation((state: string) => {
+      if (state === "active") return Promise.resolve([{ ...purchaseSummary, cards: [activeCard] }]);
+      if (state === "archived") return Promise.resolve([{ ...purchaseSummary, cards: [archivedCard] }]);
+      return Promise.resolve([{ ...purchaseSummary, cards: [activeCard, archivedCard] }]);
+    });
+    mocks.searchCards.mockResolvedValue([{
+      purchase_id: "purchase-mixed",
+      card_id: "card-archived",
+      last4: "7777",
+      denomination: 50,
+      state: "archived",
+      activation_barcode: archivedCard.activation_barcode,
+      vanilla_serial: archivedCard.vanilla_serial,
+      sales_receipt_id: "receipt-1",
+      activation_receipt_count: 0,
+      details_captured: true,
+    }]);
+    mocks.getCardDetail.mockResolvedValue({
+      ...archivedCard,
+      pan: "4000000000007777",
+      expiry: "12/29",
+      cvv: "777",
+    });
+
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("textbox", { name: "Search full card number or last 4" }), { target: { value: "7777" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /archived card ending 7777/i })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /archived card ending 7777/i }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("4000000000007777")).toBeInTheDocument());
+    expect(screen.getByText("Vanilla serial: 22222222222")).toBeInTheDocument();
+    expect(screen.getByText("Package barcode: 222222222222222222222222222222")).toBeInTheDocument();
+    expect(mocks.listPurchases).not.toHaveBeenCalledWith("all");
+  });
 });
