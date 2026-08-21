@@ -1,11 +1,13 @@
 import { MemoryRouter } from "react-router-dom";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PrepaidCards from "@/pages/PrepaidCards";
 
 const mocks = vi.hoisted(() => ({
   listPurchases: vi.fn(),
   signActivationReceiptImage: vi.fn(),
+  signCardImage: vi.fn(),
+  getCardDetail: vi.fn(),
   fetchReceipt: vi.fn(),
 }));
 
@@ -18,7 +20,8 @@ vi.mock("@/hooks/usePrepaidApi", () => ({
     extractOpenedCard: vi.fn(),
     updateCard: vi.fn(),
     archiveCard: vi.fn(),
-    getCardDetail: vi.fn(),
+    getCardDetail: mocks.getCardDetail,
+    signCardImage: mocks.signCardImage,
   }),
 }));
 
@@ -62,6 +65,8 @@ describe("PrepaidCards", () => {
                 state: "active",
                 last4: "1234",
                 details_captured: true,
+                package_image_storage_path: "receipts/u_owner/prepaid/package/card-1.webp",
+                opened_card_image_storage_path: "receipts/u_owner/prepaid/opened/card-1.webp",
               },
               {
                 id: "card-2",
@@ -94,6 +99,23 @@ describe("PrepaidCards", () => {
       created_at: "2026-08-20T12:00:00Z",
       status: "success",
     });
+    mocks.getCardDetail.mockResolvedValue({
+      id: "card-1",
+      activation_barcode: "123456789012345678901234567890",
+      vanilla_serial: "12345678901",
+      denomination: 75,
+      state: "active",
+      last4: "1234",
+      details_captured: true,
+      pan: "1234567890121234",
+      expiry: "12/29",
+      cvv: "123",
+      package_image_storage_path: "receipts/u_owner/prepaid/package/card-1.webp",
+      opened_card_image_storage_path: "receipts/u_owner/prepaid/opened/card-1.webp",
+    });
+    mocks.signCardImage.mockImplementation((_purchaseID: string, _cardID: string, kind: string) => {
+      return Promise.resolve(kind === "package" ? "https://signed.example/package.webp" : "https://signed.example/opened.webp");
+    });
   });
 
   it("groups active cards by purchase with receipt metadata and activation count", async () => {
@@ -111,5 +133,34 @@ describe("PrepaidCards", () => {
     expect(screen.getByText("•••• 1234")).toBeInTheDocument();
     expect(screen.getByText("Card details not captured")).toBeInTheDocument();
     expect(screen.getAllByText("$75.00 Vanilla")).toHaveLength(2);
+  });
+
+  it("renders saved card images after reload and exposes download actions", async () => {
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    const salesActions = screen.getByRole("group", { name: "Sales receipt actions" });
+    expect(within(salesActions).getByRole("button", { name: /download sales/i })).toBeInTheDocument();
+    for (const activationIndex of [1, 2]) {
+      const activationActions = screen.getByRole("group", { name: `Activation receipt ${activationIndex}` });
+      expect(within(activationActions).getByRole("button", { name: "Download" })).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+
+    await waitFor(() => expect(screen.getByAltText("Package image")).toBeInTheDocument());
+    expect(screen.getByAltText("Opened-card image")).toBeInTheDocument();
+    expect(screen.getByAltText("Package image")).toHaveAttribute("src", "https://signed.example/package.webp");
+    expect(screen.getByAltText("Opened-card image")).toHaveAttribute("src", "https://signed.example/opened.webp");
+    const packageImage = screen.getByRole("region", { name: "Package image" });
+    expect(within(packageImage).getByRole("button", { name: "View" })).toBeInTheDocument();
+    expect(within(packageImage).getByRole("button", { name: "Download" })).toBeInTheDocument();
+    const openedCardImage = screen.getByRole("region", { name: "Opened-card image" });
+    expect(within(openedCardImage).getByRole("button", { name: "View" })).toBeInTheDocument();
+    expect(within(openedCardImage).getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 });

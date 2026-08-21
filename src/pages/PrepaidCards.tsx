@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Archive, Camera, CreditCard, FileImage, Loader2, Plus, ReceiptText, RefreshCw, ScanLine, Upload, X } from "lucide-react";
+import { ArrowLeft, Archive, Camera, CreditCard, Download, Eye, FileImage, Loader2, Plus, RefreshCw, ScanLine, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,55 @@ interface SelectedCard {
   card: PrepaidCard;
 }
 
+interface ImageModalState {
+  title: string;
+  url: string;
+  filename: string;
+}
+
 function digitsOnly(value: string) {
   return value.replace(/\D/g, "");
+}
+
+async function signedSalesReceiptUrl(receiptID: string) {
+  const response = await apiFetch(`${API_BASE_URL}/receipts/sign-image`, {
+    method: "POST",
+    body: JSON.stringify({ receipt_id: receiptID }),
+  });
+  if (!response.ok) throw new Error("Sales receipt image is unavailable");
+  const payload = (await response.json()) as { image_url?: string };
+  if (!payload.image_url) throw new Error("Sales receipt image is unavailable");
+  return payload.image_url;
+}
+
+async function downloadImageFromSignedURL(imageUrl: string, filename: string) {
+  const response = await fetch(imageUrl, { credentials: "omit" });
+  if (!response.ok) throw new Error("Download failed");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.hidden = true;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function downloadFromSignedURL(getURL: () => Promise<string> | string, filename: string) {
+  const imageUrl = typeof getURL === "string" ? getURL : await getURL();
+  await downloadImageFromSignedURL(imageUrl, filename);
+}
+
+function safeCardIdentifier(card: PrepaidCard) {
+  const last4 = digitsOnly(card.last4 || "");
+  if (last4) return last4.slice(-4);
+  return (card.id || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || "card";
+}
+
+function cardImageFilename(kind: "package" | "opened-card", card: PrepaidCard) {
+  return `${kind}-card-${safeCardIdentifier(card)}.webp`;
 }
 
 const PrepaidCards = () => {
@@ -36,7 +83,7 @@ const PrepaidCards = () => {
   const [showAddFlow, setShowAddFlow] = useState(false);
   const [selected, setSelected] = useState<SelectedCard | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<Receipt | null>(null);
-  const [activationImage, setActivationImage] = useState<{ title: string; url: string } | null>(null);
+  const [activationImage, setActivationImage] = useState<ImageModalState | null>(null);
 
   const loadReceiptSummaries = useCallback(async (purchases: PrepaidPurchase[]) => {
     const ids = Array.from(new Set(purchases.map((purchase) => purchase.sales_receipt_id).filter(Boolean)));
@@ -96,9 +143,28 @@ const PrepaidCards = () => {
   const openActivationReceipt = async (purchaseID: string, receipt: PrepaidActivationReceipt, index: number) => {
     try {
       const url = await signActivationReceiptImage(purchaseID, receipt.id);
-      setActivationImage({ title: `Activation receipt ${index + 1}`, url });
+      setActivationImage({ title: `Activation receipt ${index + 1}`, url, filename: `activation-receipt-${index + 1}.webp` });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Activation receipt image is unavailable");
+    }
+  };
+
+  const downloadSalesReceipt = async (receiptID: string) => {
+    try {
+      await downloadFromSignedURL(() => signedSalesReceiptUrl(receiptID), "sales-receipt.webp");
+    } catch {
+      toast.error("Failed to download sales receipt");
+    }
+  };
+
+  const downloadActivationReceipt = async (purchaseID: string, receipt: PrepaidActivationReceipt, index: number) => {
+    try {
+      await downloadFromSignedURL(
+        () => signActivationReceiptImage(purchaseID, receipt.id),
+        `activation-receipt-${index + 1}.webp`,
+      );
+    } catch {
+      toast.error("Failed to download activation receipt");
     }
   };
 
@@ -138,7 +204,9 @@ const PrepaidCards = () => {
                   receipt={receiptMap[purchase.sales_receipt_id]}
                   onCardClick={(card) => setSelected({ purchase, card })}
                   onViewSalesReceipt={() => openSalesReceipt(purchase.sales_receipt_id)}
+                  onDownloadSalesReceipt={() => downloadSalesReceipt(purchase.sales_receipt_id)}
                   onViewActivationReceipt={(receipt, index) => openActivationReceipt(purchase.id, receipt, index)}
+                  onDownloadActivationReceipt={(receipt, index) => downloadActivationReceipt(purchase.id, receipt, index)}
                 />
               ))
             )}
@@ -156,7 +224,9 @@ const PrepaidCards = () => {
                   receipt={receiptMap[purchase.sales_receipt_id]}
                   onCardClick={(card) => setSelected({ purchase, card })}
                   onViewSalesReceipt={() => openSalesReceipt(purchase.sales_receipt_id)}
+                  onDownloadSalesReceipt={() => downloadSalesReceipt(purchase.sales_receipt_id)}
                   onViewActivationReceipt={(receipt, index) => openActivationReceipt(purchase.id, receipt, index)}
+                  onDownloadActivationReceipt={(receipt, index) => downloadActivationReceipt(purchase.id, receipt, index)}
                 />
               ))
             )}
@@ -193,7 +263,7 @@ const PrepaidCards = () => {
       )}
 
       {viewingReceipt && <SalesReceiptViewer receipt={viewingReceipt} onClose={() => setViewingReceipt(null)} />}
-      {activationImage && <ImageViewer title={activationImage.title} imageUrl={activationImage.url} onClose={() => setActivationImage(null)} />}
+      {activationImage && <ImageViewer title={activationImage.title} imageUrl={activationImage.url} filename={activationImage.filename} onClose={() => setActivationImage(null)} />}
     </div>
   );
 };
@@ -225,13 +295,17 @@ function PrepaidPurchaseGroup({
   receipt,
   onCardClick,
   onViewSalesReceipt,
+  onDownloadSalesReceipt,
   onViewActivationReceipt,
+  onDownloadActivationReceipt,
 }: {
   purchase: PrepaidPurchase;
   receipt?: Receipt | null;
   onCardClick: (card: PrepaidCard) => void;
   onViewSalesReceipt: () => void;
+  onDownloadSalesReceipt: () => void;
   onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
 }) {
   const vendor = receipt?.vendor?.trim() || "Retailer";
   const date = receipt?.purchase_date
@@ -250,26 +324,43 @@ function PrepaidPurchaseGroup({
           </div>
           <span className="text-xs text-muted-foreground">Sales receipt ✓</span>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Sales receipt actions">
           <Button variant="outline" size="sm" onClick={onViewSalesReceipt}>
-            <ReceiptText className="w-4 h-4 mr-2" />
-            View sales receipt
+            <Eye className="w-4 h-4 mr-2" />
+            View sales
+          </Button>
+          <Button variant="outline" size="sm" onClick={onDownloadSalesReceipt}>
+            <Download className="w-4 h-4 mr-2" />
+            Download sales
           </Button>
           <span className="inline-flex h-9 items-center rounded-md border px-3 text-xs text-muted-foreground">
             Activation receipts ({purchase.activation_receipts.length})
           </span>
         </div>
         {purchase.activation_receipts.length > 0 && (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             {purchase.activation_receipts.map((activationReceipt, index) => (
-              <button
+              <div
                 key={activationReceipt.id}
-                onClick={() => onViewActivationReceipt(activationReceipt, index)}
-                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-left text-xs hover:bg-secondary"
+                className="rounded-md border bg-background p-2 space-y-2"
+                role="group"
+                aria-label={`Activation receipt ${index + 1}`}
               >
-                <FileImage className="w-4 h-4 text-muted-foreground" />
-                <span className="truncate">Activation {index + 1}</span>
-              </button>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <FileImage className="w-4 h-4" />
+                  <span className="truncate">Activation {index + 1}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" size="sm" onClick={() => onViewActivationReceipt(activationReceipt, index)}>
+                    <Eye className="w-4 h-4 mr-2" />
+                    View
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => onDownloadActivationReceipt(activationReceipt, index)}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Download
+                  </Button>
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -346,7 +437,7 @@ function EmptyState({ label }: { label: string }) {
 }
 
 function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard; onClose: () => void; onUpdated: (purchase: PrepaidPurchase) => void }) {
-  const { uploadPrepaidImage, extractOpenedCard, updateCard, archiveCard, getCardDetail } = usePrepaidApi();
+  const { uploadPrepaidImage, extractOpenedCard, updateCard, archiveCard, getCardDetail, signCardImage } = usePrepaidApi();
   const [detailCard, setDetailCard] = useState(entry.card);
   const [pan, setPan] = useState("");
   const [expiry, setExpiry] = useState("");
@@ -354,6 +445,9 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
   const [openedImage, setOpenedImage] = useState<File | null>(null);
   const [openedPreview, setOpenedPreview] = useState<string | null>(null);
   const [openedStoragePath, setOpenedStoragePath] = useState(entry.card.opened_card_image_storage_path || "");
+  const [packageImageUrl, setPackageImageUrl] = useState<string | null>(null);
+  const [openedSavedImageUrl, setOpenedSavedImageUrl] = useState<string | null>(null);
+  const [cardImageModal, setCardImageModal] = useState<ImageModalState | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [detailLoading, setDetailLoading] = useState(true);
@@ -371,6 +465,22 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
         setExpiry(card.expiry || "");
         setCvv(card.cvv || "");
         setOpenedStoragePath(card.opened_card_image_storage_path || "");
+        setPackageImageUrl(null);
+        setOpenedSavedImageUrl(null);
+        if (card.package_image_storage_path) {
+          void signCardImage(entry.purchase.id, entry.card.id, "package")
+            .then((url) => {
+              if (!cancelled) setPackageImageUrl(url);
+            })
+            .catch(() => undefined);
+        }
+        if (card.opened_card_image_storage_path) {
+          void signCardImage(entry.purchase.id, entry.card.id, "opened-card")
+            .then((url) => {
+              if (!cancelled) setOpenedSavedImageUrl(url);
+            })
+            .catch(() => undefined);
+        }
       })
       .catch(() => {
         if (!cancelled) toast.error("Failed to load card details");
@@ -381,7 +491,7 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
     return () => {
       cancelled = true;
     };
-  }, [entry.card.id, entry.purchase.id, getCardDetail]);
+  }, [entry.card.id, entry.purchase.id, getCardDetail, signCardImage]);
 
   const setImage = (file: File) => {
     if (!file.type.startsWith("image/")) return;
@@ -423,6 +533,7 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
       if (!storagePath && openedImage) {
         const webp = await convertReceiptImageFile(openedImage);
         storagePath = await uploadPrepaidImage(webp, "opened_card");
+        setOpenedStoragePath(storagePath);
       }
       const purchase = await updateCard(entry.purchase.id, entry.card.id, {
         pan: digitsOnly(pan),
@@ -453,6 +564,26 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
     }
   };
 
+  const downloadCardImage = async (kind: "package" | "opened-card") => {
+    try {
+      await downloadFromSignedURL(() => signCardImage(entry.purchase.id, entry.card.id, kind), cardImageFilename(kind, detailCard));
+    } catch {
+      toast.error("Failed to download card image");
+    }
+  };
+
+  const viewCardImage = async (kind: "package" | "opened-card") => {
+    const title = kind === "package" ? "Package image" : "Opened-card image";
+    try {
+      const url = await signCardImage(entry.purchase.id, entry.card.id, kind);
+      if (kind === "package") setPackageImageUrl(url);
+      else setOpenedSavedImageUrl(url);
+      setCardImageModal({ title, url, filename: cardImageFilename(kind, detailCard) });
+    } catch {
+      toast.error(`${title} is unavailable`);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in">
       <header className="flex items-center justify-between border-b px-4 py-3">
@@ -472,6 +603,27 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
             <p className="text-xs text-muted-foreground break-all">Package barcode: {detailCard.activation_barcode}</p>
             <p className="text-xs text-muted-foreground">Vanilla serial: {detailCard.vanilla_serial}</p>
           </div>
+
+          {(detailCard.package_image_storage_path || detailCard.opened_card_image_storage_path) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {detailCard.package_image_storage_path && (
+                <SavedCardImage
+                  title="Package image"
+                  imageUrl={packageImageUrl}
+                  onView={() => viewCardImage("package")}
+                  onDownload={() => downloadCardImage("package")}
+                />
+              )}
+              {detailCard.opened_card_image_storage_path && (
+                <SavedCardImage
+                  title="Opened-card image"
+                  imageUrl={openedSavedImageUrl}
+                  onView={() => viewCardImage("opened-card")}
+                  onDownload={() => downloadCardImage("opened-card")}
+                />
+              )}
+            </div>
+          )}
 
           <div className="rounded-lg border bg-card p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -529,29 +681,84 @@ function PrepaidCardDetail({ entry, onClose, onUpdated }: { entry: SelectedCard;
           )}
         </div>
       </main>
+      {cardImageModal && (
+        <ImageViewer
+          title={cardImageModal.title}
+          imageUrl={cardImageModal.url}
+          filename={cardImageModal.filename}
+          onClose={() => setCardImageModal(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function SavedCardImage({
+  title,
+  imageUrl,
+  onView,
+  onDownload,
+}: {
+  title: string;
+  imageUrl: string | null;
+  onView: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <section className="rounded-lg border bg-card p-3 space-y-3" aria-label={title}>
+      <div className="aspect-[4/3] overflow-hidden rounded-md bg-muted">
+        {imageUrl ? (
+          <img src={imageUrl} alt={title} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          </div>
+        )}
+      </div>
+      <div className="space-y-2">
+        <p className="text-sm font-medium">{title}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" size="sm" onClick={onView}>
+            <Eye className="w-4 h-4 mr-2" />
+            View
+          </Button>
+          <Button variant="outline" size="sm" onClick={onDownload}>
+            <Download className="w-4 h-4 mr-2" />
+            Download
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }
 
 function SalesReceiptViewer({ receipt, onClose }: { receipt: Receipt; onClose: () => void }) {
   const [imageUrl, setImageUrl] = useState<string | null>(receipt.image_url || null);
+  const [downloadPending, setDownloadPending] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     if (receipt.image_url) return;
-    void apiFetch(`${API_BASE_URL}/receipts/sign-image`, {
-      method: "POST",
-      body: JSON.stringify({ receipt_id: receipt.id }),
-    })
-      .then((response) => response.ok ? response.json() : null)
-      .then((payload: { image_url?: string } | null) => {
-        if (!cancelled && payload?.image_url) setImageUrl(payload.image_url);
+    void signedSalesReceiptUrl(receipt.id)
+      .then((url) => {
+        if (!cancelled) setImageUrl(url);
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [receipt.id, receipt.image_url]);
+
+  const downloadSalesImage = async () => {
+    try {
+      setDownloadPending(true);
+      await downloadFromSignedURL(() => signedSalesReceiptUrl(receipt.id), "sales-receipt.webp");
+    } catch {
+      toast.error("Failed to download sales receipt");
+    } finally {
+      setDownloadPending(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-background animate-fade-in">
@@ -560,7 +767,10 @@ function SalesReceiptViewer({ receipt, onClose }: { receipt: Receipt; onClose: (
           <X className="w-5 h-5" />
         </button>
         <h2 className="text-sm font-semibold">Sales Receipt</h2>
-        <span className="w-9" />
+        <Button variant="outline" size="sm" onClick={downloadSalesImage} disabled={downloadPending}>
+          <Download className="w-4 h-4 mr-2" />
+          Download
+        </Button>
       </header>
       <main className="flex-1 overflow-y-auto">
         {imageUrl && (
@@ -578,7 +788,19 @@ function SalesReceiptViewer({ receipt, onClose }: { receipt: Receipt; onClose: (
   );
 }
 
-function ImageViewer({ title, imageUrl, onClose }: { title: string; imageUrl: string; onClose: () => void }) {
+function ImageViewer({ title, imageUrl, filename, onClose }: { title: string; imageUrl: string; filename: string; onClose: () => void }) {
+  const [downloadPending, setDownloadPending] = useState(false);
+  const downloadImage = async () => {
+    try {
+      setDownloadPending(true);
+      await downloadFromSignedURL(imageUrl, filename);
+    } catch {
+      toast.error("Failed to download image");
+    } finally {
+      setDownloadPending(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-background animate-fade-in">
       <header className="flex items-center justify-between border-b px-4 py-3">
@@ -586,7 +808,10 @@ function ImageViewer({ title, imageUrl, onClose }: { title: string; imageUrl: st
           <X className="w-5 h-5" />
         </button>
         <h2 className="text-sm font-semibold">{title}</h2>
-        <span className="w-9" />
+        <Button variant="outline" size="sm" onClick={downloadImage} disabled={downloadPending}>
+          <Download className="w-4 h-4 mr-2" />
+          Download
+        </Button>
       </header>
       <main className="flex-1 bg-muted">
         <img src={imageUrl} alt={title} className="h-full w-full object-contain" />

@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export type PrepaidCardState = "active" | "archived";
 export type PrepaidImageType = "activation_receipt" | "package" | "opened_card";
+export type PrepaidCardImageKind = "package" | "opened-card";
 
 export interface PrepaidActivationReceipt {
   id: string;
@@ -235,6 +236,15 @@ export function usePrepaidApi() {
     return payload.image_url;
   }, []);
 
+  const signCardImage = useCallback(async (purchaseID: string, cardID: string, imageKind: PrepaidCardImageKind) => {
+    const path = imageKind === "package" ? "package-image" : "opened-card-image";
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}/${path}`);
+    if (!response.ok) throw new Error(await readError(response));
+    const payload = (await response.json()) as { image_url?: string };
+    if (!payload.image_url) throw new Error("Card image is unavailable");
+    return payload.image_url;
+  }, []);
+
   return {
     listPurchases,
     uploadPrepaidImage,
@@ -245,5 +255,6 @@ export function usePrepaidApi() {
     archiveCard,
     getCardDetail,
     signActivationReceiptImage,
+    signCardImage,
   };
 }
