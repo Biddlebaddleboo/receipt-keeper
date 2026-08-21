@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildJpegConversionArguments,
   convertImageBlobToJpeg,
-  JPEG_DOWNLOAD_MAX_WIDTH,
+  convertReceiptImageFile,
   JPEG_DOWNLOAD_QUALITY,
   normalizeErrorMessage,
 } from "@/lib/ffmpegImageConverter";
@@ -45,12 +45,16 @@ describe("download JPEG conversion", () => {
     mocks.off.mockImplementation(() => undefined);
   });
 
-  it("uses a conditional 1200px max width without upscaling smaller images", () => {
+  it("does not resize JPEG downloads", () => {
     const args = buildJpegConversionArguments("input.webp", "output.jpg");
 
-    expect(JPEG_DOWNLOAD_MAX_WIDTH).toBe(1200);
-    expect(args).toContain("scale='if(gt(iw,1200),1200,iw)':-2");
+    expect(args).not.toContain("-vf");
+    expect(args.some((argument) => argument.includes("scale="))).toBe(false);
     expect(args).toContain("-frames:v");
+    expect(args).toContain("-f");
+    expect(args).toContain("image2");
+    expect(args).toContain("-update");
+    expect(args).toContain("1");
   });
 
   it("encodes downloaded JPEGs with MJPEG quality 7", async () => {
@@ -58,14 +62,21 @@ describe("download JPEG conversion", () => {
 
     expect(JPEG_DOWNLOAD_QUALITY).toBe(7);
     expect(output.type).toBe("image/jpeg");
-    expect(mocks.exec).toHaveBeenCalledWith(expect.arrayContaining([
-      "-vf",
-      "scale='if(gt(iw,1200),1200,iw)':-2",
+    const args = mocks.exec.mock.calls[0]?.[0] as string[];
+    expect(args).toEqual(expect.arrayContaining([
+      "-frames:v",
+      "1",
       "-c:v",
       "mjpeg",
       "-q:v",
       "7",
+      "-f",
+      "image2",
+      "-update",
+      "1",
     ]));
+    expect(args).not.toContain("-vf");
+    expect(args.some((argument) => argument.includes("scale="))).toBe(false);
     expect(mocks.deleteFile).toHaveBeenCalledTimes(2);
     expect(mocks.on).toHaveBeenCalledTimes(1);
     expect(mocks.off).toHaveBeenCalledTimes(1);
@@ -78,6 +89,24 @@ describe("download JPEG conversion", () => {
       type: "image/jpeg",
     });
     expect(mocks.readFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps WebP upload conversion separate from JPEG download settings", async () => {
+    const output = await convertReceiptImageFile(new File(["image"], "receipt.jpg", { type: "image/jpeg" }));
+
+    expect(output.type).toBe("image/webp");
+    expect(output.name).toBe("receipt.webp");
+    expect(mocks.exec).toHaveBeenCalledWith(expect.arrayContaining([
+      "-c:v",
+      "libwebp",
+      "-q:v",
+      "85",
+      "-compression_level",
+      "10",
+      "-preset",
+      "picture",
+      "-y",
+    ]));
   });
 
   it("reports a non-zero FFmpeg exit code without reading a missing output", async () => {

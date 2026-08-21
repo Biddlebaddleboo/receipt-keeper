@@ -197,21 +197,22 @@ export const convertReceiptImageFile = async (file: File): Promise<File> => {
   });
 };
 
-export const JPEG_DOWNLOAD_MAX_WIDTH = 1200;
 export const JPEG_DOWNLOAD_QUALITY = 7;
 
-/** Keep downloaded JPEGs readable while limiting their device/storage size. */
+/** Encode downloaded images as readable JPEGs without resizing the source. */
 export const buildJpegConversionArguments = (inputName: string, outputName: string): string[] => [
   "-i",
   inputName,
-  "-vf",
-  `scale='if(gt(iw,${JPEG_DOWNLOAD_MAX_WIDTH}),${JPEG_DOWNLOAD_MAX_WIDTH},iw)':-2`,
   "-frames:v",
   "1",
   "-c:v",
   "mjpeg",
   "-q:v",
   String(JPEG_DOWNLOAD_QUALITY),
+  "-f",
+  "image2",
+  "-update",
+  "1",
   "-y",
   outputName,
 ];
