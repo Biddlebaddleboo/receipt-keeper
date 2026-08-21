@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X, Camera, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
@@ -15,8 +15,30 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   const [isQueueingUpload, setIsQueueingUpload] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef(0);
+
+  const stopCamera = useCallback(() => {
+    cameraRequestRef.current += 1;
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    setCameraStream(null);
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
+  }, []);
+
+  useEffect(() => stopCamera, [stopCamera]);
+
+  useEffect(() => {
+    if (!cameraStream || !cameraVideoRef.current) return;
+    cameraVideoRef.current.srcObject = cameraStream;
+    void cameraVideoRef.current.play().catch(() => {
+      // Autoplay can be blocked until the user interacts with the preview.
+    });
+  }, [cameraStream]);
 
   const handleFile = (f: File) => {
     if (!f.type.startsWith("image/")) {
@@ -35,6 +57,74 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
     const f = e.target.files?.[0];
     if (f) handleFile(f);
     e.target.value = "";
+  };
+
+  const fallbackToCaptureInput = () => {
+    stopCamera();
+    cameraRef.current?.click();
+  };
+
+  const openCamera = async () => {
+    const requestId = cameraRequestRef.current + 1;
+    cameraRequestRef.current = requestId;
+    const getUserMedia = navigator.mediaDevices?.getUserMedia;
+    if (!getUserMedia) {
+      fallbackToCaptureInput();
+      return;
+    }
+
+    let stream: MediaStream | null = null;
+    try {
+      stream = await getUserMedia.call(navigator.mediaDevices, {
+        audio: false,
+        video: { facingMode: { exact: "environment" } },
+      });
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track?.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+      if (!track || !capabilities?.torch) throw new Error("Rear camera torch is unavailable");
+
+      await track.applyConstraints({ advanced: [{ torch: true }] } as unknown as MediaTrackConstraints);
+      if (requestId !== cameraRequestRef.current) {
+        stream.getTracks().forEach((activeTrack) => activeTrack.stop());
+        return;
+      }
+      cameraStreamRef.current = stream;
+      setCameraStream(stream);
+    } catch {
+      stream?.getTracks().forEach((track) => track.stop());
+      if (requestId === cameraRequestRef.current) fallbackToCaptureInput();
+    }
+  };
+
+  const captureCameraFrame = () => {
+    const video = cameraVideoRef.current;
+    if (!video || video.videoWidth <= 0 || video.videoHeight <= 0) {
+      fallbackToCaptureInput();
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      fallbackToCaptureInput();
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      stopCamera();
+      if (!blob) {
+        fallbackToCaptureInput();
+        return;
+      }
+      handleFile(new File([blob], `receipt-camera-${Date.now()}.jpg`, { type: "image/jpeg" }));
+    }, "image/jpeg", 0.92);
+  };
+
+  const handleClose = () => {
+    stopCamera();
+    onClose();
   };
 
   const handleSubmit = async () => {
@@ -78,7 +168,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in">
       <header className="flex items-center justify-between px-4 py-3 border-b">
-        <button onClick={onClose} className="p-2 -ml-2 rounded-md hover:bg-secondary transition-colors active:scale-95">
+        <button onClick={handleClose} className="p-2 -ml-2 rounded-md hover:bg-secondary transition-colors active:scale-95">
           <X className="w-5 h-5" />
         </button>
         <h2 className="text-sm font-semibold">New Receipt</h2>
@@ -104,7 +194,36 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
           </div>
         )}
 
-        {preview ? (
+        {cameraStream ? (
+          <div className="space-y-3">
+            <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-black ring-1 ring-border">
+              <video
+                ref={cameraVideoRef}
+                autoPlay
+                playsInline
+                muted
+                aria-label="Rear camera preview"
+                className="h-full w-full object-cover"
+              />
+              <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-10">
+                <button
+                  type="button"
+                  onClick={captureCameraFrame}
+                  className="rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-lg transition-transform active:scale-95"
+                >
+                  Capture photo
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={stopCamera}
+              className="w-full rounded-md border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : preview ? (
           <div className="space-y-3">
             <div className="relative aspect-[4/3] rounded-lg overflow-hidden bg-muted ring-1 ring-border">
               <img src={preview} alt="Receipt preview" className="w-full h-full object-cover" />
@@ -128,7 +247,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
         ) : (
           <div className="flex gap-3">
             <button
-              onClick={() => cameraRef.current?.click()}
+              onClick={() => void openCamera()}
               className="flex-1 flex flex-col items-center gap-2 py-10 rounded-lg border-2 border-dashed border-border hover:border-primary/40 hover:bg-secondary/50 transition-colors active:scale-[0.98]"
             >
               <Camera className="w-6 h-6 text-muted-foreground" />
