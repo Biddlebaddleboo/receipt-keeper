@@ -61,6 +61,15 @@ interface UseReceiptApiOptions {
   pollingPaused?: boolean;
 }
 
+// Shard metadata mirrors the current user-editable value. Detail fields are
+// only a fallback for older records that genuinely lack the mirrored value;
+// historical AI suggestions must never replace either canonical source.
+const canonicalEditableText = (metadataValue: unknown, detailValue: unknown): string => {
+  if (typeof metadataValue === "string" && metadataValue.trim()) return metadataValue;
+  if (typeof detailValue === "string" && detailValue.trim()) return detailValue;
+  return "";
+};
+
 export function useReceiptApi(options?: UseReceiptApiOptions) {
   const pollingPaused = options?.pollingPaused ?? false;
   const { token, user, isLoading: authLoading, firebaseUID, isFirebaseReady } = useAuth();
@@ -299,22 +308,8 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
         ?? toNumber(metadata.total)
         ?? toNumber(aiSuggestions?.total)
         ?? 0,
-      category:
-        typeof detailData.category === "string"
-          ? detailData.category
-          : typeof metadata.category === "string"
-            ? metadata.category
-            : typeof aiSuggestions?.category === "string"
-              ? aiSuggestions.category
-              : "",
-      purchase_date:
-        typeof detailData.purchase_date === "string"
-          ? detailData.purchase_date
-          : typeof metadata.purchase_date === "string"
-            ? metadata.purchase_date
-            : typeof aiSuggestions?.purchase_date === "string"
-              ? aiSuggestions.purchase_date
-              : "",
+      category: canonicalEditableText(metadata.category, detailData.category),
+      purchase_date: canonicalEditableText(metadata.purchase_date, detailData.purchase_date),
       extracted_text:
         typeof detailData.extracted_text === "string"
           ? detailData.extracted_text

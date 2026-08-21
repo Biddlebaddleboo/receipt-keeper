@@ -67,6 +67,45 @@ describe("receipt export", () => {
     }).map((item) => item.id)).toEqual(["start", "end"]);
   });
 
+  it("exports all corrected canonical categories even when AI suggestions are stale", async () => {
+    const correctedReceipts = Array.from({ length: 21 }, (_value, index) => receipt({
+      id: `corrected-${index + 1}`,
+      vendor: `Store ${index + 1}`,
+      category: "Corrected category",
+      purchase_date: "2026-08-20",
+      extracted_fields: [{
+        ai_suggestions: {
+          category: "Old AI category",
+          purchase_date: "2019-01-01",
+        },
+      }] as unknown as Receipt["extracted_fields"],
+    }));
+    const filters = {
+      fromDate: "2026-08-20",
+      toDate: "2026-08-20",
+      categories: ["Corrected category"],
+    };
+    const matchingReceipts = filterReceiptsForExport(correctedReceipts, filters);
+    expect(matchingReceipts).toHaveLength(21);
+    expect(new Set(matchingReceipts.map((item) => item.id)).size).toBe(21);
+
+    const getImageUrl = vi.fn(async (item: Receipt) => `https://signed/${item.id}`);
+    const zip = await buildReceiptExportZip(correctedReceipts, {
+      ...filters,
+      getImageUrl,
+      fetchImage: async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => new Blob(["webp"], { type: "image/webp" }),
+      } as Response),
+      convert: async () => jpeg(),
+    });
+
+    expect(getImageUrl).toHaveBeenCalledTimes(21);
+    expect(new Set(getImageUrl.mock.calls.map(([item]) => item.id)).size).toBe(21);
+    expect(await readZipEntries(zip)).toHaveLength(21);
+  });
+
   it("exports every supplied owner receipt, including receipts outside the visible page", async () => {
     const allReceipts = [
       receipt({ id: "visible", vendor: "Visible" }),
