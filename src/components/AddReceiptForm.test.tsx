@@ -8,8 +8,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
 
-const createTrack = (torch: boolean, capabilities: Record<string, unknown> = {}) => ({
+const createTrack = (
+  torch: boolean,
+  capabilities: Record<string, unknown> = {},
+  existingConstraints: MediaTrackConstraints = {},
+) => ({
   getCapabilities: vi.fn(() => ({ torch, ...capabilities })),
+  getConstraints: vi.fn(() => existingConstraints),
   applyConstraints: vi.fn().mockResolvedValue(undefined),
   stop: vi.fn(),
 });
@@ -49,7 +54,12 @@ describe("AddReceiptForm camera", () => {
   });
 
   it("opens the rear-camera preview and enables torch by default", async () => {
-    const track = createTrack(true);
+    const existingConstraints = {
+      facingMode: { exact: "environment" },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    };
+    const track = createTrack(true, {}, existingConstraints);
     const stream = createStream(track);
     const getUserMedia = vi.fn().mockResolvedValue(stream);
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
@@ -78,11 +88,20 @@ describe("AddReceiptForm camera", () => {
         height: { ideal: 1080 },
       },
     });
-    expect(track.applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] });
+    expect(track.applyConstraints).toHaveBeenCalledWith({
+      ...existingConstraints,
+      advanced: [{ torch: true }],
+    });
+    expect(track.getConstraints).toHaveBeenCalledTimes(1);
   });
 
   it("enables continuous autofocus while preserving the default torch", async () => {
-    const track = createTrack(true, { focusMode: ["continuous", "manual"] });
+    const existingConstraints = {
+      facingMode: { exact: "environment" },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    };
+    const track = createTrack(true, { focusMode: ["continuous", "manual"] }, existingConstraints);
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
@@ -93,6 +112,7 @@ describe("AddReceiptForm camera", () => {
     await screen.findByLabelText("Rear camera preview");
 
     expect(track.applyConstraints).toHaveBeenCalledWith({
+      ...existingConstraints,
       advanced: [{ torch: true, focusMode: "continuous" }],
     });
   });
@@ -114,7 +134,12 @@ describe("AddReceiptForm camera", () => {
   });
 
   it("uses supported points of interest for tap-to-focus", async () => {
-    const track = createTrack(true, { focusMode: ["continuous"], pointsOfInterest: [] });
+    const existingConstraints = {
+      facingMode: { exact: "environment" },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    };
+    const track = createTrack(true, { focusMode: ["continuous"], pointsOfInterest: [] }, existingConstraints);
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
@@ -139,12 +164,67 @@ describe("AddReceiptForm camera", () => {
 
     await waitFor(() => expect(track.applyConstraints).toHaveBeenCalledTimes(2));
     expect(track.applyConstraints).toHaveBeenLastCalledWith({
+      ...existingConstraints,
       advanced: [{
         torch: true,
         focusMode: "continuous",
         pointsOfInterest: [{ x: 0.25, y: 0.5 }],
       }],
     });
+  });
+
+  it("does not retry continuous focus after autofocus setup fails", async () => {
+    const existingConstraints = {
+      facingMode: { exact: "environment" },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    };
+    const track = createTrack(true, { focusMode: ["continuous"], pointsOfInterest: [] }, existingConstraints);
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
+    track.applyConstraints.mockImplementation((constraints: MediaTrackConstraints) => {
+      const advanced = constraints.advanced ?? [];
+      if (advanced.some((entry) => "focusMode" in entry)) return Promise.reject(new Error("focus rejected"));
+      return Promise.resolve();
+    });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+
+    render(<AddReceiptForm onSubmit={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Camera" }));
+    const preview = await screen.findByLabelText("Rear camera preview");
+    vi.spyOn(preview, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 100,
+      right: 100,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    expect(track.applyConstraints).toHaveBeenNthCalledWith(1, {
+      ...existingConstraints,
+      advanced: [{ torch: true, focusMode: "continuous" }],
+    });
+    expect(track.applyConstraints).toHaveBeenNthCalledWith(2, {
+      ...existingConstraints,
+      advanced: [{ torch: true }],
+    });
+
+    fireEvent.click(preview, { clientX: 50, clientY: 50 });
+    await waitFor(() => expect(track.applyConstraints).toHaveBeenCalledTimes(3));
+    expect(track.applyConstraints).toHaveBeenLastCalledWith({
+      ...existingConstraints,
+      advanced: [{
+        torch: true,
+        pointsOfInterest: [{ x: 0.5, y: 0.5 }],
+      }],
+    });
+    expect(inputClick).not.toHaveBeenCalled();
   });
 
   it("does not apply tap-to-focus constraints when points are unsupported", async () => {

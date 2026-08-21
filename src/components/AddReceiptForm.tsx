@@ -15,6 +15,29 @@ type CameraTrackCapabilities = MediaTrackCapabilities & {
   torch?: boolean;
 };
 
+type CameraConstraintSet = MediaTrackConstraintSet & {
+  focusMode?: string;
+  pointsOfInterest?: unknown;
+  torch?: boolean;
+};
+
+function mergeCameraConstraints(track: MediaStreamTrack, additional: CameraConstraintSet): MediaTrackConstraints {
+  let existing: MediaTrackConstraints = {};
+  try {
+    existing = track.getConstraints?.() ?? {};
+  } catch {
+    // Browsers without readable track constraints can still apply the enhancement.
+  }
+  return {
+    ...existing,
+    advanced: [...(existing.advanced ?? []), additional],
+  };
+}
+
+function applyCameraConstraints(track: MediaStreamTrack, additional: CameraConstraintSet) {
+  return track.applyConstraints(mergeCameraConstraints(track, additional));
+}
+
 export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -101,26 +124,26 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
 
       const supportsContinuousFocus = capabilities.focusMode?.includes("continuous") === true;
       const supportsTapFocus = capabilities.pointsOfInterest !== undefined;
-      const torchConstraints = { advanced: [{ torch: true }] } as unknown as MediaTrackConstraints;
+      const torchConstraints: CameraConstraintSet = { torch: true };
+      let continuousFocusApplied = false;
       if (supportsContinuousFocus) {
         try {
-          await track.applyConstraints({
-            advanced: [{ torch: true, focusMode: "continuous" }],
-          } as unknown as MediaTrackConstraints);
+          await applyCameraConstraints(track, { torch: true, focusMode: "continuous" });
+          continuousFocusApplied = true;
         } catch {
           // Some browsers report focus support but reject the combined constraint.
           // Keep the camera available by retrying the required torch constraint alone.
-          await track.applyConstraints(torchConstraints);
+          await applyCameraConstraints(track, torchConstraints);
         }
       } else {
-        await track.applyConstraints(torchConstraints);
+        await applyCameraConstraints(track, torchConstraints);
       }
       if (requestId !== cameraRequestRef.current) {
         stream.getTracks().forEach((activeTrack) => activeTrack.stop());
         return;
       }
       cameraTrackRef.current = track;
-      cameraContinuousFocusRef.current = supportsContinuousFocus;
+      cameraContinuousFocusRef.current = continuousFocusApplied;
       cameraTapFocusSupportedRef.current = supportsTapFocus;
       cameraStreamRef.current = stream;
       setCameraStream(stream);
@@ -143,7 +166,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       ...(cameraContinuousFocusRef.current ? { focusMode: "continuous" } : {}),
       pointsOfInterest: [{ x, y }],
     };
-    void track.applyConstraints({ advanced: [focusPoint] } as unknown as MediaTrackConstraints).catch(() => {
+    void applyCameraConstraints(track, focusPoint).catch(() => {
       // Tap-to-focus is an enhancement; unsupported or rejected points must not
       // interrupt the active camera preview or trigger the file-input fallback.
     });
