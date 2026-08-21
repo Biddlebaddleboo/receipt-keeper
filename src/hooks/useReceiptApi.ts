@@ -627,6 +627,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     isLoadingMore,
     hasMore,
     uploadReceipt,
+    createReceiptViaSignedUpload,
     removeReceipt,
     retryUpload,
     fetchReceipt,

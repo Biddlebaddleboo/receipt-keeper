@@ -4,8 +4,9 @@ import { ReceiptList } from "@/components/ReceiptList";
 import { ReceiptDetail } from "@/components/ReceiptDetail";
 import { AddReceiptForm } from "@/components/AddReceiptForm";
 import { useReceiptApi } from "@/hooks/useReceiptApi";
+import { usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { useAuth } from "@/contexts/AuthContext";
-import { ScanLine, Plus, Settings, LogOut, RefreshCw } from "lucide-react";
+import { CreditCard, ScanLine, Plus, Settings, LogOut, RefreshCw } from "lucide-react";
 import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
 
 const Index = () => {
@@ -16,6 +17,7 @@ const Index = () => {
   const shouldPausePolling = Boolean(selectedReceiptId) || showAddForm;
   const { receipts, receiptsByDate, isUploading, isLoadingMore, hasMore, uploadReceipt, removeReceipt, retryUpload, fetchReceipt, loadNextPage, refreshLatest } =
     useReceiptApi({ pollingPaused: shouldPausePolling });
+  const { enabled: prepaidEnabled } = usePrepaidStatus();
   const didInitialLoadRef = useRef(false);
 
   useEffect(() => {
@@ -62,6 +64,15 @@ const Index = () => {
           >
             <Settings className="w-5 h-5 text-muted-foreground" />
           </button>
+          {prepaidEnabled && (
+            <button
+              onClick={() => navigate("/prepaid")}
+              className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"
+              title="Prepaid cards"
+            >
+              <CreditCard className="w-5 h-5 text-muted-foreground" />
+            </button>
+          )}
           <button
             onClick={() => void refreshLatest()}
             className="p-2 rounded-md hover:bg-secondary transition-colors active:scale-95"

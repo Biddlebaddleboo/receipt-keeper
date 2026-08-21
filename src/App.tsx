@@ -15,6 +15,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy.tsx";
 import BillingSuccess from "./pages/BillingSuccess.tsx";
 import BillingCancelled from "./pages/BillingCancelled.tsx";
 import DeleteAccount from "./pages/DeleteAccount.tsx";
+import PrepaidCards from "./pages/PrepaidCards.tsx";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,7 @@ const AppRoutes = () => (
     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
     <Route path="/settings/categories" element={<RequireAuth><CategoryManager /></RequireAuth>} />
     <Route path="/settings/delete-account" element={<DeleteAccount />} />
+    <Route path="/prepaid" element={<RequireAuth><PrepaidCards /></RequireAuth>} />
     <Route path="/billing/success" element={<RequireAuth><BillingSuccess /></RequireAuth>} />
     <Route path="/billing/cancelled" element={<RequireAuth><BillingCancelled /></RequireAuth>} />
     <Route path="/terms" element={<TermsOfService />} />
