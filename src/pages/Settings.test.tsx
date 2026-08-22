@@ -21,11 +21,13 @@ describe("Settings GST288 feature gate", () => {
   it("hides GST288 export when prepaid is disabled", () => {
     render(<MemoryRouter><Settings /></MemoryRouter>);
     expect(screen.queryByRole("region", { name: "GST288 export" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download GST288 PDF" })).not.toBeInTheDocument();
   });
 
   it("shows GST288 export when prepaid is enabled", () => {
     mocks.prepaidEnabled = true;
     render(<MemoryRouter><Settings /></MemoryRouter>);
     expect(screen.getByRole("region", { name: "GST288 export" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download GST288 PDF" })).toBeInTheDocument();
   });
 });

@@ -3,9 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { Gst288ExportSection } from "@/components/Gst288ExportSection";
 import type { Receipt } from "@/hooks/useReceiptApi";
 
-const mocks = vi.hoisted(() => ({ toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ toast: vi.fn(), buildPdf: vi.fn() }));
 
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: mocks.toast }) }));
+vi.mock("@/lib/gst288Pdf", () => ({
+  buildGst288Pdf: mocks.buildPdf,
+  gst288PdfFilename: () => "gst288-test.pdf",
+}));
 
 const receipt = (id: string, date: string): Receipt => ({
   id,
@@ -38,5 +42,29 @@ describe("Gst288ExportSection", () => {
     await waitFor(() => expect(fetchAllReceipts).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("status")).toHaveTextContent("2 receipts · 2 matched · 0 ambiguous · 0 unmatched");
     expect(mocks.toast).toHaveBeenCalledWith(expect.objectContaining({ title: "GST288 CSV downloaded" }));
+  });
+
+  it("passes claimant fields and complete receipts through the PDF action", async () => {
+    const fetchAllReceipts = vi.fn().mockResolvedValue([receipt("full-set", "2026-08-20")]);
+    mocks.buildPdf.mockResolvedValue({
+      rows: [],
+      summary: { totalReceipts: 1, matched: 1, ambiguous: 0, unmatched: 0 },
+      blob: new Blob(["pdf"], { type: "application/pdf" }),
+      filename: "gst288-test.pdf",
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    render(<Gst288ExportSection fetchAllReceipts={fetchAllReceipts} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Claimant/business name" }), { target: { value: "Business" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 first name" }), { target: { value: "Alex" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 business number" }), { target: { value: "123RT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Download GST288 PDF" }));
+
+    await waitFor(() => expect(mocks.buildPdf).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "full-set" })]),
+      expect.objectContaining({ taxRatePercent: 13 }),
+      { businessName: "Business", firstName: "Alex", businessNumber: "123RT" },
+    ));
+    expect(await screen.findByRole("status")).toHaveTextContent("1 receipts · 1 matched · 0 ambiguous · 0 unmatched");
   });
 });

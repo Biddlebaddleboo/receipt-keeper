@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import type { Receipt } from "@/hooks/useReceiptApi";
 import { buildGst288Export, gst288CsvFilename, type Gst288ExportSummary } from "@/lib/gst288Export";
+import { buildGst288Pdf, gst288PdfFilename, type Gst288ClaimantDetails } from "@/lib/gst288Pdf";
 
 interface Gst288ExportSectionProps {
   fetchAllReceipts: () => Promise<Receipt[]>;
@@ -17,35 +18,48 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [taxRate, setTaxRate] = useState("13");
+  const [businessName, setBusinessName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [businessNumber, setBusinessNumber] = useState("");
   const [summary, setSummary] = useState<Gst288ExportSummary | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const isBusy = isExporting || isExportingPdf;
   const invalidDateRange = Boolean(fromDate && toDate && fromDate > toDate);
 
-  const download = async () => {
+  const validateInputs = (): number | null => {
     if (invalidDateRange) {
       toast({ title: "Invalid date range", description: "From date must be on or before the to date.", variant: "destructive" });
-      return;
+      return null;
     }
     const parsedRate = Number(taxRate);
     if (!Number.isFinite(parsedRate) || parsedRate <= 0 || parsedRate > 100) {
       toast({ title: "Invalid GST/HST rate", description: "Enter a rate between 0 and 100%.", variant: "destructive" });
-      return;
+      return null;
     }
+    return parsedRate;
+  };
+
+  const exportFilters = (parsedRate: number) => ({
+    fromDate,
+    toDate,
+    taxRatePercent: parsedRate,
+  });
+
+  const download = async () => {
+    const parsedRate = validateInputs();
+    if (parsedRate === null) return;
 
     setIsExporting(true);
     setSummary(null);
     try {
       const receipts = await fetchAllReceipts();
-      const result = buildGst288Export(receipts, {
-        fromDate,
-        toDate,
-        taxRatePercent: parsedRate,
-      });
+      const result = buildGst288Export(receipts, exportFilters(parsedRate));
       setSummary(result.summary);
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = gst288CsvFilename({ fromDate, toDate, taxRatePercent: parsedRate });
+      anchor.download = gst288CsvFilename(exportFilters(parsedRate));
       anchor.style.display = "none";
       document.body.appendChild(anchor);
       anchor.click();
@@ -63,11 +77,78 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
     }
   };
 
+  const downloadPdf = async () => {
+    const parsedRate = validateInputs();
+    if (parsedRate === null) return;
+
+    setIsExportingPdf(true);
+    setSummary(null);
+    try {
+      const receipts = await fetchAllReceipts();
+      const claimant: Gst288ClaimantDetails = { businessName, firstName, businessNumber };
+      const result = await buildGst288Pdf(receipts, exportFilters(parsedRate), claimant);
+      setSummary(result.summary);
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = gst288PdfFilename(exportFilters(parsedRate));
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      toast({ title: "GST288 PDF downloaded", description: summaryText(result.summary) });
+    } catch (error) {
+      toast({
+        title: "GST288 PDF export failed",
+        description: error instanceof Error ? error.message : "Unable to create GST288 PDF.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <section className="rounded-xl bg-card p-4 receipt-shadow" aria-label="GST288 export">
       <div className="mb-3">
         <h2 className="text-sm font-semibold">GST288 export</h2>
         <p className="text-xs text-muted-foreground">Create a filtered GST/HST CSV from your receipts.</p>
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <label className="col-span-2 text-xs font-medium text-muted-foreground">
+          Claimant/business name
+          <input
+            type="text"
+            value={businessName}
+            onChange={(event) => setBusinessName(event.target.value)}
+            aria-label="Claimant/business name"
+            disabled={isBusy}
+            className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
+          />
+        </label>
+        <label className="text-xs font-medium text-muted-foreground">
+          First name
+          <input
+            type="text"
+            value={firstName}
+            onChange={(event) => setFirstName(event.target.value)}
+            aria-label="GST288 first name"
+            disabled={isBusy}
+            className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
+          />
+        </label>
+        <label className="text-xs font-medium text-muted-foreground">
+          Business number
+          <input
+            type="text"
+            value={businessNumber}
+            onChange={(event) => setBusinessNumber(event.target.value)}
+            aria-label="GST288 business number"
+            disabled={isBusy}
+            className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
+          />
+        </label>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <label className="text-xs font-medium text-muted-foreground">
@@ -77,7 +158,7 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
             value={fromDate}
             onChange={(event) => setFromDate(event.target.value)}
             aria-label="GST288 from date"
-            disabled={isExporting}
+            disabled={isBusy}
             className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
           />
         </label>
@@ -88,7 +169,7 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
             value={toDate}
             onChange={(event) => setToDate(event.target.value)}
             aria-label="GST288 to date"
-            disabled={isExporting}
+            disabled={isBusy}
             className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
           />
         </label>
@@ -104,14 +185,20 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
             value={taxRate}
             onChange={(event) => setTaxRate(event.target.value)}
             aria-label="GST/HST rate"
-            disabled={isExporting}
+            disabled={isBusy}
             className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
           />
         </label>
-        <Button type="button" onClick={() => void download()} disabled={isExporting} className="shrink-0 gap-1.5">
-          {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          {isExporting ? "Preparing CSV…" : "Download CSV"}
-        </Button>
+        <div className="grid shrink-0 grid-cols-2 gap-2">
+          <Button type="button" onClick={() => void download()} disabled={isBusy} className="gap-1.5">
+            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {isExporting ? "Preparing CSV…" : "Download CSV"}
+          </Button>
+          <Button type="button" onClick={() => void downloadPdf()} disabled={isBusy} className="gap-1.5">
+            {isExportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {isExportingPdf ? "Preparing PDF…" : "Download GST288 PDF"}
+          </Button>
+        </div>
       </div>
       {invalidDateRange && (
         <p className="mt-2 text-xs text-destructive" role="alert">From date must be on or before the to date.</p>
