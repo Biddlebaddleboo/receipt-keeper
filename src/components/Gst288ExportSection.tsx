@@ -18,9 +18,8 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [taxRate, setTaxRate] = useState("13");
-  const [businessName, setBusinessName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
-  const [businessNumber, setBusinessNumber] = useState("");
   const [summary, setSummary] = useState<Gst288ExportSummary | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -85,7 +84,7 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
     setSummary(null);
     try {
       const receipts = await fetchAllReceipts();
-      const claimant: Gst288ClaimantDetails = { businessName, firstName, businessNumber };
+      const claimant: Gst288ClaimantDetails = { lastName, firstName };
       const result = await buildGst288Pdf(receipts, exportFilters(parsedRate), claimant);
       setSummary(result.summary);
       const url = URL.createObjectURL(result.blob);
@@ -116,13 +115,13 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
         <p className="text-xs text-muted-foreground">Create a filtered GST/HST CSV or PDF from your receipts.</p>
       </div>
       <div className="mb-2 grid grid-cols-2 gap-2">
-        <label className="col-span-2 text-xs font-medium text-muted-foreground">
-          Claimant/business name
+        <label className="text-xs font-medium text-muted-foreground">
+          Last name
           <input
             type="text"
-            value={businessName}
-            onChange={(event) => setBusinessName(event.target.value)}
-            aria-label="Claimant/business name"
+            value={lastName}
+            onChange={(event) => setLastName(event.target.value)}
+            aria-label="GST288 last name"
             disabled={isBusy}
             className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
           />
@@ -134,17 +133,6 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
             value={firstName}
             onChange={(event) => setFirstName(event.target.value)}
             aria-label="GST288 first name"
-            disabled={isBusy}
-            className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
-          />
-        </label>
-        <label className="text-xs font-medium text-muted-foreground">
-          Business number
-          <input
-            type="text"
-            value={businessNumber}
-            onChange={(event) => setBusinessNumber(event.target.value)}
-            aria-label="GST288 business number"
             disabled={isBusy}
             className="mt-1 w-full rounded-md border bg-background px-2.5 py-2 text-sm font-normal text-foreground"
           />

@@ -31,7 +31,7 @@ const receipt = (index: number): Receipt => ({
 const makePdfApi = () => {
   const values = new Map<string, string>();
   const fieldNames = new Set<string>([
-    GST288_FIELD_NAMES.claimantName[0],
+    GST288_FIELD_NAMES.lastName[0],
     GST288_FIELD_NAMES.firstName[0],
     GST288_FIELD_NAMES.businessNumberParts.first[0],
     GST288_FIELD_NAMES.businessNumberParts.type[0],
@@ -77,15 +77,15 @@ describe("GST288 PDF export", () => {
     const result = await buildGst288Pdf(
       Array.from({ length: GST288_MAX_ROWS }, (_value, index) => receipt(index + 1)),
       { fromDate: "2026-08-01", toDate: "2026-08-30", taxRatePercent: 13 },
-      { businessName: "Example Business", firstName: "Alex", businessNumber: "123456789RT0001" },
+      { lastName: "Example", firstName: "Alex" },
       { loadTemplate: async () => new Uint8Array([9]), pdfDocumentApi: fake.pdfDocumentApi },
     );
 
-    expect(fake.values.get(GST288_FIELD_NAMES.claimantName[0])).toBe("Example Business");
+    expect(fake.values.get(GST288_FIELD_NAMES.lastName[0])).toBe("Example");
     expect(fake.values.get(GST288_FIELD_NAMES.firstName[0])).toBe("Alex");
-    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.first[0])).toBe("123456789");
-    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.type[0])).toBe("RT");
-    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.second[0])).toBe("0001");
+    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.first[0])).toBe("");
+    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.type[0])).toBe("");
+    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.second[0])).toBe("");
     expect(fake.values.get(GST288_FIELD_NAMES.page(1).pageNumber[0])).toBe("1");
     expect(fake.values.get(GST288_FIELD_NAMES.page(1).pageCount[0])).toBe("2");
     expect(fake.values.get(GST288_FIELD_NAMES.page(2).pageNumber[0])).toBe("2");
@@ -128,7 +128,7 @@ describe("GST288 PDF export", () => {
     const result = await buildGst288Pdf(
       [receipt(1)],
       {},
-      { businessName: "Example Business", firstName: "Alex", businessNumber: "123456789RT0001" },
+      { lastName: "Example", firstName: "Alex" },
       { loadTemplate: async () => new Uint8Array(template), pdfDocumentApi: PDFDocument },
     );
 

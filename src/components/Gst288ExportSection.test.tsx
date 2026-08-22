@@ -55,15 +55,15 @@ describe("Gst288ExportSection", () => {
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
 
     render(<Gst288ExportSection fetchAllReceipts={fetchAllReceipts} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Claimant/business name" }), { target: { value: "Business" } });
+    expect(screen.queryByRole("textbox", { name: "GST288 business number" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 last name" }), { target: { value: "Example" } });
     fireEvent.change(screen.getByRole("textbox", { name: "GST288 first name" }), { target: { value: "Alex" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "GST288 business number" }), { target: { value: "123RT" } });
     fireEvent.click(screen.getByRole("button", { name: "Download GST288 PDF" }));
 
     await waitFor(() => expect(mocks.buildPdf).toHaveBeenCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: "full-set" })]),
       expect.objectContaining({ taxRatePercent: 13 }),
-      { businessName: "Business", firstName: "Alex", businessNumber: "123RT" },
+      { lastName: "Example", firstName: "Alex" },
     ));
     expect(await screen.findByRole("status")).toHaveTextContent("1 receipts · 1 matched · 0 ambiguous · 0 unmatched");
   });

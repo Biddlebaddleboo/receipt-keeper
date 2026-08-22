@@ -8,9 +8,8 @@ export const GST288_MAX_ROWS = 30;
 export const GST288_PAGE_ROW_COUNTS = [11, 19] as const;
 
 export interface Gst288ClaimantDetails {
-  businessName?: string;
+  lastName?: string;
   firstName?: string;
-  businessNumber?: string;
 }
 
 type FieldAliases = readonly string[];
@@ -91,24 +90,17 @@ const pageFieldNames = (page: number): Gst288PageFieldNames => ({
  * filling code.
  */
 export const GST288_FIELD_NAMES = {
-  claimantName: [
+  lastName: [
     "form1[0].Page1[0].PartA[0].Claiment_Last_Name[0].Claimants_Last_Name[0]",
-    "claimant_business_name",
-    "claimant_name",
-    "claimants_name_or_business_name",
-    "claimants_last_name_or_name_of_business_organization",
-    "name_of_business_organization",
+    "claimant_last_name",
+    "last_name",
+    "claimants_last_name",
   ],
   firstName: [
     "form1[0].Page1[0].PartA[0].Claimant_First_Name[0].Claimants_First_Name[0]",
     "claimant_first_name",
     "first_name",
     "claimants_first_name",
-  ],
-  businessNumber: [
-    "form1[0].Page1[0].PartA[0].BusinessNumber[0].BusinessNumber[0].BusinessNumber_RT1[0]",
-    "business_number",
-    "claimant_business_number",
   ],
   businessNumberParts: {
     first: [
@@ -222,18 +214,8 @@ const setOptionalTextField = (form: PdfForm, aliases: FieldAliases, value: strin
   setTextField(form, aliases, value);
 };
 
-const fillBusinessNumber = (form: PdfForm, value: string): void => {
-  const businessNumber = value.trim();
-  const normalized = businessNumber.replace(/\s+/g, "");
-  const parts = /^(\d{9})([A-Za-z]{2})(\d{4})$/.exec(normalized);
-  if (parts) {
-    setTextField(form, GST288_FIELD_NAMES.businessNumberParts.first, parts[1]);
-    setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.type, parts[2]);
-    setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.second, parts[3]);
-    return;
-  }
-
-  setTextField(form, GST288_FIELD_NAMES.businessNumber, businessNumber);
+const clearBusinessNumberFields = (form: PdfForm): void => {
+  setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.first, "");
   setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.type, "");
   setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.second, "");
 };
@@ -300,9 +282,9 @@ export const buildGst288Pdf = async (
     const api = options.pdfDocumentApi ?? await loadPdfDocumentApi();
     pdfDocument = await api.load(templateBytes);
     const form = pdfDocument.getForm();
-    setTextField(form, GST288_FIELD_NAMES.claimantName, claimant.businessName ?? "");
+    setTextField(form, GST288_FIELD_NAMES.lastName, claimant.lastName ?? "");
     setTextField(form, GST288_FIELD_NAMES.firstName, claimant.firstName ?? "");
-    fillBusinessNumber(form, claimant.businessNumber ?? "");
+    clearBusinessNumberFields(form);
     fillPage(form, 1, pageRows(analyzed.rows, 1));
     fillPage(form, 2, pageRows(analyzed.rows, 2));
     try {
