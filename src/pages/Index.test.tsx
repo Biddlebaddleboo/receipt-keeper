@@ -106,7 +106,7 @@ describe("Index receipt filters and export", () => {
   it("uses the complete receipt metadata fetch rather than the visible page", async () => {
     render(<MemoryRouter><Index /></MemoryRouter>);
 
-    fireEvent.click(screen.getByRole("button", { name: "Download Receipts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download receipts ZIP" }));
 
     await waitFor(() => expect(mocks.buildReceiptExportZip).toHaveBeenCalled());
     expect(mocks.fetchAllReceipts).toHaveBeenCalledTimes(1);
@@ -135,7 +135,7 @@ describe("Index receipt filters and export", () => {
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Store name" }), { target: { value: "older" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "older-not-loaded" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Download Receipts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download receipts ZIP" }));
 
     await waitFor(() => expect(mocks.buildReceiptExportZip).toHaveBeenCalled());
     expect(mocks.filterReceiptsForExport).toHaveBeenLastCalledWith(
@@ -149,7 +149,7 @@ describe("Index receipt filters and export", () => {
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Store name" }), { target: { value: "older" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "older-not-loaded" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Download CSV" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download receipts CSV" }));
 
     await waitFor(() => expect(mocks.buildReceiptExportCsv).toHaveBeenCalled());
     expect(mocks.fetchAllReceipts).toHaveBeenCalledTimes(2);
@@ -186,7 +186,10 @@ describe("Index receipt filters and export", () => {
     expect(screen.getByTestId("receipt-date-filter-row")).toHaveClass("grid-cols-2");
     const actionRow = screen.getByTestId("receipt-filter-action-row");
     expect(actionRow).toHaveClass("grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]");
-    expect(actionRow).toContainElement(screen.getByRole("button", { name: "Download Receipts" }));
+    expect(actionRow).toContainElement(screen.getByRole("button", { name: "Download receipts ZIP" }));
+    expect(actionRow).toContainElement(screen.getByRole("button", { name: "Download receipts CSV" }));
+    expect(actionRow).toHaveTextContent("Receipts");
+    expect(actionRow).toHaveTextContent("CSV");
   });
 
   it("clears list filters and returns to the visible receipt list", async () => {

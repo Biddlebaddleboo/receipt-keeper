@@ -378,19 +378,21 @@ const Index = () => {
                   type="button"
                   onClick={() => void downloadReceipts()}
                   disabled={isAnyExporting}
+                  aria-label={isExporting ? "Preparing receipt ZIP" : "Download receipts ZIP"}
                   className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md bg-primary px-2 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  <span className="truncate">{isExporting ? "Preparing ZIP…" : "Download Receipts"}</span>
+                  <span className="truncate">{isExporting ? "Preparing ZIP…" : "Receipts"}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => void downloadReceiptsCsv()}
                   disabled={isAnyExporting}
+                  aria-label={isExportingCsv ? "Preparing receipt CSV" : "Download receipts CSV"}
                   className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary px-2 py-2 text-sm font-medium text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isExportingCsv ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  <span className="truncate">{isExportingCsv ? "Preparing CSV…" : "Download CSV"}</span>
+                  <span className="truncate">{isExportingCsv ? "Preparing CSV…" : "CSV"}</span>
                 </button>
               </div>
             </div>
