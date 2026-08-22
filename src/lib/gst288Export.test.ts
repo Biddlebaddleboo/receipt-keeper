@@ -44,6 +44,33 @@ describe("GST288 export", () => {
     expect(result).toEqual({ status: "matched", description: "Activation fee" });
   });
 
+  it("uses a matching subtotal and excludes discounts from the description", () => {
+    const result = inferTaxableDescription(receipt({
+      subtotal: 80,
+      tax: 10.4,
+      items: [
+        { name: "Sale item", quantity: 1, price: 100 },
+        { name: "Coupon discount", quantity: 1, price: -20 },
+      ],
+    }), 13);
+
+    expect(result).toEqual({ status: "matched", description: "Sale item" });
+  });
+
+  it("gives subtotal matching precedence over an ambiguous item subset", () => {
+    const result = inferTaxableDescription(receipt({
+      subtotal: 10,
+      tax: 1.3,
+      items: [
+        { name: "Purchase A", quantity: 1, price: 5 },
+        { name: "Purchase B", quantity: 1, price: 5 },
+        { name: "Coupon", quantity: 1, price: 5 },
+      ],
+    }), 13);
+
+    expect(result).toEqual({ status: "matched", description: "Purchase A; Purchase B" });
+  });
+
   it("uses quantity and integer-cent rounding", () => {
     expect(calculateGstCents(554, 13)).toBe(72);
     const result = inferTaxableDescription(receipt({
@@ -51,6 +78,18 @@ describe("GST288 export", () => {
       tax: 0.72,
     }), 13);
     expect(result).toEqual({ status: "matched", description: "Two taxable items" });
+  });
+
+  it("falls back to the item subset when subtotal does not match", () => {
+    const vanilla = inferTaxableDescription(receipt({
+      subtotal: 105.5,
+      tax: 0.72,
+      items: [
+        { name: "Visa value", quantity: 1, price: 100 },
+        { name: "Activation fee", quantity: 1, price: 5.5 },
+      ],
+    }), 13);
+    expect(vanilla).toEqual({ status: "matched", description: "Activation fee" });
   });
 
   it("leaves ambiguous and unmatched subsets blank", () => {

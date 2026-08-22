@@ -78,6 +78,20 @@ interface TaxableCandidate {
   cents: number;
 }
 
+const nonPurchaseLinePattern = /\b(?:discount|coupon|adjustment)\b/i;
+
+const positivePurchasedItemNames = (receipt: Receipt): string[] =>
+  (Array.isArray(receipt.items) ? receipt.items : []).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const quantity = finiteNumber(item.quantity);
+    const price = finiteNumber(item.price);
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (quantity === null || price === null || quantity <= 0 || price <= 0 || !name || nonPurchaseLinePattern.test(name)) {
+      return [];
+    }
+    return [name];
+  });
+
 /**
  * Find the uniquely determined taxable item subset. At most two selections
  * are retained for each subtotal, since a second selection is enough to mark
@@ -91,6 +105,11 @@ export const inferTaxableDescription = (
   const basisPoints = rateBasisPoints(taxRatePercent);
   if (actualTaxCents === null || actualTaxCents <= 0 || basisPoints === null) {
     return { status: "unmatched", description: "" };
+  }
+
+  const subtotalCents = toCents(receipt.subtotal);
+  if (subtotalCents !== null && subtotalCents >= 0 && calculateGstCents(subtotalCents, taxRatePercent) === actualTaxCents) {
+    return { status: "matched", description: positivePurchasedItemNames(receipt).join("; ") };
   }
 
   const candidates: TaxableCandidate[] = (Array.isArray(receipt.items) ? receipt.items : []).flatMap((item) => {
