@@ -151,6 +151,15 @@ describe("Index receipt filters and export", () => {
     ));
   });
 
+  it("keeps dates and category/download controls side-by-side at every width", () => {
+    render(<MemoryRouter><Index /></MemoryRouter>);
+
+    expect(screen.getByTestId("receipt-date-filter-row")).toHaveClass("grid-cols-2");
+    const actionRow = screen.getByTestId("receipt-filter-action-row");
+    expect(actionRow).toHaveClass("grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]");
+    expect(actionRow).toContainElement(screen.getByRole("button", { name: "Download Receipts" }));
+  });
+
   it("clears list filters and returns to the visible receipt list", async () => {
     render(<MemoryRouter><Index /></MemoryRouter>);
 

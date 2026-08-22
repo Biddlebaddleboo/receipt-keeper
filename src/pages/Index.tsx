@@ -285,7 +285,7 @@ const Index = () => {
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
               />
             </label>
-            <div className="grid gap-2.5 sm:grid-cols-[1fr_1fr_1.35fr]">
+            <div className="grid grid-cols-2 gap-2.5" data-testid="receipt-date-filter-row">
               <label className="text-xs font-medium text-muted-foreground">
                 From date
                 <input
@@ -308,6 +308,8 @@ const Index = () => {
                   className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
                 />
               </label>
+            </div>
+            <div className="col-span-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-2.5" data-testid="receipt-filter-action-row">
               <details className="relative min-w-0">
                 <summary
                   aria-label="Filter receipt categories"
@@ -333,6 +335,15 @@ const Index = () => {
                   ))}
                 </div>
               </details>
+              <button
+                type="button"
+                onClick={() => void downloadReceipts()}
+                disabled={isExporting}
+                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                <span className="truncate">{isExporting ? "Preparing ZIP…" : "Download Receipts"}</span>
+              </button>
             </div>
           </div>
           {invalidReceiptDateRange && (
@@ -366,15 +377,6 @@ const Index = () => {
               )}
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => void downloadReceipts()}
-            disabled={isExporting}
-            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {isExporting ? "Preparing ZIP…" : "Download Receipts"}
-          </button>
         </section>
         <ReceiptList
           receiptsByDate={filteredReceiptsByDate}
