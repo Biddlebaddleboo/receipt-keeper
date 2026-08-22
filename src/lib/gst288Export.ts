@@ -81,17 +81,48 @@ interface TaxableCandidate {
 
 const nonPurchaseLinePattern = /\b(?:discount|coupon|adjustment)\b/i;
 
+export interface Gst288DescriptionItem {
+  name: string;
+  quantity: unknown;
+}
+
+const positiveIntegerQuantity = (quantity: unknown): number | null => {
+  const numericQuantity = finiteNumber(quantity);
+  return numericQuantity !== null && Number.isInteger(numericQuantity) && numericQuantity > 0
+    ? numericQuantity
+    : null;
+};
+
 export const formatGst288ItemDescription = (name: string, quantity: unknown): string => {
   const description = name.trim();
   if (!description) return "";
-  const numericQuantity = finiteNumber(quantity);
-  if (numericQuantity !== null && numericQuantity > 1) {
-    return `${numericQuantity} × ${description}`;
-  }
-  return description;
+  const normalizedQuantity = positiveIntegerQuantity(quantity);
+  return normalizedQuantity === null ? description : `${normalizedQuantity} × ${description}`;
 };
 
-const positivePurchasedItemNames = (receipt: Receipt): string[] =>
+export const aggregateGst288ItemDescriptions = (items: readonly Gst288DescriptionItem[]): string => {
+  const grouped = new Map<string, { name: string; quantity: number | null }>();
+  items.forEach((item) => {
+    const name = item.name.trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    const quantity = positiveIntegerQuantity(item.quantity);
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { name, quantity });
+      return;
+    }
+    if (quantity !== null) {
+      existing.quantity = (existing.quantity ?? 0) + quantity;
+    }
+  });
+  return Array.from(grouped.values())
+    .map((item) => formatGst288ItemDescription(item.name, item.quantity))
+    .filter(Boolean)
+    .join("; ");
+};
+
+const positivePurchasedItems = (receipt: Receipt): Gst288DescriptionItem[] =>
   (Array.isArray(receipt.items) ? receipt.items : []).flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const quantity = finiteNumber(item.quantity);
@@ -100,7 +131,7 @@ const positivePurchasedItemNames = (receipt: Receipt): string[] =>
     if (quantity === null || price === null || quantity <= 0 || price <= 0 || !name || nonPurchaseLinePattern.test(name)) {
       return [];
     }
-    return [formatGst288ItemDescription(name, quantity)];
+    return [{ name, quantity }];
   });
 
 /**
@@ -120,7 +151,7 @@ export const inferTaxableDescription = (
 
   const subtotalCents = toCents(receipt.subtotal);
   if (subtotalCents !== null && subtotalCents >= 0 && calculateGstCents(subtotalCents, taxRatePercent) === actualTaxCents) {
-    return { status: "matched", description: positivePurchasedItemNames(receipt).join("; ") };
+    return { status: "matched", description: aggregateGst288ItemDescriptions(positivePurchasedItems(receipt)) };
   }
 
   const candidates: TaxableCandidate[] = (Array.isArray(receipt.items) ? receipt.items : []).flatMap((item) => {
@@ -170,10 +201,9 @@ export const inferTaxableDescription = (
 
   if (matches.length === 0) return { status: "unmatched", description: "" };
   if (matches.length > 1) return { status: "ambiguous", description: "" };
-  const description = matches[0]
-    .map((index) => formatGst288ItemDescription(candidates[index].name, candidates[index].quantity))
-    .filter(Boolean)
-    .join("; ");
+  const description = aggregateGst288ItemDescriptions(
+    matches[0].map((index) => candidates[index]),
+  );
   return { status: "matched", description };
 };
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Receipt } from "@/hooks/useReceiptApi";
 import {
   analyzeGst288Receipts,
+  aggregateGst288ItemDescriptions,
   buildGst288Csv,
   calculateGstCents,
   formatGst288ItemDescription,
@@ -35,10 +36,25 @@ const readText = (blob: Blob): Promise<string> => new Promise((resolve, reject) 
 
 describe("GST288 export", () => {
   it("formats item quantities with the GST288 multiplication sign", () => {
-    expect(formatGst288ItemDescription("Activation fee", 1)).toBe("Activation fee");
+    expect(formatGst288ItemDescription("Activation fee", 1)).toBe("1 × Activation fee");
     expect(formatGst288ItemDescription("Activation fee", 2)).toBe("2 × Activation fee");
     expect(formatGst288ItemDescription("Activation fee", 0)).toBe("Activation fee");
     expect(formatGst288ItemDescription("Activation fee", "not-a-number")).toBe("Activation fee");
+  });
+
+  it("aggregates equivalent item descriptions while preserving the first spelling", () => {
+    expect(aggregateGst288ItemDescriptions([
+      { name: "Activation fee", quantity: 1 },
+      { name: "activation fee", quantity: 1 },
+    ])).toBe("2 × Activation fee");
+    expect(aggregateGst288ItemDescriptions([
+      { name: "Activation fee", quantity: 2 },
+      { name: "Activation fee", quantity: 1 },
+    ])).toBe("3 × Activation fee");
+    expect(aggregateGst288ItemDescriptions([
+      { name: "Item A", quantity: 2 },
+      { name: "Item B", quantity: 1 },
+    ])).toBe("2 × Item A; 1 × Item B");
   });
 
   it("finds the unique taxable subset in the prepaid example", () => {
@@ -49,7 +65,7 @@ describe("GST288 export", () => {
       ],
     }), 13);
 
-    expect(result).toEqual({ status: "matched", description: "Activation fee" });
+    expect(result).toEqual({ status: "matched", description: "1 × Activation fee" });
   });
 
   it("uses a matching subtotal and excludes discounts from the description", () => {
@@ -62,7 +78,7 @@ describe("GST288 export", () => {
       ],
     }), 13);
 
-    expect(result).toEqual({ status: "matched", description: "Sale item" });
+    expect(result).toEqual({ status: "matched", description: "1 × Sale item" });
   });
 
   it("includes quantity in a subtotal-first description", () => {
@@ -73,6 +89,16 @@ describe("GST288 export", () => {
     }), 13);
 
     expect(result).toEqual({ status: "matched", description: "2 × Bulk item" });
+
+    const repeated = inferTaxableDescription(receipt({
+      subtotal: 11,
+      tax: 1.43,
+      items: [
+        { name: "Activation fee", quantity: 1, price: 5.5 },
+        { name: "activation fee", quantity: 1, price: 5.5 },
+      ],
+    }), 13);
+    expect(repeated).toEqual({ status: "matched", description: "2 × Activation fee" });
   });
 
   it("gives subtotal matching precedence over an ambiguous item subset", () => {
@@ -86,7 +112,7 @@ describe("GST288 export", () => {
       ],
     }), 13);
 
-    expect(result).toEqual({ status: "matched", description: "Purchase A; Purchase B" });
+    expect(result).toEqual({ status: "matched", description: "1 × Purchase A; 1 × Purchase B" });
   });
 
   it("uses quantity and integer-cent rounding", () => {
@@ -107,7 +133,18 @@ describe("GST288 export", () => {
         { name: "Activation fee", quantity: 1, price: 5.5 },
       ],
     }), 13);
-    expect(vanilla).toEqual({ status: "matched", description: "Activation fee" });
+    expect(vanilla).toEqual({ status: "matched", description: "1 × Activation fee" });
+
+    const repeatedFees = inferTaxableDescription(receipt({
+      subtotal: 105.5,
+      tax: 1.43,
+      items: [
+        { name: "Visa value", quantity: 1, price: 100 },
+        { name: "Activation fee", quantity: 1, price: 5.5 },
+        { name: "activation fee", quantity: 1, price: 5.5 },
+      ],
+    }), 13);
+    expect(repeatedFees).toEqual({ status: "matched", description: "2 × Activation fee" });
 
     const threeFees = inferTaxableDescription(receipt({
       subtotal: 105.5,
@@ -159,7 +196,7 @@ describe("GST288 export", () => {
     expect(csv.type).toBe("text/csv;charset=utf-8");
     expect(await readText(csv)).toBe(
       '"Date","Invoice ID","Supplier Name","Brief Description of Purchases","GST/HST"\r\n' +
-      '"2026-08-20","","Supplier, ""quoted""","Fee\nwith comma, and quote","0.72"\r\n',
+      '"2026-08-20","","Supplier, ""quoted""","1 × Fee\nwith comma, and quote","0.72"\r\n',
     );
   });
 });
