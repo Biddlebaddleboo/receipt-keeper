@@ -52,6 +52,26 @@ describe("native JPEG conversion", () => {
     expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 800, 600);
   });
 
+  it("resizes and enforces grayscale in one JPEG encode", async () => {
+    const bitmap = { width: 2400, height: 1200, close: vi.fn() } as unknown as ImageBitmap;
+    const pixels = new Uint8ClampedArray([255, 0, 0, 255, 0, 120, 240, 255]);
+    const getImageData = vi.fn(() => ({ data: pixels, width: 1000, height: 500 } as ImageData));
+    const putImageData = vi.fn();
+    context = { drawImage, getImageData, putImageData } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => context);
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+
+    const output = await convertImageBlobToJpeg(sourceBlob(), { grayscale: true });
+
+    expect(output.type).toBe("image/jpeg");
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1000, 500);
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 1000, 500);
+    expect(putImageData).toHaveBeenCalledTimes(1);
+    expect(Array.from(pixels)).toEqual([54, 54, 54, 255, 103, 103, 103, 255]);
+    expect(toBlob).toHaveBeenCalledTimes(1);
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/jpeg", NATIVE_JPEG_QUALITY);
+  });
+
   it("closes ImageBitmap resources and resets the canvas after encoding", async () => {
     const close = vi.fn();
     const bitmap = { width: 500, height: 400, close } as unknown as ImageBitmap;

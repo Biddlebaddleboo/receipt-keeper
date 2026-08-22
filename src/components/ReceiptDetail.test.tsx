@@ -6,7 +6,6 @@ import type { Receipt } from "@/hooks/useReceiptApi";
 const mocks = vi.hoisted(() => ({
   fetchSignedReceiptImageUrl: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
-  convertImageBlobToGrayscale: vi.fn(),
   convertImageFileToGrayscale: vi.fn(),
   autoCropReceiptImage: vi.fn(),
   convertReceiptImageFile: vi.fn(),
@@ -26,7 +25,6 @@ vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: 
 vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSignedReceiptImageUrl }));
 vi.mock("@/lib/nativeImageConverter", () => ({
   convertImageBlobToJpeg: mocks.convertImageBlobToJpeg,
-  convertImageBlobToGrayscale: mocks.convertImageBlobToGrayscale,
   convertImageFileToGrayscale: mocks.convertImageFileToGrayscale,
 }));
 vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
@@ -73,7 +71,6 @@ describe("ReceiptDetail download", () => {
     mocks.convertImageBlobToJpeg.mockImplementation(async () => new Blob([
       new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
     ], { type: "image/jpeg" }));
-    mocks.convertImageBlobToGrayscale.mockImplementation(async (blob: Blob) => blob);
     mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["webp"], "receipt.webp", { type: "image/webp" }));
     mocks.convertImageFileToGrayscale.mockImplementation(async (file: File) => file);
@@ -108,13 +105,14 @@ describe("ReceiptDetail download", () => {
     const downloadButton = await screen.findByRole("button", { name: "Download receipt" });
     fireEvent.click(downloadButton);
 
-    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" })));
+    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "image/webp" }),
+      { grayscale: false },
+    ));
     expect(downloadedName).toBe("receipt-Example Store.jpg");
   });
 
   it("reapplies grayscale when downloading a grayscale receipt", async () => {
-    const grayscaleJpeg = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: "image/jpeg" });
-    mocks.convertImageBlobToGrayscale.mockResolvedValue(grayscaleJpeg);
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(
       <ReceiptDetail
@@ -130,8 +128,9 @@ describe("ReceiptDetail download", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Download receipt" }));
 
-    await waitFor(() => expect(mocks.convertImageBlobToGrayscale).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "image/jpeg" }),
+    await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "image/webp" }),
+      { grayscale: true },
     ));
     expect(mocks.replaceReceiptImage).not.toHaveBeenCalled();
   });

@@ -14,12 +14,10 @@ import { createStoredZip } from "@/lib/zipStore";
 
 const mocks = vi.hoisted(() => ({
   nativeConvert: vi.fn(),
-  nativeGrayscaleConvert: vi.fn(),
 }));
 
 vi.mock("@/lib/nativeImageConverter", () => ({
   convertImageBlobToJpeg: mocks.nativeConvert,
-  convertImageBlobToGrayscale: mocks.nativeGrayscaleConvert,
 }));
 
 const receipt = (overrides: Partial<Receipt>): Receipt => ({
@@ -132,18 +130,14 @@ describe("receipt export", () => {
   it("reapplies grayscale for grayscale receipts during JPEG export", async () => {
     vi.clearAllMocks();
     const source = new Blob(["webp"], { type: "image/webp" });
-    const converted = jpeg();
-    const grayscale = jpeg();
-    mocks.nativeConvert.mockResolvedValue(converted);
-    mocks.nativeGrayscaleConvert.mockResolvedValue(grayscale);
+    mocks.nativeConvert.mockResolvedValue(jpeg());
 
     await buildReceiptExportZip([receipt({ id: "grayscale", image_grayscale: true })], {
       getImageUrl: async () => "https://signed/grayscale",
       fetchImage: async () => ({ ok: true, status: 200, blob: async () => source } as Response),
     });
 
-    expect(mocks.nativeConvert).toHaveBeenCalledWith(source);
-    expect(mocks.nativeGrayscaleConvert).toHaveBeenCalledWith(converted);
+    expect(mocks.nativeConvert).toHaveBeenCalledWith(source, { grayscale: true });
   });
 
   it("filters both dates inclusively and applies selected categories", () => {

@@ -1,6 +1,6 @@
 import type { Receipt } from "@/hooks/useReceiptApi";
 import { normalizeErrorMessage } from "@/lib/imageErrors";
-import { convertImageBlobToGrayscale, convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
+import { convertImageBlobToJpeg, type NativeJpegConversionOptions } from "@/lib/nativeImageConverter";
 import { normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { createStoredZip, type StoredZipEntry } from "@/lib/zipStore";
 
@@ -25,8 +25,7 @@ export interface ReceiptExportProgress {
 export interface ReceiptExportOptions extends ReceiptExportFilters {
   getImageUrl: (receipt: Receipt) => Promise<string | null>;
   fetchImage?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-  convert?: (blob: Blob) => Promise<Blob>;
-  convertGrayscale?: (blob: Blob) => Promise<Blob>;
+  convert?: (blob: Blob, options?: NativeJpegConversionOptions) => Promise<Blob>;
   onProgress?: (progress: ReceiptExportProgress) => void;
 }
 
@@ -167,7 +166,6 @@ export const buildReceiptExportZip = async (receipts: Receipt[], options: Receip
   const matchingReceipts = filterReceiptsForExport(receipts, options);
   const fetchImage = options.fetchImage ?? fetch;
   const convert = options.convert ?? convertImageBlobToJpeg;
-  const convertGrayscale = options.convertGrayscale ?? convertImageBlobToGrayscale;
   const usedNames = new Map<string, number>();
   const filenames = matchingReceipts.map((receipt) => receiptExportFilename(receipt, usedNames));
   const entries: StoredZipEntry[] = [];
@@ -200,10 +198,8 @@ export const buildReceiptExportZip = async (receipts: Receipt[], options: Receip
       sourceBlob = await response.blob();
 
       reportProgress(index, "converting", filename, 0.5);
-      jpegBlob = await convert(sourceBlob);
-      if (receipt.image_grayscale === true) {
-        jpegBlob = await convertGrayscale(jpegBlob);
-      }
+      const conversionOptions = receipt.image_grayscale === true ? { grayscale: true } : undefined;
+      jpegBlob = conversionOptions ? await convert(sourceBlob, conversionOptions) : await convert(sourceBlob);
       if (jpegBlob.type.split(";", 1)[0].trim().toLowerCase() !== "image/jpeg") {
         throw new Error("Receipt image conversion did not produce a JPEG");
       }

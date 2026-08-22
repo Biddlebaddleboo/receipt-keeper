@@ -7,7 +7,7 @@ import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate, normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
-import { convertImageBlobToGrayscale, convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
+import { convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
 import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
@@ -403,10 +403,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                 const res = await fetch(imageEndpoint, { credentials: "omit" });
                 if (!res.ok) throw new Error("Download failed");
                 const sourceBlob = await res.blob();
-                let jpegBlob = await convertImageBlobToJpeg(sourceBlob);
-                if (receipt.image_grayscale === true) {
-                  jpegBlob = await convertImageBlobToGrayscale(jpegBlob);
-                }
+                const jpegBlob = await convertImageBlobToJpeg(sourceBlob, { grayscale: receipt.image_grayscale === true });
                 if (jpegBlob.type !== "image/jpeg") throw new Error("Image conversion to JPEG failed");
                 const url = URL.createObjectURL(jpegBlob);
                 const a = document.createElement("a");
