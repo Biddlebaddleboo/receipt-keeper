@@ -2,6 +2,7 @@ import { normalizeErrorMessage } from "@/lib/imageErrors";
 
 export const NATIVE_JPEG_MAX_WIDTH = 1000;
 export const NATIVE_JPEG_QUALITY = 0.75;
+export const GRAYSCALE_EXPORT_JPEG_QUALITY = 0.65;
 export const GRAYSCALE_JPEG_QUALITY = 0.92;
 
 type DecodedImage = {
@@ -154,7 +155,7 @@ const convertImageBlobToJpegWithOptions = async (
     if (options.grayscale) applyGrayscale(context, targetWidth, targetHeight);
     return await encodeCanvasAsJpeg(
       canvas,
-      options.quality ?? NATIVE_JPEG_QUALITY,
+      options.quality ?? (options.grayscale ? GRAYSCALE_EXPORT_JPEG_QUALITY : NATIVE_JPEG_QUALITY),
       options.grayscale ? "Browser grayscale JPEG encoding" : "Browser JPEG encoding",
     );
   } catch (error) {

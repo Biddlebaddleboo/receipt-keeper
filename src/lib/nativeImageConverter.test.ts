@@ -3,6 +3,7 @@ import {
   convertImageBlobToGrayscale,
   convertImageBlobToJpeg,
   convertImageFileToGrayscale,
+  GRAYSCALE_EXPORT_JPEG_QUALITY,
   GRAYSCALE_JPEG_QUALITY,
   NATIVE_JPEG_MAX_WIDTH,
   NATIVE_JPEG_QUALITY,
@@ -69,7 +70,8 @@ describe("native JPEG conversion", () => {
     expect(putImageData).toHaveBeenCalledTimes(1);
     expect(Array.from(pixels)).toEqual([54, 54, 54, 255, 103, 103, 103, 255]);
     expect(toBlob).toHaveBeenCalledTimes(1);
-    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/jpeg", NATIVE_JPEG_QUALITY);
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/jpeg", GRAYSCALE_EXPORT_JPEG_QUALITY);
+    expect(GRAYSCALE_EXPORT_JPEG_QUALITY).toBe(0.65);
   });
 
   it("closes ImageBitmap resources and resets the canvas after encoding", async () => {
