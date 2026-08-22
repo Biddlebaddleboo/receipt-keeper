@@ -6,6 +6,7 @@ import type { Receipt } from "@/hooks/useReceiptApi";
 const mocks = vi.hoisted(() => ({
   fetchSignedReceiptImageUrl: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
+  convertImageBlobToGrayscale: vi.fn(),
   convertImageFileToGrayscale: vi.fn(),
   autoCropReceiptImage: vi.fn(),
   convertReceiptImageFile: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: 
 vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSignedReceiptImageUrl }));
 vi.mock("@/lib/nativeImageConverter", () => ({
   convertImageBlobToJpeg: mocks.convertImageBlobToJpeg,
+  convertImageBlobToGrayscale: mocks.convertImageBlobToGrayscale,
   convertImageFileToGrayscale: mocks.convertImageFileToGrayscale,
 }));
 vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
@@ -71,6 +73,7 @@ describe("ReceiptDetail download", () => {
     mocks.convertImageBlobToJpeg.mockImplementation(async () => new Blob([
       new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
     ], { type: "image/jpeg" }));
+    mocks.convertImageBlobToGrayscale.mockImplementation(async (blob: Blob) => blob);
     mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["webp"], "receipt.webp", { type: "image/webp" }));
     mocks.convertImageFileToGrayscale.mockImplementation(async (file: File) => file);
@@ -107,6 +110,30 @@ describe("ReceiptDetail download", () => {
 
     await waitFor(() => expect(mocks.convertImageBlobToJpeg).toHaveBeenCalledWith(expect.objectContaining({ type: "image/webp" })));
     expect(downloadedName).toBe("receipt-Example Store.jpg");
+  });
+
+  it("reapplies grayscale when downloading a grayscale receipt", async () => {
+    const grayscaleJpeg = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: "image/jpeg" });
+    mocks.convertImageBlobToGrayscale.mockResolvedValue(grayscaleJpeg);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(
+      <ReceiptDetail
+        receipt={{ ...receipt, image_grayscale: true }}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue({ ...receipt, image_grayscale: true })}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Download receipt" }));
+
+    await waitFor(() => expect(mocks.convertImageBlobToGrayscale).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "image/jpeg" }),
+    ));
+    expect(mocks.replaceReceiptImage).not.toHaveBeenCalled();
   });
 
   it("writes purchase dates through the canonical normalization boundary", async () => {
@@ -198,6 +225,33 @@ describe("ReceiptDetail download", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Receipt image cropped");
     expect(mocks.toastWarning).not.toHaveBeenCalled();
     expect(mocks.revokeObjectURL).toHaveBeenCalledWith("blob:crop-preview");
+  });
+
+  it("reapplies grayscale when cropping a grayscale receipt and preserves metadata", async () => {
+    const grayscaleReceipt = { ...receipt, image_grayscale: true };
+    const cropped = new File(["cropped"], "cropped.jpg", { type: "image/jpeg" });
+    mocks.autoCropReceiptImage.mockResolvedValue(cropped);
+    render(
+      <ReceiptDetail
+        receipt={grayscaleReceipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue(grayscaleReceipt)}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Crop Image" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply Crop" }));
+
+    await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalledWith(
+      receipt.id,
+      "receipts/u_owner/replacement.webp",
+      true,
+    ));
+    expect(mocks.convertImageFileToGrayscale).toHaveBeenCalledWith(cropped);
   });
 
   it("forwards Replace Image camera captures through the existing replacement flow", async () => {

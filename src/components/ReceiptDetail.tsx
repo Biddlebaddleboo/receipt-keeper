@@ -7,7 +7,7 @@ import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate, normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
-import { convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
+import { convertImageBlobToGrayscale, convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
 import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
@@ -159,7 +159,12 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     const croppedFile = cropPreviewFile;
     setImageEditPending("crop");
     try {
-      await saveReplacementImage(croppedFile, "Receipt image cropped", false);
+      await saveReplacementImage(
+        croppedFile,
+        "Receipt image cropped",
+        false,
+        receipt.image_grayscale === true ? true : undefined,
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to apply receipt crop");
     } finally {
@@ -398,7 +403,10 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                 const res = await fetch(imageEndpoint, { credentials: "omit" });
                 if (!res.ok) throw new Error("Download failed");
                 const sourceBlob = await res.blob();
-                const jpegBlob = await convertImageBlobToJpeg(sourceBlob);
+                let jpegBlob = await convertImageBlobToJpeg(sourceBlob);
+                if (receipt.image_grayscale === true) {
+                  jpegBlob = await convertImageBlobToGrayscale(jpegBlob);
+                }
                 if (jpegBlob.type !== "image/jpeg") throw new Error("Image conversion to JPEG failed");
                 const url = URL.createObjectURL(jpegBlob);
                 const a = document.createElement("a");
