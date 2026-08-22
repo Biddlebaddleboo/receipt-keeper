@@ -1,0 +1,44 @@
+name: Provision GST288 template
+
+on:
+  push:
+    paths:
+      - '.github/workflows/provision-gst288.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download and unlock GST288
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qpdf
+          mkdir -p public/forms
+          curl -L --fail --retry 3 --retry-delay 2 \
+            'https://www.canada.ca/content/dam/cra-arc/formspubs/pbg/gst288/gst288-fill-23e.pdf' \
+            -o /tmp/gst288-fill-23e.pdf
+          qpdf --password='' --decrypt /tmp/gst288-fill-23e.pdf public/forms/gst288-fill-23e.pdf
+          qpdf --check public/forms/gst288-fill-23e.pdf
+          test "$(qpdf --show-npages public/forms/gst288-fill-23e.pdf)" = "2"
+          qpdf --show-encryption public/forms/gst288-fill-23e.pdf | grep -qi 'File is not encrypted'
+
+      - name: Commit template and remove staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .gst288-upload
+          rm -f .github/workflows/provision-gst288.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore(gst288): add unlocked form template'
+          git push origin HEAD:main
