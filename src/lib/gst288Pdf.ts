@@ -28,7 +28,18 @@ interface Gst288PageFieldNames {
   };
 }
 
+const actualPagePrefix = (page: number): string =>
+  page === 1
+    ? "form1[0].Page1[0].PartB[0].Table[0]"
+    : "form1[0].Page2[0].PartB_contd[0].Table[0]";
+
+const actualPageNumberPrefix = (page: number): string =>
+  `form1[0].Page${page}[0].Page_Of_Box[0]`;
+
 const rowAliases = (page: number, slot: number, globalRow: number, field: string): FieldAliases => [
+  `${actualPagePrefix(page)}.Row${globalRow}[0].${field === "gst_hst" ? "GST[0].Cell5[0]" : `Cell${field === "date" ? 1 : field === "invoice_id" ? 2 : field === "supplier_name" ? 3 : 4}[0]`}`,
+  `row${globalRow}_cell${field === "date" ? 1 : field === "invoice_id" ? 2 : field === "supplier_name" ? 3 : 4}`,
+  ...(field === "gst_hst" ? [`${actualPagePrefix(page)}.Row${globalRow}[0].GST[0].Cell5[0]`] : []),
   `page${page}_row${globalRow}_${field}`,
   `page${page}_row${slot}_${field}`,
   `p${page}_${field}_${globalRow}`,
@@ -40,9 +51,23 @@ const rowAliases = (page: number, slot: number, globalRow: number, field: string
 ];
 
 const pageFieldNames = (page: number): Gst288PageFieldNames => ({
-  pageNumber: [`page${page}_number`, `page_number_${page}`, `page${page}_page_number`, `page${page}`],
-  pageCount: [`page${page}_count`, `page_count_${page}`, `page${page}_page_count`, `page${page}_of_2`, `page${page}of2`],
+  pageNumber: [
+    `${actualPageNumberPrefix(page)}.First_Page_Number[0]`,
+    `page${page}_number`,
+    `page_number_${page}`,
+    `page${page}_page_number`,
+    `page${page}`,
+  ],
+  pageCount: [
+    `${actualPageNumberPrefix(page)}.Second_Page_Number[0]`,
+    `page${page}_count`,
+    `page_count_${page}`,
+    `page${page}_page_count`,
+    `page${page}_of_2`,
+    `page${page}of2`,
+  ],
   pageTotal: [
+    `${actualPagePrefix(page)}.Table_Final_Row[0].Total_GST[0].Cell5[0]`,
     `page${page}_total`,
     `page${page}_gst_hst_total`,
     `gst_hst_total_page${page}`,
@@ -67,14 +92,38 @@ const pageFieldNames = (page: number): Gst288PageFieldNames => ({
  */
 export const GST288_FIELD_NAMES = {
   claimantName: [
+    "form1[0].Page1[0].PartA[0].Claiment_Last_Name[0].Claimants_Last_Name[0]",
     "claimant_business_name",
     "claimant_name",
     "claimants_name_or_business_name",
     "claimants_last_name_or_name_of_business_organization",
     "name_of_business_organization",
   ],
-  firstName: ["claimant_first_name", "first_name", "claimants_first_name"],
-  businessNumber: ["business_number", "claimant_business_number"],
+  firstName: [
+    "form1[0].Page1[0].PartA[0].Claimant_First_Name[0].Claimants_First_Name[0]",
+    "claimant_first_name",
+    "first_name",
+    "claimants_first_name",
+  ],
+  businessNumber: [
+    "form1[0].Page1[0].PartA[0].BusinessNumber[0].BusinessNumber[0].BusinessNumber_RT1[0]",
+    "business_number",
+    "claimant_business_number",
+  ],
+  businessNumberParts: {
+    first: [
+      "form1[0].Page1[0].PartA[0].BusinessNumber[0].BusinessNumber[0].BusinessNumber_RT1[0]",
+      "business_number_first",
+    ],
+    type: [
+      "form1[0].Page1[0].PartA[0].BusinessNumber[0].BusinessNumber[0].BusinessNumber_RT[0]",
+      "business_number_type",
+    ],
+    second: [
+      "form1[0].Page1[0].PartA[0].BusinessNumber[0].BusinessNumber[0].BusinessNumber_RT2[0]",
+      "business_number_second",
+    ],
+  },
   page: (page: number) => pageFieldNames(page),
 } as const;
 
@@ -135,9 +184,9 @@ const availableFieldNames = (form: PdfForm): string[] => {
   }
 };
 
-const resolveFieldName = (form: PdfForm, aliases: FieldAliases): string => {
+const findAvailableFieldName = (form: PdfForm, aliases: FieldAliases): string | undefined => {
   const available = availableFieldNames(form);
-  if (available.length === 0) return aliases[0];
+  if (available.length === 0) return undefined;
   const availableByNormalized = new Map(available.map((name) => [normalizeFieldName(name), name]));
   for (const alias of aliases) {
     const exact = availableByNormalized.get(normalizeFieldName(alias));
@@ -148,6 +197,14 @@ const resolveFieldName = (form: PdfForm, aliases: FieldAliases): string => {
     const partial = available.find((name) => normalizeFieldName(name).includes(normalizedAlias));
     if (partial) return partial;
   }
+  return undefined;
+};
+
+const resolveFieldName = (form: PdfForm, aliases: FieldAliases): string => {
+  const available = availableFieldNames(form);
+  if (available.length === 0) return aliases[0];
+  const fieldName = findAvailableFieldName(form, aliases);
+  if (fieldName) return fieldName;
   throw new Error(`GST288 template is missing mapped field: ${aliases[0]}`);
 };
 
@@ -158,6 +215,27 @@ const setTextField = (form: PdfForm, aliases: FieldAliases, value: string): void
   } catch (error) {
     throw new Error(`Unable to fill GST288 field ${fieldName}: ${error instanceof Error ? error.message : String(error)}`);
   }
+};
+
+const setOptionalTextField = (form: PdfForm, aliases: FieldAliases, value: string): void => {
+  if (availableFieldNames(form).length > 0 && !findAvailableFieldName(form, aliases)) return;
+  setTextField(form, aliases, value);
+};
+
+const fillBusinessNumber = (form: PdfForm, value: string): void => {
+  const businessNumber = value.trim();
+  const normalized = businessNumber.replace(/\s+/g, "");
+  const parts = /^(\d{9})([A-Za-z]{2})(\d{4})$/.exec(normalized);
+  if (parts) {
+    setTextField(form, GST288_FIELD_NAMES.businessNumberParts.first, parts[1]);
+    setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.type, parts[2]);
+    setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.second, parts[3]);
+    return;
+  }
+
+  setTextField(form, GST288_FIELD_NAMES.businessNumber, businessNumber);
+  setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.type, "");
+  setOptionalTextField(form, GST288_FIELD_NAMES.businessNumberParts.second, "");
 };
 
 const parseTaxCents = (tax: string): number => {
@@ -224,7 +302,7 @@ export const buildGst288Pdf = async (
     const form = pdfDocument.getForm();
     setTextField(form, GST288_FIELD_NAMES.claimantName, claimant.businessName ?? "");
     setTextField(form, GST288_FIELD_NAMES.firstName, claimant.firstName ?? "");
-    setTextField(form, GST288_FIELD_NAMES.businessNumber, claimant.businessNumber ?? "");
+    fillBusinessNumber(form, claimant.businessNumber ?? "");
     fillPage(form, 1, pageRows(analyzed.rows, 1));
     fillPage(form, 2, pageRows(analyzed.rows, 2));
     try {

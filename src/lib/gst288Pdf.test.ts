@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { PDFDocument } from "pdf-lib";
 import type { Receipt } from "@/hooks/useReceiptApi";
 import {
   buildGst288Pdf,
@@ -30,7 +33,9 @@ const makePdfApi = () => {
   const fieldNames = new Set<string>([
     GST288_FIELD_NAMES.claimantName[0],
     GST288_FIELD_NAMES.firstName[0],
-    GST288_FIELD_NAMES.businessNumber[0],
+    GST288_FIELD_NAMES.businessNumberParts.first[0],
+    GST288_FIELD_NAMES.businessNumberParts.type[0],
+    GST288_FIELD_NAMES.businessNumberParts.second[0],
   ]);
   for (const page of [1, 2] as const) {
     const fields = GST288_FIELD_NAMES.page(page);
@@ -78,7 +83,9 @@ describe("GST288 PDF export", () => {
 
     expect(fake.values.get(GST288_FIELD_NAMES.claimantName[0])).toBe("Example Business");
     expect(fake.values.get(GST288_FIELD_NAMES.firstName[0])).toBe("Alex");
-    expect(fake.values.get(GST288_FIELD_NAMES.businessNumber[0])).toBe("123456789RT0001");
+    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.first[0])).toBe("123456789");
+    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.type[0])).toBe("RT");
+    expect(fake.values.get(GST288_FIELD_NAMES.businessNumberParts.second[0])).toBe("0001");
     expect(fake.values.get(GST288_FIELD_NAMES.page(1).pageNumber[0])).toBe("1");
     expect(fake.values.get(GST288_FIELD_NAMES.page(1).pageCount[0])).toBe("2");
     expect(fake.values.get(GST288_FIELD_NAMES.page(2).pageNumber[0])).toBe("2");
@@ -114,5 +121,18 @@ describe("GST288 PDF export", () => {
 
   it("uses deterministic PDF filenames", () => {
     expect(gst288PdfFilename({ fromDate: "2026-08-01", toDate: "2026-08-31" })).toBe("gst288-2026-08-01-to-2026-08-31.pdf");
+  });
+
+  it("fills the uploaded GST288 template field names", async () => {
+    const template = readFileSync(resolve(process.cwd(), "public/forms/gst288-fill-23e.pdf"));
+    const result = await buildGst288Pdf(
+      [receipt(1)],
+      {},
+      { businessName: "Example Business", firstName: "Alex", businessNumber: "123456789RT0001" },
+      { loadTemplate: async () => new Uint8Array(template), pdfDocumentApi: PDFDocument },
+    );
+
+    expect(result.blob.type).toBe("application/pdf");
+    expect(result.blob.size).toBeGreaterThan(0);
   });
 });
