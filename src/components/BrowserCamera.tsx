@@ -19,6 +19,8 @@ const BASE_CAMERA_CONSTRAINTS: MediaTrackConstraints = {
   height: { ideal: 1080 },
 };
 
+const CAMERA_STARTUP_TIMEOUT_MS = 5_000;
+
 function buildCameraConstraints(additional: CameraConstraintSet): MediaTrackConstraints {
   return {
     ...BASE_CAMERA_CONSTRAINTS,
@@ -49,6 +51,8 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
   const cameraContinuousFocusRef = useRef(false);
   const cameraTapFocusSupportedRef = useRef(false);
   const cameraRequestRef = useRef(0);
+  const cameraTrackEndedHandlerRef = useRef<(() => void) | null>(null);
+  const openRef = useRef(open);
   const onCaptureRef = useRef(onCapture);
   const onCloseRef = useRef(onClose);
 
@@ -57,9 +61,18 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
     onCloseRef.current = onClose;
   }, [onCapture, onClose]);
 
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   const stopCamera = useCallback(() => {
     cameraRequestRef.current += 1;
-    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    const track = cameraTrackRef.current;
+    if (track && cameraTrackEndedHandlerRef.current) {
+      track.removeEventListener?.("ended", cameraTrackEndedHandlerRef.current);
+    }
+    cameraTrackEndedHandlerRef.current = null;
+    cameraStreamRef.current?.getTracks().forEach((activeTrack) => activeTrack.stop());
     cameraStreamRef.current = null;
     cameraTrackRef.current = null;
     cameraContinuousFocusRef.current = false;
@@ -73,7 +86,26 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
     onCloseRef.current();
   }, [stopCamera]);
 
+  const closeCameraForLifecycle = useCallback(() => {
+    if (!openRef.current && !cameraStreamRef.current) return;
+    stopCamera();
+    onCloseRef.current();
+  }, [stopCamera]);
+
   useEffect(() => stopCamera, [stopCamera]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") closeCameraForLifecycle();
+    };
+    const handlePageHide = () => closeCameraForLifecycle();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [closeCameraForLifecycle]);
 
   useEffect(() => {
     if (!cameraStream || !cameraVideoRef.current) return;
@@ -99,11 +131,32 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
     }
 
     let stream: MediaStream | null = null;
+    let startupTimedOut = false;
+    let startupTimeoutID: number | null = null;
     try {
-      stream = await getUserMedia.call(navigator.mediaDevices, {
+      const streamPromise = getUserMedia.call(navigator.mediaDevices, {
         audio: false,
         video: BASE_CAMERA_CONSTRAINTS,
       });
+      streamPromise.then((lateStream) => {
+        if (startupTimedOut || requestId !== cameraRequestRef.current) {
+          lateStream.getTracks().forEach((lateTrack) => lateTrack.stop());
+        }
+      }).catch(() => {
+        // The race below handles the rejected startup request.
+      });
+      const timeoutPromise = new Promise<MediaStream>((_, reject) => {
+        startupTimeoutID = window.setTimeout(() => {
+          startupTimedOut = true;
+          reject(new Error("Camera startup timed out"));
+        }, CAMERA_STARTUP_TIMEOUT_MS);
+      });
+      stream = await Promise.race([streamPromise, timeoutPromise]);
+      if (startupTimeoutID !== null) window.clearTimeout(startupTimeoutID);
+      if (requestId !== cameraRequestRef.current) {
+        stream.getTracks().forEach((activeTrack) => activeTrack.stop());
+        return;
+      }
       const track = stream.getVideoTracks()[0];
       const capabilities = track?.getCapabilities?.() as CameraTrackCapabilities | undefined;
       if (!track || !capabilities?.torch) throw new Error("Rear camera torch is unavailable");
@@ -132,12 +185,20 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
       cameraContinuousFocusRef.current = continuousFocusApplied;
       cameraTapFocusSupportedRef.current = supportsTapFocus;
       cameraStreamRef.current = stream;
+      const handleTrackEnded = () => {
+        if (cameraTrackRef.current !== track) return;
+        stopCamera();
+        onCloseRef.current();
+      };
+      cameraTrackEndedHandlerRef.current = handleTrackEnded;
+      track.addEventListener?.("ended", handleTrackEnded);
       setCameraStream(stream);
     } catch {
+      if (startupTimeoutID !== null) window.clearTimeout(startupTimeoutID);
       stream?.getTracks().forEach((track) => track.stop());
       if (requestId === cameraRequestRef.current) fallbackToCaptureInput();
     }
-  }, [fallbackToCaptureInput]);
+  }, [fallbackToCaptureInput, stopCamera]);
 
   useEffect(() => {
     if (open) {
