@@ -273,7 +273,7 @@ const Index = () => {
             </button>
           </div>
           <div className="grid gap-2.5">
-            <label className="text-xs font-medium text-muted-foreground">
+            <label className="text-xs font-medium text-muted-foreground" data-testid="receipt-store-filter-row">
               Store name
               <input
                 type="search"
@@ -309,7 +309,7 @@ const Index = () => {
                 />
               </label>
             </div>
-            <div className="col-span-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-2.5" data-testid="receipt-filter-action-row">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-2.5" data-testid="receipt-filter-action-row">
               <details className="relative min-w-0">
                 <summary
                   aria-label="Filter receipt categories"
