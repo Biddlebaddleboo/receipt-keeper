@@ -24,6 +24,7 @@ interface ReceiptUploadMeta {
   total?: number;
   category?: string;
   purchase_date?: string;
+  invoice_id?: string;
 }
 
 interface SignedUploadResponse {
@@ -50,6 +51,7 @@ export interface Receipt {
   total: number;
   category: string;
   purchase_date: string;
+  invoice_id?: string;
   extracted_text: string;
   extracted_fields: ExtractedField[];
   items: ReceiptItem[];
@@ -295,6 +297,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       total: canonicalNumber(raw.total) ?? 0,
       category: canonicalEditableText(raw.category, undefined),
       purchase_date: canonicalEditableText(raw.purchase_date, undefined),
+      invoice_id: canonicalEditableText(raw.invoice_id, undefined),
       extracted_text: typeof raw.extracted_text === "string" ? raw.extracted_text : "",
       extracted_fields: Array.isArray(raw.extracted_fields) ? (raw.extracted_fields as ExtractedField[]) : [],
       items: Array.isArray(raw.items) ? (raw.items as ReceiptItem[]) : [],
@@ -330,6 +333,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       total: canonicalNumber(metadata.total) ?? canonicalNumber(detailData.total) ?? 0,
       category: canonicalEditableText(metadata.category, detailData.category),
       purchase_date: canonicalEditableText(metadata.purchase_date, detailData.purchase_date),
+      invoice_id: canonicalEditableText(metadata.invoice_id, detailData.invoice_id),
       extracted_text:
         typeof detailData.extracted_text === "string"
           ? detailData.extracted_text
@@ -476,6 +480,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       tax: 0,
       category: "",
       purchase_date: "",
+      invoice_id: "",
       extracted_text: "",
       extracted_fields: [],
       items: [],

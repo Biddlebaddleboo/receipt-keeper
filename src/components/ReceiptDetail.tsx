@@ -56,7 +56,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     (updates: Record<string, unknown>) =>
       Object.fromEntries(
         Object.entries(updates).filter(([key]) =>
-          ["vendor", "subtotal", "tax", "total", "category", "purchase_date"].includes(key)
+          ["vendor", "subtotal", "tax", "total", "category", "purchase_date", "invoice_id"].includes(key)
         )
       ),
     []
@@ -179,6 +179,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const saveField = async (field: string, value: string) => {
     const payload: Record<string, unknown> = {};
     if (field === "vendor") payload.vendor = value.trim();
+    else if (field === "invoice_id") payload.invoice_id = value.trim();
     else if (field === "total") payload.total = parseFloat(value);
     else if (field === "subtotal") payload.subtotal = parseFloat(value);
     else if (field === "tax") payload.tax = parseFloat(value);
@@ -487,6 +488,36 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">Vendor</p>
                   <p className="text-sm font-medium">{receipt.vendor || "—"}</p>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )}
+
+            {/* Invoice ID */}
+            {editingField === "invoice_id" ? (
+              <div className="px-3.5 py-3 rounded-lg bg-secondary/80 space-y-2 ring-1 ring-primary/20">
+                <label className="text-xs text-muted-foreground" htmlFor="receipt-invoice-id">Invoice ID</label>
+                <input
+                  id="receipt-invoice-id"
+                  type="text"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  className="w-full bg-background/80 rounded-md px-2.5 py-1.5 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-1.5">
+                  <button onClick={() => setEditingField(null)} className="px-2.5 py-1 rounded-md text-xs text-muted-foreground hover:bg-secondary transition-colors active:scale-95">Cancel</button>
+                  <button onClick={() => saveField("invoice_id", editValue)} disabled={isSaving} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors active:scale-95 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => startFieldEdit("invoice_id", receipt.invoice_id || "")} className="w-full flex items-center gap-3 px-3.5 py-3 rounded-lg bg-secondary/50 hover:bg-secondary/70 transition-colors text-left group">
+                <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-muted-foreground">Invoice ID</p>
+                  <p className="text-sm font-medium truncate">{receipt.invoice_id || "—"}</p>
                 </div>
                 <Pencil className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>

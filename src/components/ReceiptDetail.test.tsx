@@ -127,6 +127,38 @@ describe("ReceiptDetail download", () => {
     expect(mocks.updateDoc.mock.calls[0][1]).toEqual({ purchase_date: "2026-07-23" });
   });
 
+  it("allows invoice IDs to be edited, cleared, and saved without OCR", async () => {
+    const editableReceipt = { ...receipt, invoice_id: "0007-ABC", shard_doc_id: "shard-1" };
+    const fetchReceipt = vi.fn().mockResolvedValue(editableReceipt);
+    render(
+      <ReceiptDetail
+        receipt={editableReceipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={fetchReceipt}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    const invoiceButton = await screen.findByRole("button", { name: /Invoice ID/ });
+    expect(invoiceButton).toHaveTextContent("0007-ABC");
+    fireEvent.click(invoiceButton);
+    const invoiceInput = screen.getByLabelText("Invoice ID");
+    fireEvent.change(invoiceInput, { target: { value: "INV-0009-X" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateDoc).toHaveBeenCalled());
+    expect(mocks.updateDoc.mock.calls[0][1]).toEqual({ invoice_id: "INV-0009-X" });
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: /Invoice ID/ }));
+    fireEvent.change(screen.getByLabelText("Invoice ID"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateDoc.mock.calls.at(-2)?.[1]).toEqual({ invoice_id: "" }));
+  });
+
   it("crops and replaces only the existing image without OCR or finalize-upload", async () => {
     const cropped = new File(["cropped"], "cropped.jpg", { type: "image/jpeg" });
     mocks.autoCropReceiptImage.mockResolvedValue(cropped);

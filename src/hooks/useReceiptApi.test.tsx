@@ -54,6 +54,7 @@ describe("useReceiptApi canonical export fields", () => {
             total: 11,
             category: "Corrected category",
             purchase_date: "2026/08/20",
+            invoice_id: "META-0001",
             created_at: "2026-08-20T00:00:00.000Z",
           },
           fallback: {
@@ -94,7 +95,8 @@ describe("useReceiptApi canonical export fields", () => {
             tax: 2,
             total: 22,
             category: "Historical detail category",
-            purchase_date: "2020-01-01",
+          purchase_date: "2020-01-01",
+          invoice_id: "DETAIL-0001",
             extracted_fields: {
               ai_suggestions: {
                 vendor: "AI store",
@@ -119,6 +121,7 @@ describe("useReceiptApi canonical export fields", () => {
           items: [{ name: "Canonical item", quantity: 1, price: 5 }],
           category: "Detail fallback category",
           purchase_date: "2026-08-21",
+          invoice_id: "DETAIL-0002",
           extracted_fields: {
             ai_suggestions: {
               vendor: "AI fallback store",
@@ -153,6 +156,7 @@ describe("useReceiptApi canonical export fields", () => {
       total: 11,
       category: "Corrected category",
       purchase_date: "2026/08/20",
+      invoice_id: "META-0001",
     });
     expect(fallback).toMatchObject({
       vendor: "Detail fallback store",
@@ -162,10 +166,13 @@ describe("useReceiptApi canonical export fields", () => {
       items: [{ name: "Canonical item", quantity: 1, price: 5 }],
       category: "Detail fallback category",
       purchase_date: "2026-08-21",
+      invoice_id: "DETAIL-0002",
     });
     expect(corrected?.items).toEqual([]);
     expect(corrected?.category).not.toBe("AI category");
     expect(corrected?.purchase_date).not.toBe("2019-01-01");
+    expect(corrected?.invoice_id).toBe("META-0001");
+    expect(fallback?.invoice_id).toBe("DETAIL-0002");
     expect(corrected?.vendor).not.toBe("AI store");
     expect(corrected?.subtotal).not.toBe(99);
     expect(corrected?.tax).not.toBe(9);
