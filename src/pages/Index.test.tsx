@@ -190,6 +190,7 @@ describe("Index receipt filters and export", () => {
     expect(actionRow).toContainElement(screen.getByRole("button", { name: "Download receipts CSV" }));
     expect(actionRow).toHaveTextContent("Receipts");
     expect(actionRow).toHaveTextContent("CSV");
+    expect(screen.getByTestId("receipt-export-button-grid")).toHaveClass("grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]");
   });
 
   it("clears list filters and returns to the visible receipt list", async () => {

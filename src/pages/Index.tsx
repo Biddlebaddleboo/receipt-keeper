@@ -373,7 +373,7 @@ const Index = () => {
                   ))}
                 </div>
               </details>
-              <div className="grid min-w-0 grid-cols-2 gap-2">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-2" data-testid="receipt-export-button-grid">
                 <button
                   type="button"
                   onClick={() => void downloadReceipts()}
