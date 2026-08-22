@@ -5,10 +5,12 @@ import Index from "@/pages/Index";
 
 const mocks = vi.hoisted(() => ({
   fetchAllReceipts: vi.fn(),
+  buildReceiptExportCsv: vi.fn(),
   buildReceiptExportZip: vi.fn(),
   filterReceipts: vi.fn(),
   filterReceiptsForExport: vi.fn(),
   receiptExportZipFilename: vi.fn(),
+  receiptExportCsvFilename: vi.fn(),
   fetchSignedReceiptImageUrl: vi.fn(),
 }));
 
@@ -62,10 +64,12 @@ vi.mock("@/components/AddReceiptForm", () => ({ AddReceiptForm: () => null }));
 vi.mock("@/lib/ffmpegImageConverter", () => ({ preloadReceiptImageConverter: vi.fn() }));
 vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSignedReceiptImageUrl }));
 vi.mock("@/lib/receiptExport", () => ({
+  buildReceiptExportCsv: mocks.buildReceiptExportCsv,
   buildReceiptExportZip: mocks.buildReceiptExportZip,
   filterReceipts: mocks.filterReceipts,
   filterReceiptsForExport: mocks.filterReceiptsForExport,
   receiptExportZipFilename: mocks.receiptExportZipFilename,
+  receiptExportCsvFilename: mocks.receiptExportCsvFilename,
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -93,7 +97,9 @@ describe("Index receipt filters and export", () => {
       options.onProgress?.({ completed: 2, total: 2, percentage: 100, phase: "complete" });
       return new Blob(["zip"], { type: "application/zip" });
     });
+    mocks.buildReceiptExportCsv.mockReturnValue(new Blob(["csv"], { type: "text/csv;charset=utf-8" }));
     mocks.receiptExportZipFilename.mockReturnValue("receipts.zip");
+    mocks.receiptExportCsvFilename.mockReturnValue("receipts.csv");
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   });
 
@@ -136,6 +142,26 @@ describe("Index receipt filters and export", () => {
       expect.arrayContaining([expect.objectContaining({ id: "older-not-loaded" })]),
       expect.objectContaining({ vendor: "older", categories: [] }),
     );
+  });
+
+  it("downloads a filtered CSV from the complete receipt set", async () => {
+    render(<MemoryRouter><Index /></MemoryRouter>);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Store name" }), { target: { value: "older" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "older-not-loaded" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Download CSV" }));
+
+    await waitFor(() => expect(mocks.buildReceiptExportCsv).toHaveBeenCalled());
+    expect(mocks.fetchAllReceipts).toHaveBeenCalledTimes(2);
+    expect(mocks.filterReceiptsForExport).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "older-not-loaded" })]),
+      expect.objectContaining({ vendor: "older", categories: [] }),
+    );
+    expect(mocks.buildReceiptExportCsv).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "older-not-loaded" })]),
+      expect.objectContaining({ vendor: "older", categories: [] }),
+    );
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("uses a compact category dropdown for the shared filter", async () => {

@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Receipt } from "@/hooks/useReceiptApi";
 import {
+  buildReceiptExportCsv,
   buildReceiptExportZip,
   filterReceipts,
   filterReceiptsForExport,
   receiptExportFilename,
+  receiptExportCsvFilename,
   receiptExportZipFilename,
+  serializeReceiptItems,
 } from "@/lib/receiptExport";
 import { createStoredZip } from "@/lib/zipStore";
 
@@ -42,6 +45,13 @@ const readBlob = (blob: Blob): Promise<ArrayBuffer> => new Promise((resolve, rej
   reader.readAsArrayBuffer(blob);
 });
 
+const readText = (blob: Blob): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(reader.error);
+  reader.onload = () => resolve(String(reader.result));
+  reader.readAsText(blob);
+});
+
 const readZipEntries = async (zip: Blob) => {
   const bytes = new Uint8Array(await readBlob(zip));
   const view = new DataView(bytes.buffer);
@@ -60,6 +70,46 @@ const readZipEntries = async (zip: Blob) => {
 };
 
 describe("receipt export", () => {
+  it("builds filtered CSV rows from canonical fields in the required order", async () => {
+    const csv = buildReceiptExportCsv([
+      receipt({
+        id: "csv-1",
+        purchase_date: "2026/08/20",
+        invoice_id: "INV-0007",
+        vendor: "Fresh Market",
+        items: [
+          { name: "Watermelon", quantity: 2, price: 15.98 },
+          { name: "Activation fee", quantity: 1, price: 5.5 },
+        ],
+        tax: 2.15,
+      }),
+      receipt({ id: "csv-2", invoice_id: undefined, vendor: "No ID Store", items: [], tax: 0 }),
+    ], { categories: ["Food"] });
+
+    expect(csv.type).toBe("text/csv;charset=utf-8");
+    expect(await readText(csv)).toBe(
+      '"Date","Invoice ID","Merchant Name","Items Purchased","Total GST/HST"\r\n' +
+      '"2026-08-20","INV-0007","Fresh Market","Watermelon x2 ($15.98); Activation fee x1 ($5.50)","2.15"\r\n' +
+      '"2026-08-20","","No ID Store","","0"\r\n',
+    );
+    expect(receiptExportCsvFilename({ fromDate: "2026-08-20", toDate: "2026-08-20" })).toBe("receipts-2026-08-20-to-2026-08-20.csv");
+  });
+
+  it("escapes CSV commas, quotes, and newlines and keeps all matching receipts", async () => {
+    const receipts = Array.from({ length: 3 }, (_value, index) => receipt({
+      id: `csv-${index}`,
+      vendor: index === 0 ? 'Store, "Main"' : `Other ${index}`,
+      category: index === 0 ? "Food" : "Travel",
+      items: [{ name: "Line\nitem, \"special\"", quantity: 1, price: 1 }],
+    }));
+    const csv = buildReceiptExportCsv(receipts, { categories: ["Food"] });
+    const text = await readText(csv);
+
+    expect(text).toContain('"2026-08-20","","Store, ""Main""","Line\nitem, ""special"" x1 ($1.00)","0"');
+    expect(text.split("\r\n")).toHaveLength(3);
+    expect(serializeReceiptItems(receipts[0].items)).toBe('Line\nitem, "special" x1 ($1.00)');
+  });
+
   it("uses the native JPEG converter by default", async () => {
     vi.clearAllMocks();
     mocks.nativeConvert.mockResolvedValue(jpeg());

@@ -92,6 +92,64 @@ export const receiptExportZipFilename = (filters: ReceiptExportFilters): string 
   return "receipts.zip";
 };
 
+const csvField = (value: string): string => `"${value.replace(/"/g, '""')}"`;
+
+const finiteNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const formatReceiptItem = (item: Receipt["items"][number]): string => {
+  if (!item || typeof item !== "object") return "";
+  const name = typeof item.name === "string" ? item.name.trim() : "";
+  const quantityValue = finiteNumber(item.quantity);
+  const quantity = quantityValue !== null
+    ? `x${Number.isInteger(quantityValue) ? quantityValue : quantityValue.toString()}`
+    : "";
+  const priceValue = finiteNumber(item.price);
+  const price = priceValue !== null
+    ? `($${priceValue.toFixed(2)})`
+    : "";
+  return [name, quantity, price].filter(Boolean).join(" ");
+};
+
+/** Serialize canonical receipt line items into one readable CSV cell. */
+export const serializeReceiptItems = (items: Receipt["items"]): string =>
+  (Array.isArray(items) ? items : []).map(formatReceiptItem).filter(Boolean).join("; ");
+
+/** Build a UTF-8 CSV from the complete, already-enumerated receipt set. */
+export const buildReceiptExportCsv = (
+  receipts: Receipt[],
+  filters: ReceiptExportFilters = {},
+): Blob => {
+  const matchingReceipts = filterReceiptsForExport(receipts, filters);
+  const rows = [
+    ["Date", "Invoice ID", "Merchant Name", "Items Purchased", "Total GST/HST"],
+    ...matchingReceipts.map((receipt) => [
+      receiptDate(receipt.purchase_date || "") ?? "",
+      typeof receipt.invoice_id === "string" ? receipt.invoice_id : "",
+      typeof receipt.vendor === "string" ? receipt.vendor : "",
+      serializeReceiptItems(receipt.items),
+      typeof receipt.tax === "number" && Number.isFinite(receipt.tax) ? String(receipt.tax) : "",
+    ]),
+  ];
+  const csv = rows.map((row) => row.map((value) => csvField(value)).join(",")).join("\r\n") + "\r\n";
+  return new Blob([csv], { type: "text/csv;charset=utf-8" });
+};
+
+export const receiptExportCsvFilename = (filters: ReceiptExportFilters): string => {
+  const from = safeRangePart(filters.fromDate);
+  const to = safeRangePart(filters.toDate);
+  if (from && to) return `receipts-${from}-to-${to}.csv`;
+  if (from) return `receipts-from-${from}.csv`;
+  if (to) return `receipts-through-${to}.csv`;
+  return "receipts.csv";
+};
+
 const readBlobBytes = async (blob: Blob): Promise<Uint8Array> => {
   const blobWithArrayBuffer = blob as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> };
   if (blobWithArrayBuffer.arrayBuffer) return new Uint8Array(await blobWithArrayBuffer.arrayBuffer());

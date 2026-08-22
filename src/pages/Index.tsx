@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CreditCard, ScanLine, Plus, Settings, LogOut, RefreshCw, Download, Loader2 } from "lucide-react";
 import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
-import { buildReceiptExportZip, filterReceipts, filterReceiptsForExport, receiptExportZipFilename, type ReceiptExportProgress } from "@/lib/receiptExport";
+import { buildReceiptExportCsv, buildReceiptExportZip, filterReceipts, filterReceiptsForExport, receiptExportCsvFilename, receiptExportZipFilename, type ReceiptExportFilters, type ReceiptExportProgress } from "@/lib/receiptExport";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ const Index = () => {
   const { enabled: prepaidEnabled } = usePrepaidStatus();
   const didInitialLoadRef = useRef(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
   const [matchingReceiptCount, setMatchingReceiptCount] = useState<number | null>(null);
   const [exportProgress, setExportProgress] = useState<ReceiptExportProgress | null>(null);
   const [vendorFilter, setVendorFilter] = useState("");
@@ -42,6 +43,7 @@ const Index = () => {
     receiptToDate
   );
   const invalidReceiptDateRange = Boolean(receiptFromDate && receiptToDate && receiptFromDate > receiptToDate);
+  const isAnyExporting = isExporting || isExportingCsv;
 
   const categoryOptions = useMemo(
     () => Array.from(new Set([
@@ -158,6 +160,19 @@ const Index = () => {
     resetExportStatus();
   };
 
+  const getMatchingReceipts = async (): Promise<{ filters: ReceiptExportFilters; matchingReceipts: typeof receipts }> => {
+    const allReceipts = await fetchAllReceipts();
+    const filters: ReceiptExportFilters = {
+      vendor: vendorFilter,
+      fromDate: receiptFromDate,
+      toDate: receiptToDate,
+      categories: receiptFilterCategories,
+    };
+    const matchingReceipts = filterReceiptsForExport(allReceipts, filters);
+    setMatchingReceiptCount(matchingReceipts.length);
+    return { filters, matchingReceipts };
+  };
+
   const downloadReceipts = async () => {
     if (receiptFromDate && receiptToDate && receiptFromDate > receiptToDate) {
       toast.error("From date must be on or before the to date");
@@ -168,15 +183,7 @@ const Index = () => {
     setMatchingReceiptCount(null);
     setExportProgress({ completed: 0, total: 0, percentage: 0, phase: "fetching" });
     try {
-      const allReceipts = await fetchAllReceipts();
-      const filters = {
-        vendor: vendorFilter,
-        fromDate: receiptFromDate,
-        toDate: receiptToDate,
-        categories: receiptFilterCategories,
-      };
-      const matchingReceipts = filterReceiptsForExport(allReceipts, filters);
-      setMatchingReceiptCount(matchingReceipts.length);
+      const { filters, matchingReceipts } = await getMatchingReceipts();
       if (matchingReceipts.length === 0) {
         throw new Error("No receipts match the selected filters");
       }
@@ -202,6 +209,37 @@ const Index = () => {
       toast.error(error instanceof Error ? error.message : "Failed to download receipts");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const downloadReceiptsCsv = async () => {
+    if (receiptFromDate && receiptToDate && receiptFromDate > receiptToDate) {
+      toast.error("From date must be on or before the to date");
+      return;
+    }
+
+    setIsExportingCsv(true);
+    setMatchingReceiptCount(null);
+    try {
+      const { filters, matchingReceipts } = await getMatchingReceipts();
+      if (matchingReceipts.length === 0) {
+        throw new Error("No receipts match the selected filters");
+      }
+      const csv = buildReceiptExportCsv(matchingReceipts, filters);
+      const url = URL.createObjectURL(csv);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = receiptExportCsvFilename(filters);
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      toast.success(`Downloaded ${matchingReceipts.length} receipt${matchingReceipts.length === 1 ? "" : "s"} as CSV`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to download CSV");
+    } finally {
+      setIsExportingCsv(false);
     }
   };
 
@@ -266,7 +304,7 @@ const Index = () => {
             <button
               type="button"
               onClick={clearReceiptFilters}
-              disabled={!hasReceiptFilters || isExporting}
+              disabled={!hasReceiptFilters || isAnyExporting}
               className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
             >
               Clear filters
@@ -281,7 +319,7 @@ const Index = () => {
                 onChange={(event) => updateVendorFilter(event.target.value)}
                 placeholder="Search store name"
                 aria-label="Store name"
-                disabled={isExporting}
+                disabled={isAnyExporting}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
               />
             </label>
@@ -293,7 +331,7 @@ const Index = () => {
                   value={receiptFromDate}
                   onChange={(event) => updateReceiptDate(setReceiptFromDate, event.target.value)}
                   aria-label="Filter from date"
-                  disabled={isExporting}
+                  disabled={isAnyExporting}
                   className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
                 />
               </label>
@@ -304,7 +342,7 @@ const Index = () => {
                   value={receiptToDate}
                   onChange={(event) => updateReceiptDate(setReceiptToDate, event.target.value)}
                   aria-label="Filter to date"
-                  disabled={isExporting}
+                  disabled={isAnyExporting}
                   className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
                 />
               </label>
@@ -328,22 +366,33 @@ const Index = () => {
                         type="checkbox"
                         checked={receiptFilterCategories.includes(category)}
                         onChange={(event) => updateReceiptCategories(category, event.target.checked)}
-                        disabled={isExporting}
+                        disabled={isAnyExporting}
                       />
                       <span className="truncate">{category}</span>
                     </label>
                   ))}
                 </div>
               </details>
-              <button
-                type="button"
-                onClick={() => void downloadReceipts()}
-                disabled={isExporting}
-                className="inline-flex min-w-0 items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                <span className="truncate">{isExporting ? "Preparing ZIP…" : "Download Receipts"}</span>
-              </button>
+              <div className="grid min-w-0 grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void downloadReceipts()}
+                  disabled={isAnyExporting}
+                  className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md bg-primary px-2 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  <span className="truncate">{isExporting ? "Preparing ZIP…" : "Download Receipts"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void downloadReceiptsCsv()}
+                  disabled={isAnyExporting}
+                  className="inline-flex min-w-0 items-center justify-center gap-1 rounded-md border border-primary px-2 py-2 text-sm font-medium text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isExportingCsv ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  <span className="truncate">{isExportingCsv ? "Preparing CSV…" : "Download CSV"}</span>
+                </button>
+              </div>
             </div>
           </div>
           {invalidReceiptDateRange && (
