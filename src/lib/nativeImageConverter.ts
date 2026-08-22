@@ -2,6 +2,7 @@ import { normalizeErrorMessage } from "@/lib/imageErrors";
 
 export const NATIVE_JPEG_MAX_WIDTH = 1000;
 export const NATIVE_JPEG_QUALITY = 0.75;
+export const GRAYSCALE_JPEG_QUALITY = 0.92;
 
 type DecodedImage = {
   source: CanvasImageSource;
@@ -99,6 +100,24 @@ const encodeCanvasAsJpeg = (canvas: HTMLCanvasElement): Promise<Blob> => new Pro
   }
 });
 
+const encodeCanvasAsGrayscaleJpeg = (canvas: HTMLCanvasElement): Promise<Blob> => new Promise((resolve, reject) => {
+  try {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Browser grayscale JPEG encoding returned no image"));
+        return;
+      }
+      if (blob.type.toLowerCase() !== "image/jpeg") {
+        reject(new Error(`Browser grayscale JPEG encoding returned ${blob.type || "an unknown type"}`));
+        return;
+      }
+      resolve(blob);
+    }, "image/jpeg", GRAYSCALE_JPEG_QUALITY);
+  } catch (error) {
+    reject(error);
+  }
+});
+
 /** Decode and encode a downloaded image with native browser APIs. */
 export const convertImageBlobToJpeg = async (blob: Blob): Promise<Blob> => {
   let decoded: DecodedImage | null = null;
@@ -132,4 +151,57 @@ export const convertImageBlobToJpeg = async (blob: Blob): Promise<Blob> => {
       canvas.height = 0;
     }
   }
+};
+
+/** Render an image through the browser's native decoder and encode a grayscale JPEG. */
+export const convertImageBlobToGrayscale = async (blob: Blob): Promise<Blob> => {
+  let decoded: DecodedImage | null = null;
+  let canvas: HTMLCanvasElement | null = null;
+
+  try {
+    if (blob.type && !blob.type.toLowerCase().startsWith("image/")) {
+      throw new Error("Selected file is not an image");
+    }
+
+    decoded = await decodeImage(blob);
+    if (!Number.isFinite(decoded.width) || !Number.isFinite(decoded.height) || decoded.width <= 0 || decoded.height <= 0) {
+      throw new Error("Decoded image has no usable dimensions");
+    }
+
+    canvas = document.createElement("canvas");
+    canvas.width = decoded.width;
+    canvas.height = decoded.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Browser canvas rendering is unavailable");
+    context.drawImage(decoded.source, 0, 0, decoded.width, decoded.height);
+
+    const imageData = context.getImageData(0, 0, decoded.width, decoded.height);
+    for (let index = 0; index < imageData.data.length; index += 4) {
+      const luminance = Math.round(
+        0.2126 * imageData.data[index]
+        + 0.7152 * imageData.data[index + 1]
+        + 0.0722 * imageData.data[index + 2],
+      );
+      imageData.data[index] = luminance;
+      imageData.data[index + 1] = luminance;
+      imageData.data[index + 2] = luminance;
+    }
+    context.putImageData(imageData, 0, 0);
+    return await encodeCanvasAsGrayscaleJpeg(canvas);
+  } catch (error) {
+    throw new Error(`Native grayscale conversion failed: ${normalizeErrorMessage(error)}`);
+  } finally {
+    decoded?.cleanup();
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+};
+
+/** Convert an image file to a grayscale JPEG while preserving its dimensions. */
+export const convertImageFileToGrayscale = async (file: File): Promise<File> => {
+  const blob = await convertImageBlobToGrayscale(file);
+  const filename = file.name.replace(/\.[^.]+$/, "") + "-grayscale.jpg";
+  return new File([blob], filename, { type: "image/jpeg" });
 };

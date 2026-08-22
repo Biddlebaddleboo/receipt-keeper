@@ -3,10 +3,11 @@ import { X, Camera, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
-import { BrowserCamera } from "@/components/BrowserCamera";
+import { BrowserCamera, type CameraColorMode } from "@/components/BrowserCamera";
+import { convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
 
 interface AddReceiptFormProps {
-  onSubmit: (file: File, onProgress?: (progress: number) => void) => Promise<void> | void;
+  onSubmit: (file: File, onProgress?: (progress: number) => void, imageGrayscale?: boolean) => Promise<void> | void;
   onClose: () => void;
   disabled?: boolean;
 }
@@ -18,14 +19,16 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   const [uploadProgress, setUploadProgress] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [imageGrayscale, setImageGrayscale] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = (f: File) => {
+  const handleFile = (f: File, colorMode: CameraColorMode = "color") => {
     if (!f.type.startsWith("image/")) {
       setSubmitError("Only image files are allowed.");
       return;
     }
     setSubmitError(null);
+    setImageGrayscale(colorMode === "grayscale");
     setFile(f);
     setPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
@@ -35,7 +38,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) handleFile(f);
+    if (f) handleFile(f, "color");
     e.target.value = "";
   };
 
@@ -61,7 +64,8 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       }, 220);
 
       const croppedFile = await autoCropReceiptImage(file);
-      const convertedFile = await convertReceiptImageFile(croppedFile);
+      const grayscaleFile = imageGrayscale ? await convertImageFileToGrayscale(croppedFile) : croppedFile;
+      const convertedFile = await convertReceiptImageFile(grayscaleFile);
       if (conversionProgressTimer) {
         window.clearInterval(conversionProgressTimer);
         conversionProgressTimer = null;
@@ -70,7 +74,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       if (convertedFile.type !== "image/webp") {
         throw new Error(`WebP conversion failed. Got type: ${convertedFile.type || "unknown"}`);
       }
-      await onSubmit(convertedFile, (progress) => setUploadProgress(progress));
+      await onSubmit(convertedFile, (progress) => setUploadProgress(progress), imageGrayscale);
       onClose();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
@@ -86,7 +90,12 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in">
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleInputChange} />
-      <BrowserCamera open={cameraOpen} onCapture={handleFile} onClose={() => setCameraOpen(false)} />
+      <BrowserCamera
+        open={cameraOpen}
+        defaultColorMode="grayscale"
+        onCapture={handleFile}
+        onClose={() => setCameraOpen(false)}
+      />
       <header className="flex items-center justify-between px-4 py-3 border-b">
             <button onClick={handleClose} className="p-2 -ml-2 rounded-md hover:bg-secondary transition-colors active:scale-95">
               <X className="w-5 h-5" />

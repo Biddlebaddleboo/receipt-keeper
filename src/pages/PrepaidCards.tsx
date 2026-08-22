@@ -9,13 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AddPrepaidPurchaseFlow } from "@/components/prepaid/AddPrepaidPurchaseFlow";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
-import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
+import { convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
 import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
 import { PrepaidActivationReceipt, PrepaidCard, PrepaidCleanupSummary, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
-import { BrowserCamera } from "@/components/BrowserCamera";
+import { BrowserCamera, type CameraColorMode } from "@/components/BrowserCamera";
 
 interface SelectedCard {
   purchase: PrepaidPurchase;
@@ -689,6 +689,7 @@ function PrepaidCardDetail({
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
   const [openedImage, setOpenedImage] = useState<File | null>(null);
+  const [openedImageGrayscale, setOpenedImageGrayscale] = useState(false);
   const [openedPreview, setOpenedPreview] = useState<string | null>(null);
   const [openedStoragePath, setOpenedStoragePath] = useState(entry.card.opened_card_image_storage_path || "");
   const [packageImageUrl, setPackageImageUrl] = useState<string | null>(null);
@@ -739,9 +740,10 @@ function PrepaidCardDetail({
     };
   }, [entry.card.id, entry.purchase.id, getCardDetail, signCardImage]);
 
-  const setImage = (file: File) => {
+  const setImage = (file: File, colorMode: CameraColorMode = "color") => {
     if (!file.type.startsWith("image/")) return;
     setOpenedImage(file);
+    setOpenedImageGrayscale(colorMode === "grayscale");
     setOpenedStoragePath("");
     setOpenedPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
@@ -756,7 +758,8 @@ function PrepaidCardDetail({
     try {
       let storagePath = openedStoragePath;
       if (!storagePath && openedImage) {
-        const webp = await convertReceiptImageFile(openedImage);
+        const source = openedImageGrayscale ? await convertImageFileToGrayscale(openedImage) : openedImage;
+        const webp = await convertReceiptImageFile(source);
         storagePath = await uploadPrepaidImage(webp, "opened_card");
         setOpenedStoragePath(storagePath);
       }
@@ -777,7 +780,8 @@ function PrepaidCardDetail({
     try {
       let storagePath = openedStoragePath;
       if (!storagePath && openedImage) {
-        const webp = await convertReceiptImageFile(openedImage);
+        const source = openedImageGrayscale ? await convertImageFileToGrayscale(openedImage) : openedImage;
+        const webp = await convertReceiptImageFile(source);
         storagePath = await uploadPrepaidImage(webp, "opened_card");
         setOpenedStoragePath(storagePath);
       }
@@ -912,7 +916,7 @@ function PrepaidCardDetail({
             )}
           </div>
 
-          <BrowserCamera open={cameraOpen} onCapture={setImage} onClose={() => setCameraOpen(false)} />
+          <BrowserCamera open={cameraOpen} defaultColorMode="color" onCapture={setImage} onClose={() => setCameraOpen(false)} />
 
           {warnings.length > 0 && (
             <Alert>

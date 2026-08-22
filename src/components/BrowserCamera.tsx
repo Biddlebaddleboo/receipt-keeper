@@ -7,6 +7,8 @@ export type CameraTrackCapabilities = MediaTrackCapabilities & {
   torch?: boolean;
 };
 
+export type CameraColorMode = "grayscale" | "color";
+
 type CameraConstraintSet = MediaTrackConstraintSet & {
   focusMode?: string;
   pointsOfInterest?: unknown;
@@ -34,16 +36,18 @@ function applyCameraConstraints(track: MediaStreamTrack, additional: CameraConst
 
 export interface BrowserCameraProps {
   open: boolean;
-  onCapture: (file: File) => void;
+  onCapture: (file: File, colorMode: CameraColorMode) => void;
   onClose: () => void;
+  defaultColorMode?: CameraColorMode;
 }
 
 /**
  * Shared rear-camera preview. Consumers receive a captured JPEG File and own
  * all subsequent image processing/upload behavior.
  */
-export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) {
+export function BrowserCamera({ open, onCapture, onClose, defaultColorMode = "color" }: BrowserCameraProps) {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [colorMode, setColorMode] = useState<CameraColorMode>(defaultColorMode);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -63,7 +67,8 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
 
   useEffect(() => {
     openRef.current = open;
-  }, [open]);
+    if (open) setColorMode(defaultColorMode);
+  }, [defaultColorMode, open]);
 
   const stopCamera = useCallback(() => {
     cameraRequestRef.current += 1;
@@ -248,7 +253,7 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
         fallbackToCaptureInput();
         return;
       }
-      onCaptureRef.current(new File([blob], `receipt-camera-${Date.now()}.jpg`, { type: "image/jpeg" }));
+      onCaptureRef.current(new File([blob], `receipt-camera-${Date.now()}.jpg`, { type: "image/jpeg" }), colorMode);
       onCloseRef.current();
     }, "image/jpeg", 0.92);
   };
@@ -256,7 +261,7 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
   const handleFallbackInput = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (file) onCaptureRef.current(file);
+    if (file) onCaptureRef.current(file, colorMode);
     onCloseRef.current();
   };
 
@@ -291,6 +296,24 @@ export function BrowserCamera({ open, onCapture, onClose }: BrowserCameraProps) 
               >
                 <X className="h-5 w-5" />
               </button>
+              <div className="mt-3 flex items-center gap-1 rounded-full bg-black/55 p-1 text-xs text-white backdrop-blur-sm" role="group" aria-label="Image color mode">
+                <button
+                  type="button"
+                  onClick={() => setColorMode("grayscale")}
+                  aria-pressed={colorMode === "grayscale"}
+                  className={`rounded-full px-3 py-2 transition-colors ${colorMode === "grayscale" ? "bg-white text-black" : "text-white/80 hover:bg-white/15"}`}
+                >
+                  Grayscale
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setColorMode("color")}
+                  aria-pressed={colorMode === "color"}
+                  className={`rounded-full px-3 py-2 transition-colors ${colorMode === "color" ? "bg-white text-black" : "text-white/80 hover:bg-white/15"}`}
+                >
+                  Colour
+                </button>
+              </div>
             </div>
             <div className="absolute inset-x-0 bottom-0 flex justify-center px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-16">
               <button

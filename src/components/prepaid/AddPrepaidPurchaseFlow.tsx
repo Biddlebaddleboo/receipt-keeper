@@ -9,7 +9,8 @@ import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { useReceiptApi } from "@/hooks/useReceiptApi";
 import { PrepaidCardInput, usePrepaidApi } from "@/hooks/usePrepaidApi";
 import { cn } from "@/lib/utils";
-import { BrowserCamera } from "@/components/BrowserCamera";
+import { BrowserCamera, type CameraColorMode } from "@/components/BrowserCamera";
+import { convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
 
 type Step = 0 | 1 | 2 | 3;
 
@@ -25,6 +26,7 @@ interface ImageDraft {
   storagePath?: string;
   filename?: string;
   contentType?: string;
+  imageGrayscale?: boolean;
 }
 
 interface CardDraft extends ImageDraft {
@@ -73,6 +75,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   const [salesPreview, setSalesPreview] = useState<string | null>(null);
   const [salesReceiptID, setSalesReceiptID] = useState<string | null>(null);
   const [salesReceiptUploading, setSalesReceiptUploading] = useState(false);
+  const [salesImageGrayscale, setSalesImageGrayscale] = useState(false);
   const [activationReceipts, setActivationReceipts] = useState<ImageDraft[]>([]);
   const [cards, setCards] = useState<CardDraft[]>([newCardDraft()]);
   const [isSaving, setIsSaving] = useState(false);
@@ -98,7 +101,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
     return true;
   }, [cards, salesFile, salesReceiptID, step]);
 
-  const setSalesImage = (file: File) => {
+  const setSalesImage = (file: File, colorMode: CameraColorMode = "color") => {
     if (salesReceiptID) {
       setSubmitError("The sales receipt is already saved and cannot be replaced from this flow.");
       return;
@@ -108,6 +111,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
       return;
     }
     setSubmitError(null);
+    setSalesImageGrayscale(colorMode === "grayscale");
     setSalesFile(file);
     setSalesPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
@@ -120,8 +124,12 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
     if (!salesFile) throw new Error("Sales receipt is required.");
     setSalesReceiptUploading(true);
     try {
-      const salesWebp = await convertReceiptImageFile(salesFile);
-      const salesReceipt = (await createReceiptViaSignedUpload(salesWebp)) as { id?: unknown };
+      const salesSource = salesImageGrayscale ? await convertImageFileToGrayscale(salesFile) : salesFile;
+      const salesWebp = await convertReceiptImageFile(salesSource);
+      const salesReceipt = (await createReceiptViaSignedUpload(
+        salesWebp,
+        salesImageGrayscale ? { image_grayscale: true } : undefined,
+      )) as { id?: unknown };
       const nextSalesReceiptID = typeof salesReceipt.id === "string" ? salesReceipt.id : "";
       if (!nextSalesReceiptID) throw new Error("Sales receipt upload did not return a receipt ID.");
       setSalesReceiptID(nextSalesReceiptID);
@@ -146,7 +154,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
     setStep((Math.min(3, step + 1) as Step));
   };
 
-  const updateActivationFile = (id: string, file: File) => {
+  const updateActivationFile = (id: string, file: File, colorMode: CameraColorMode = "color") => {
     if (!file.type.startsWith("image/")) return;
     setActivationReceipts((prev) =>
       prev.map((item) => {
@@ -158,13 +166,14 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
           preview: URL.createObjectURL(file),
           filename: file.name,
           contentType: file.type,
+          imageGrayscale: colorMode === "grayscale",
           storagePath: undefined,
         };
       }),
     );
   };
 
-  const updateCardFile = (id: string, file: File) => {
+  const updateCardFile = (id: string, file: File, colorMode: CameraColorMode = "color") => {
     if (!file.type.startsWith("image/")) return;
     setCards((prev) =>
       prev.map((card) => {
@@ -176,6 +185,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
           preview: URL.createObjectURL(file),
           filename: file.name,
           contentType: file.type,
+          imageGrayscale: colorMode === "grayscale",
           storagePath: undefined,
           warnings: [],
         };
@@ -190,7 +200,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
     try {
       let storagePath = card.storagePath;
       if (!storagePath && card.file) {
-        const webp = await convertReceiptImageFile(card.file);
+        const source = card.imageGrayscale ? await convertImageFileToGrayscale(card.file) : card.file;
+        const webp = await convertReceiptImageFile(source);
         storagePath = await uploadPrepaidImage(webp, "package");
       }
       if (!storagePath) throw new Error("Package image is missing");
@@ -235,7 +246,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         if (!item.file && !item.storagePath) continue;
         let storagePath = item.storagePath;
         if (!storagePath && item.file) {
-          const webp = await convertReceiptImageFile(item.file);
+          const source = item.imageGrayscale ? await convertImageFileToGrayscale(item.file) : item.file;
+          const webp = await convertReceiptImageFile(source);
           storagePath = await uploadPrepaidImage(webp, "activation_receipt");
           setActivationReceipts((prev) =>
             prev.map((entry) => (entry.id === item.id ? { ...entry, storagePath } : entry)),
@@ -256,7 +268,8 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         if (!hasAny) continue;
         let storagePath = card.storagePath;
         if (!storagePath && card.file) {
-          const webp = await convertReceiptImageFile(card.file);
+          const source = card.imageGrayscale ? await convertImageFileToGrayscale(card.file) : card.file;
+          const webp = await convertReceiptImageFile(source);
           storagePath = await uploadPrepaidImage(webp, "package");
           setCards((prev) =>
             prev.map((entry) => (entry.id === card.id ? { ...entry, storagePath } : entry)),
@@ -368,7 +381,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
                   key={item.id}
                   title={`Activation receipt ${index + 1}`}
                   draft={item}
-                  onFile={(file) => updateActivationFile(item.id, file)}
+                onFile={(file, colorMode) => updateActivationFile(item.id, file, colorMode)}
                   onRemove={() => {
                     setActivationReceipts((prev) => {
                       const target = prev.find((entry) => entry.id === item.id);
@@ -392,7 +405,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
                   key={card.id}
                   index={index}
                   card={card}
-                  onFile={(file) => updateCardFile(card.id, file)}
+                  onFile={(file, colorMode) => updateCardFile(card.id, file, colorMode)}
                   onChange={(updates) => setCards((prev) => prev.map((entry) => (entry.id === card.id ? { ...entry, ...updates } : entry)))}
                   onExtract={() => extractCard(card.id)}
                   onRemove={() => {
@@ -446,6 +459,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
       <BrowserCamera
         open={salesCameraOpen}
         onCapture={setSalesImage}
+        defaultColorMode="grayscale"
         onClose={() => setSalesCameraOpen(false)}
       />
     </div>
@@ -480,7 +494,7 @@ function ImagePreview({ preview, onClear, locked = false }: { preview: string; o
   );
 }
 
-function ImageSlot({ title, draft, onFile, onRemove }: { title: string; draft: ImageDraft; onFile: (file: File) => void; onRemove: () => void }) {
+function ImageSlot({ title, draft, onFile, onRemove }: { title: string; draft: ImageDraft; onFile: (file: File, colorMode?: CameraColorMode) => void; onRemove: () => void }) {
   const [cameraOpen, setCameraOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -497,7 +511,7 @@ function ImageSlot({ title, draft, onFile, onRemove }: { title: string; draft: I
         event.target.value = "";
       }} />
       {draft.preview ? <ImagePreview preview={draft.preview} onClear={onRemove} /> : <CaptureChoices onCamera={() => setCameraOpen(true)} onGallery={() => fileRef.current?.click()} />}
-      <BrowserCamera open={cameraOpen} onCapture={onFile} onClose={() => setCameraOpen(false)} />
+      <BrowserCamera open={cameraOpen} defaultColorMode="color" onCapture={onFile} onClose={() => setCameraOpen(false)} />
     </div>
   );
 }
@@ -512,7 +526,7 @@ function CardCapture({
 }: {
   index: number;
   card: CardDraft;
-  onFile: (file: File) => void;
+  onFile: (file: File, colorMode?: CameraColorMode) => void;
   onChange: (updates: Partial<CardDraft>) => void;
   onExtract: () => void;
   onRemove: () => void;

@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 import { Camera, Upload } from "lucide-react";
-import { BrowserCamera } from "@/components/BrowserCamera";
+import { BrowserCamera, type CameraColorMode } from "@/components/BrowserCamera";
 
 interface CaptureButtonProps {
-  onCapture: (file: File) => void;
+  onCapture: (file: File, colorMode?: CameraColorMode) => void;
   disabled?: boolean;
 }
 
@@ -46,7 +46,15 @@ export function CaptureButton({ onCapture, disabled }: CaptureButtonProps) {
         <Upload className="w-5 h-5" />
         Gallery
       </button>
-      <BrowserCamera open={cameraOpen} onCapture={onCapture} onClose={() => setCameraOpen(false)} />
+      <BrowserCamera
+        open={cameraOpen}
+        defaultColorMode="grayscale"
+        onCapture={(file, colorMode) => {
+          if (colorMode === undefined) onCapture(file);
+          else onCapture(file, colorMode);
+        }}
+        onClose={() => setCameraOpen(false)}
+      />
     </div>
   );
 }

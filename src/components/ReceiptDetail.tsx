@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Receipt, ReceiptItem, ReplaceReceiptImageResponse } from "@/hooks/useReceiptApi";
-import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download, Crop, Camera, Upload } from "lucide-react";
+import { X, Trash2, RotateCcw, Store, Calendar, DollarSign, CheckCircle2, AlertCircle, Loader2, FileText, Clock, List, ShoppingCart, Pencil, Check, Plus, Minus, Tag, Receipt as ReceiptIcon, Download, Crop, Camera, Upload, Contrast } from "lucide-react";
 import { toast } from "sonner";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate, normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
-import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
+import { convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
 import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { FieldPath, doc, updateDoc } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
-import { BrowserCamera } from "@/components/BrowserCamera";
+import { BrowserCamera, type CameraColorMode } from "@/components/BrowserCamera";
 
 interface ReceiptDetailProps {
   receipt: Receipt;
@@ -21,7 +21,7 @@ interface ReceiptDetailProps {
   onRetry: (id: string) => void;
   fetchReceipt: (id: string) => Promise<Receipt | null>;
   uploadReceiptImage: (file: File) => Promise<string>;
-  replaceReceiptImage: (receiptID: string, storagePath: string) => Promise<ReplaceReceiptImageResponse>;
+  replaceReceiptImage: (receiptID: string, storagePath: string, imageGrayscale?: boolean) => Promise<ReplaceReceiptImageResponse>;
 }
 
 const statusConfig = {
@@ -46,7 +46,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [localDownloadPending, setLocalDownloadPending] = useState(false);
-  const [imageEditPending, setImageEditPending] = useState<"crop" | "replace" | null>(null);
+  const [imageEditPending, setImageEditPending] = useState<"crop" | "replace" | "grayscale" | null>(null);
   const [cropPreviewFile, setCropPreviewFile] = useState<File | null>(null);
   const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -111,12 +111,20 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     };
   }, [cropPreviewUrl]);
 
-  const saveReplacementImage = useCallback(async (sourceFile: File, successMessage: string, shouldCrop = true) => {
+  const saveReplacementImage = useCallback(async (
+    sourceFile: File,
+    successMessage: string,
+    shouldCrop = true,
+    imageGrayscale?: boolean,
+  ) => {
     const croppedFile = shouldCrop ? await autoCropReceiptImage(sourceFile) : sourceFile;
-    const webpFile = await convertReceiptImageFile(croppedFile);
+    const processedFile = imageGrayscale ? await convertImageFileToGrayscale(croppedFile) : croppedFile;
+    const webpFile = await convertReceiptImageFile(processedFile);
     if (webpFile.type !== "image/webp") throw new Error("Image conversion to WebP failed");
     const storagePath = await uploadReceiptImage(webpFile);
-    const replacement = await replaceReceiptImage(receipt.id, storagePath);
+    const replacement = imageGrayscale === undefined
+      ? await replaceReceiptImage(receipt.id, storagePath)
+      : await replaceReceiptImage(receipt.id, storagePath, imageGrayscale);
     await refreshReceiptImage();
     const oldImageDeleteError = replacement.old_image_delete_error?.trim();
     if (oldImageDeleteError) {
@@ -160,7 +168,7 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     }
   };
 
-  const replaceExistingImage = async (sourceFile: File) => {
+  const replaceExistingImage = async (sourceFile: File, colorMode: CameraColorMode = "color") => {
     if (imageEditPending) return;
     if (!sourceFile.type.startsWith("image/")) {
       toast.error("Only image files are allowed");
@@ -168,9 +176,24 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
     }
     setImageEditPending("replace");
     try {
-      await saveReplacementImage(sourceFile, "Receipt image replaced");
+      await saveReplacementImage(sourceFile, "Receipt image replaced", true, colorMode === "grayscale");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to replace receipt image");
+    } finally {
+      setImageEditPending(null);
+    }
+  };
+
+  const convertExistingImageToGrayscale = async () => {
+    if (imageEditPending || receipt.image_grayscale) return;
+    setImageEditPending("grayscale");
+    try {
+      const sourceBlob = await fetchCurrentImageBlob();
+      const sourceFile = new File([sourceBlob], `receipt-${receipt.id}.webp`, { type: sourceBlob.type || "image/webp" });
+      const croppedFile = await autoCropReceiptImage(sourceFile);
+      await saveReplacementImage(croppedFile, "Receipt image converted to grayscale", false, true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to convert receipt image to grayscale");
     } finally {
       setImageEditPending(null);
     }
@@ -433,6 +456,17 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
                   {imageEditPending === "crop" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Crop className="h-3.5 w-3.5" />}
                   Crop Image
                 </button>
+                {!receipt.image_grayscale && (
+                  <button
+                    type="button"
+                    onClick={() => void convertExistingImageToGrayscale()}
+                    disabled={imageEditPending !== null || cropPreviewFile !== null}
+                    className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {imageEditPending === "grayscale" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Contrast className="h-3.5 w-3.5" />}
+                    Convert to grayscale
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setCameraOpen(true)}
@@ -799,7 +833,8 @@ export function ReceiptDetail({ receipt: initialReceipt, onClose, onRemove, onRe
 
       <BrowserCamera
         open={cameraOpen}
-        onCapture={(file) => void replaceExistingImage(file)}
+        defaultColorMode="grayscale"
+        onCapture={(file, colorMode) => void replaceExistingImage(file, colorMode)}
         onClose={() => setCameraOpen(false)}
       />
 

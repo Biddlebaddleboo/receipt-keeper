@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  convertImageBlobToGrayscale,
   convertImageBlobToJpeg,
+  convertImageFileToGrayscale,
+  GRAYSCALE_JPEG_QUALITY,
   NATIVE_JPEG_MAX_WIDTH,
   NATIVE_JPEG_QUALITY,
 } from "@/lib/nativeImageConverter";
@@ -142,5 +145,41 @@ describe("native JPEG conversion", () => {
 
     await expect(convertImageBlobToJpeg(sourceBlob())).rejects.toThrow(/Image decode failed/);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:failed");
+  });
+
+  it("converts images to grayscale with native canvas and preserves dimensions", async () => {
+    const close = vi.fn();
+    const bitmap = { width: 640, height: 480, close } as unknown as ImageBitmap;
+    const pixels = new Uint8ClampedArray([255, 0, 0, 255, 0, 120, 240, 255]);
+    const getImageData = vi.fn(() => ({ data: pixels, width: 2, height: 1 } as ImageData));
+    const putImageData = vi.fn();
+    context = { drawImage, getImageData, putImageData } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => context);
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+
+    const output = await convertImageBlobToGrayscale(sourceBlob());
+
+    expect(output.type).toBe("image/jpeg");
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 640, 480);
+    expect(putImageData).toHaveBeenCalledWith(expect.objectContaining({ data: pixels }), 0, 0);
+    expect(Array.from(pixels)).toEqual([54, 54, 54, 255, 103, 103, 103, 255]);
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), "image/jpeg", GRAYSCALE_JPEG_QUALITY);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a JPEG File for the upload pipeline", async () => {
+    const bitmap = { width: 100, height: 80, close: vi.fn() } as unknown as ImageBitmap;
+    const pixels = new Uint8ClampedArray([10, 20, 30, 255]);
+    context = {
+      drawImage,
+      getImageData: vi.fn(() => ({ data: pixels, width: 1, height: 1 } as ImageData)),
+      putImageData: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => context);
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(bitmap));
+
+    const output = await convertImageFileToGrayscale(new File(["source"], "receipt.webp", { type: "image/webp" }));
+
+    expect(output).toMatchObject({ type: "image/jpeg", name: "receipt-grayscale.jpg" });
   });
 });

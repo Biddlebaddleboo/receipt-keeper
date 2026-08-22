@@ -5,10 +5,12 @@ import { AddReceiptForm } from "@/components/AddReceiptForm";
 const mocks = vi.hoisted(() => ({
   convertReceiptImageFile: vi.fn(),
   autoCropReceiptImage: vi.fn(),
+  convertImageFileToGrayscale: vi.fn(),
 }));
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
 vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
+vi.mock("@/lib/nativeImageConverter", () => ({ convertImageFileToGrayscale: mocks.convertImageFileToGrayscale }));
 
 const baseCameraConstraints = {
   facingMode: { exact: "environment" },
@@ -46,6 +48,7 @@ describe("AddReceiptForm camera", () => {
     Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, value: 1600 });
     Object.defineProperty(HTMLVideoElement.prototype, "videoHeight", { configurable: true, value: 1000 });
     mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
+    mocks.convertImageFileToGrayscale.mockImplementation(async (file: File) => file);
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["converted"], "receipt.webp", { type: "image/webp" }));
   });
 
@@ -73,6 +76,7 @@ describe("AddReceiptForm camera", () => {
     expect(preview.parentElement).toHaveClass("h-[100dvh]", "w-full", "bg-black");
     expect(screen.getByRole("button", { name: "Cancel camera" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Capture photo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Grayscale" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel camera" }).parentElement).toHaveClass(
       "pt-[env(safe-area-inset-top)]",
@@ -334,7 +338,9 @@ describe("AddReceiptForm camera", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ type: "image/webp" }),
       expect.any(Function),
+      true,
     ));
+    expect(mocks.convertImageFileToGrayscale).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));
     expect(mocks.convertReceiptImageFile).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));
     expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));
     expect(track.stop).toHaveBeenCalled();

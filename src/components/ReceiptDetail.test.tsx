@@ -6,6 +6,7 @@ import type { Receipt } from "@/hooks/useReceiptApi";
 const mocks = vi.hoisted(() => ({
   fetchSignedReceiptImageUrl: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
+  convertImageFileToGrayscale: vi.fn(),
   autoCropReceiptImage: vi.fn(),
   convertReceiptImageFile: vi.fn(),
   uploadReceiptImage: vi.fn(),
@@ -22,14 +23,17 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useCategoryApi", () => ({ useCategoryApi: () => ({ categories: [] }) }));
 vi.mock("@/lib/receiptImage", () => ({ fetchSignedReceiptImageUrl: mocks.fetchSignedReceiptImageUrl }));
-vi.mock("@/lib/nativeImageConverter", () => ({ convertImageBlobToJpeg: mocks.convertImageBlobToJpeg }));
+vi.mock("@/lib/nativeImageConverter", () => ({
+  convertImageBlobToJpeg: mocks.convertImageBlobToJpeg,
+  convertImageFileToGrayscale: mocks.convertImageFileToGrayscale,
+}));
 vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
 vi.mock("@/components/BrowserCamera", () => ({
-  BrowserCamera: ({ open, onCapture, onClose }: { open: boolean; onCapture: (file: File) => void; onClose: () => void }) => (
+  BrowserCamera: ({ open, onCapture, onClose }: { open: boolean; onCapture: (file: File, colorMode?: "grayscale" | "color") => void; onClose: () => void }) => (
     open ? (
       <div>
-        <button type="button" onClick={() => onCapture(new File(["camera"], "camera.jpg", { type: "image/jpeg" }))}>Shared camera capture</button>
+        <button type="button" onClick={() => onCapture(new File(["camera"], "camera.jpg", { type: "image/jpeg" }), "grayscale")}>Shared camera capture</button>
         <button type="button" onClick={onClose}>Cancel camera</button>
       </div>
     ) : null
@@ -69,6 +73,7 @@ describe("ReceiptDetail download", () => {
     ], { type: "image/jpeg" }));
     mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["webp"], "receipt.webp", { type: "image/webp" }));
+    mocks.convertImageFileToGrayscale.mockImplementation(async (file: File) => file);
     mocks.uploadReceiptImage.mockResolvedValue("receipts/u_owner/replacement.webp");
     mocks.replaceReceiptImage.mockResolvedValue({ receipt_id: receipt.id, storage_path: "receipts/u_owner/replacement.webp" });
     mocks.createObjectURL.mockReturnValue("blob:crop-preview");
@@ -215,6 +220,53 @@ describe("ReceiptDetail download", () => {
     await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalled());
     expect(mocks.autoCropReceiptImage).toHaveBeenCalledWith(expect.objectContaining({ name: cameraFile.name, type: cameraFile.type }));
     expect(mocks.convertReceiptImageFile).toHaveBeenCalled();
+    expect(mocks.convertImageFileToGrayscale).toHaveBeenCalled();
+    expect(mocks.replaceReceiptImage).toHaveBeenCalledWith(receipt.id, "receipts/u_owner/replacement.webp", true);
+  });
+
+  it("converts an existing colour image to grayscale without OCR and marks the replacement", async () => {
+    const cropped = new File(["cropped"], "cropped.jpg", { type: "image/jpeg" });
+    mocks.autoCropReceiptImage.mockResolvedValue(cropped);
+    const fetchReceipt = vi.fn().mockResolvedValue(receipt);
+    render(
+      <ReceiptDetail
+        receipt={receipt}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={fetchReceipt}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Convert to grayscale" }));
+
+    await waitFor(() => expect(mocks.replaceReceiptImage).toHaveBeenCalledWith(
+      receipt.id,
+      "receipts/u_owner/replacement.webp",
+      true,
+    ));
+    expect(mocks.convertImageFileToGrayscale).toHaveBeenCalledWith(cropped);
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
+    expect(fetchReceipt).toHaveBeenCalledWith(receipt.id);
+  });
+
+  it("hides grayscale conversion when the stored image is already grayscale", async () => {
+    render(
+      <ReceiptDetail
+        receipt={{ ...receipt, image_grayscale: true }}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+        fetchReceipt={vi.fn().mockResolvedValue({ ...receipt, image_grayscale: true })}
+        uploadReceiptImage={mocks.uploadReceiptImage}
+        replaceReceiptImage={mocks.replaceReceiptImage}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Crop Image" });
+    expect(screen.queryByRole("button", { name: "Convert to grayscale" })).toBeNull();
   });
 
   it("keeps a successful replacement successful while warning about old-image cleanup", async () => {

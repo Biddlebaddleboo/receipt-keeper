@@ -152,4 +152,27 @@ describe("BrowserCamera lifecycle", () => {
     expect(getUserMedia).toHaveBeenCalledTimes(2);
     expect(secondTrack.stop).not.toHaveBeenCalled();
   });
+
+  it("starts in the caller's default mode and returns the selected mode with the captured file", async () => {
+    const track = createTrack();
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(createStream(track)) },
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", { configurable: true, value: 1200 });
+    Object.defineProperty(HTMLVideoElement.prototype, "videoHeight", { configurable: true, value: 800 });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) => callback(new Blob(["jpeg"], { type: "image/jpeg" })));
+    const onCapture = vi.fn();
+
+    render(<BrowserCamera open defaultColorMode="grayscale" onCapture={onCapture} onClose={vi.fn()} />);
+    await screen.findByLabelText("Rear camera preview");
+    expect(screen.getByRole("button", { name: "Grayscale" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Colour" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Colour" }));
+    fireEvent.click(screen.getByRole("button", { name: "Capture photo" }));
+
+    await waitFor(() => expect(onCapture).toHaveBeenCalledWith(expect.any(File), "color"));
+  });
 });

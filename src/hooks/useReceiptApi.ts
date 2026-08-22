@@ -25,6 +25,7 @@ interface ReceiptUploadMeta {
   category?: string;
   purchase_date?: string;
   invoice_id?: string;
+  image_grayscale?: boolean;
 }
 
 interface SignedUploadResponse {
@@ -57,6 +58,7 @@ export interface Receipt {
   items: ReceiptItem[];
   created_at: string;
   image_url?: string;
+  image_grayscale?: boolean;
   // Client-side fields
   file?: File;
   localImageUrl?: string;
@@ -221,11 +223,11 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return finalized;
   };
 
-  const replaceReceiptImage = async (receiptID: string, storagePath: string): Promise<ReplaceReceiptImageResponse> => {
+  const replaceReceiptImage = async (receiptID: string, storagePath: string, imageGrayscale?: boolean): Promise<ReplaceReceiptImageResponse> => {
     const response = await apiFetch(`${API_BASE_URL}/receipts/${encodeURIComponent(receiptID)}/replace-image`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ storage_path: storagePath }),
+      body: JSON.stringify({ storage_path: storagePath, ...(imageGrayscale === undefined ? {} : { image_grayscale: imageGrayscale }) }),
     });
     if (!response.ok) throw new Error(await response.text());
     return response.json() as Promise<ReplaceReceiptImageResponse>;
@@ -303,6 +305,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       items: Array.isArray(raw.items) ? (raw.items as ReceiptItem[]) : [],
       created_at: toISOString(raw.created_at),
       image_url: typeof raw.image_url === "string" ? raw.image_url : undefined,
+      image_grayscale: raw.image_grayscale === true,
       status: "success",
       shard_doc_id: shardDocId,
     });
@@ -349,6 +352,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
           : typeof metadata.image_url === "string"
             ? metadata.image_url
             : undefined,
+      image_grayscale: detailData.image_grayscale === true || metadata.image_grayscale === true,
       status: "success",
       shard_doc_id: shardDocId,
     });
@@ -466,7 +470,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return [...mergedIncoming, ...rest.filter((r) => !incomingMap.has(r.id))];
   }, []);
 
-  const uploadReceipt = async (file: File, onProgress?: UploadProgressCallback) => {
+  const uploadReceipt = async (file: File, onProgress?: UploadProgressCallback, imageGrayscale = false) => {
     if (authLoading || !tokenRef.current) return;
 
     const id = crypto.randomUUID();
@@ -487,6 +491,7 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       created_at: new Date().toISOString(),
       localImageUrl,
       file,
+      ...(imageGrayscale ? { image_grayscale: true } : {}),
       status: "uploading",
     };
 
@@ -494,7 +499,11 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     setIsUploading(true);
 
     try {
-      const data = (await createReceiptViaSignedUpload(file, undefined, onProgress)) as Record<string, unknown>;
+      const data = (await createReceiptViaSignedUpload(
+        file,
+        imageGrayscale ? { image_grayscale: true } : undefined,
+        onProgress,
+      )) as Record<string, unknown>;
 
       setReceipts((prev) =>
         prev.map((r) =>

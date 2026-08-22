@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createPurchase: vi.fn(),
   extractPackage: vi.fn(),
   convertReceiptImageFile: vi.fn(),
+  convertImageFileToGrayscale: vi.fn(),
 }));
 
 vi.mock("@/hooks/useReceiptApi", () => ({
@@ -28,11 +29,15 @@ vi.mock("@/lib/ffmpegImageConverter", () => ({
   convertReceiptImageFile: mocks.convertReceiptImageFile,
 }));
 
+vi.mock("@/lib/nativeImageConverter", () => ({
+  convertImageFileToGrayscale: mocks.convertImageFileToGrayscale,
+}));
+
 vi.mock("@/components/BrowserCamera", () => ({
-  BrowserCamera: ({ open, onCapture, onClose }: { open: boolean; onCapture: (file: File) => void; onClose: () => void }) => (
+  BrowserCamera: ({ open, onCapture, onClose, defaultColorMode = "color" }: { open: boolean; onCapture: (file: File, colorMode?: "grayscale" | "color") => void; onClose: () => void; defaultColorMode?: "grayscale" | "color" }) => (
     open ? (
       <div>
-        <button type="button" onClick={() => { onCapture(imageFile("camera.jpg")); onClose(); }}>Shared camera capture</button>
+        <button type="button" onClick={() => { onCapture(imageFile("camera.jpg"), defaultColorMode); onClose(); }}>Shared camera capture</button>
         <button type="button" onClick={onClose}>Cancel camera</button>
       </div>
     ) : null
@@ -63,6 +68,7 @@ describe("AddPrepaidPurchaseFlow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.convertReceiptImageFile.mockImplementation((file: File) => Promise.resolve(webpFile(file.name.replace(/\.[^.]+$/, ".webp"))));
+    mocks.convertImageFileToGrayscale.mockImplementation((file: File) => Promise.resolve(file));
     mocks.createReceiptViaSignedUpload.mockResolvedValue({ id: "receipt-1" });
     mocks.uploadPrepaidImage
       .mockResolvedValueOnce("receipts/u_owner/prepaid/activation/one.webp")
@@ -175,6 +181,8 @@ describe("AddPrepaidPurchaseFlow", () => {
 
     await waitFor(() => expect(mocks.createPurchase).toHaveBeenCalled());
     expect(mocks.convertReceiptImageFile).toHaveBeenCalledTimes(3);
+    expect(mocks.convertImageFileToGrayscale).toHaveBeenCalledTimes(1);
+    expect(mocks.createReceiptViaSignedUpload).toHaveBeenCalledWith(expect.any(File), { image_grayscale: true });
     expect(mocks.uploadPrepaidImage).toHaveBeenCalledTimes(2);
   });
 });

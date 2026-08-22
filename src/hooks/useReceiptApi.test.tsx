@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getDocs: vi.fn(),
   query: vi.fn(),
   where: vi.fn(),
+  apiFetch: vi.fn(),
 }));
 
 vi.mock("@/contexts/AuthContext", () => ({
@@ -33,6 +34,8 @@ vi.mock("firebase/firestore/lite", () => ({
   where: mocks.where,
 }));
 
+vi.mock("@/lib/api", () => ({ apiFetch: mocks.apiFetch }));
+
 const fakeDoc = (id: string, data: Record<string, unknown>) => ({ id, data: () => data });
 
 describe("useReceiptApi canonical export fields", () => {
@@ -55,6 +58,7 @@ describe("useReceiptApi canonical export fields", () => {
             category: "Corrected category",
             purchase_date: "2026/08/20",
             invoice_id: "META-0001",
+            image_grayscale: true,
             created_at: "2026-08-20T00:00:00.000Z",
           },
           fallback: {
@@ -157,6 +161,7 @@ describe("useReceiptApi canonical export fields", () => {
       category: "Corrected category",
       purchase_date: "2026/08/20",
       invoice_id: "META-0001",
+      image_grayscale: true,
     });
     expect(fallback).toMatchObject({
       vendor: "Detail fallback store",
@@ -288,5 +293,22 @@ describe("useReceiptApi canonical export fields", () => {
     expect(matching).toHaveLength(1);
     expect(receiptExportFilename(matching[0], new Map())).toBe("2026-08-07 - Corrected metadata store.jpg");
     expect(mocks.getDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends explicit grayscale metadata for replacements and supports colour removal", async () => {
+    mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ receipt_id: "receipt-1", storage_path: "new.webp" }) });
+    const { result } = renderHook(() => useReceiptApi({ pollingPaused: true }));
+
+    await result.current.replaceReceiptImage("receipt-1", "receipts/u_owner/new.webp", true);
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/receipts/receipt-1/replace-image"),
+      expect.objectContaining({ body: JSON.stringify({ storage_path: "receipts/u_owner/new.webp", image_grayscale: true }) }),
+    );
+
+    await result.current.replaceReceiptImage("receipt-1", "receipts/u_owner/colour.webp", false);
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("/receipts/receipt-1/replace-image"),
+      expect.objectContaining({ body: JSON.stringify({ storage_path: "receipts/u_owner/colour.webp", image_grayscale: false }) }),
+    );
   });
 });
