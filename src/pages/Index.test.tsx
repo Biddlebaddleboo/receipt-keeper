@@ -69,7 +69,7 @@ vi.mock("@/lib/receiptExport", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-describe("Index receipt export", () => {
+describe("Index receipt filters and export", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -122,6 +122,33 @@ describe("Index receipt export", () => {
     expect(mocks.filterReceipts).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ id: "older-not-loaded" }),
     ]), expect.objectContaining({ vendor: "OLDER" }));
+  });
+
+  it("passes the shared store filter into the ZIP export", async () => {
+    render(<MemoryRouter><Index /></MemoryRouter>);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Store name" }), { target: { value: "older" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "older-not-loaded" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Download Receipts" }));
+
+    await waitFor(() => expect(mocks.buildReceiptExportZip).toHaveBeenCalled());
+    expect(mocks.filterReceiptsForExport).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: "older-not-loaded" })]),
+      expect.objectContaining({ vendor: "older", categories: [] }),
+    );
+  });
+
+  it("uses a compact category dropdown for the shared filter", async () => {
+    render(<MemoryRouter><Index /></MemoryRouter>);
+
+    fireEvent.click(screen.getByLabelText("Filter receipt categories"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Food" }));
+
+    expect(screen.getByLabelText("Filter receipt categories")).toHaveTextContent("1 category");
+    await waitFor(() => expect(mocks.filterReceipts).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ categories: ["Food"] }),
+    ));
   });
 
   it("clears list filters and returns to the visible receipt list", async () => {

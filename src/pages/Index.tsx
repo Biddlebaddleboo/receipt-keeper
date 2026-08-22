@@ -25,9 +25,6 @@ const Index = () => {
   const { categories } = useCategoryApi();
   const { enabled: prepaidEnabled } = usePrepaidStatus();
   const didInitialLoadRef = useRef(false);
-  const [exportFromDate, setExportFromDate] = useState("");
-  const [exportToDate, setExportToDate] = useState("");
-  const [exportCategories, setExportCategories] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [matchingReceiptCount, setMatchingReceiptCount] = useState<number | null>(null);
   const [exportProgress, setExportProgress] = useState<ReceiptExportProgress | null>(null);
@@ -134,6 +131,8 @@ const Index = () => {
     setReceiptFilterCategories([]);
     setReceiptFromDate("");
     setReceiptToDate("");
+    setMatchingReceiptCount(null);
+    setExportProgress(null);
   };
 
   const resetExportStatus = () => {
@@ -141,8 +140,26 @@ const Index = () => {
     setExportProgress(null);
   };
 
+  const updateVendorFilter = (value: string) => {
+    setVendorFilter(value);
+    resetExportStatus();
+  };
+
+  const updateReceiptCategories = (category: string, selected: boolean) => {
+    setReceiptFilterCategories((current) => {
+      if (selected) return current.includes(category) ? current : [...current, category];
+      return current.filter((value) => value !== category);
+    });
+    resetExportStatus();
+  };
+
+  const updateReceiptDate = (setter: (value: string) => void, value: string) => {
+    setter(value);
+    resetExportStatus();
+  };
+
   const downloadReceipts = async () => {
-    if (exportFromDate && exportToDate && exportFromDate > exportToDate) {
+    if (receiptFromDate && receiptToDate && receiptFromDate > receiptToDate) {
       toast.error("From date must be on or before the to date");
       return;
     }
@@ -153,9 +170,10 @@ const Index = () => {
     try {
       const allReceipts = await fetchAllReceipts();
       const filters = {
-        fromDate: exportFromDate,
-        toDate: exportToDate,
-        categories: exportCategories,
+        vendor: vendorFilter,
+        fromDate: receiptFromDate,
+        toDate: receiptToDate,
+        categories: receiptFilterCategories,
       };
       const matchingReceipts = filterReceiptsForExport(allReceipts, filters);
       setMatchingReceiptCount(matchingReceipts.length);
@@ -239,119 +257,87 @@ const Index = () => {
 
       {/* Main content */}
       <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
-        <section className="mb-4 rounded-xl border bg-card p-4 shadow-sm" aria-label="Filter receipts">
+        <section className="mb-6 rounded-xl border bg-card p-4 shadow-sm" aria-label="Receipt filters and export">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold">Find receipts</h2>
-              <p className="text-xs text-muted-foreground">Search all of your receipts</p>
+              <h2 className="text-sm font-semibold">Find &amp; download receipts</h2>
+              <p className="text-xs text-muted-foreground">Filters apply to the list and ZIP export.</p>
             </div>
             <button
               type="button"
               onClick={clearReceiptFilters}
-              disabled={!hasReceiptFilters}
-              className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!hasReceiptFilters || isExporting}
+              className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
             >
               Clear filters
             </button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-medium text-muted-foreground sm:col-span-2">
+          <div className="grid gap-2.5">
+            <label className="text-xs font-medium text-muted-foreground">
               Store name
               <input
                 type="search"
                 value={vendorFilter}
-                onChange={(event) => setVendorFilter(event.target.value)}
+                onChange={(event) => updateVendorFilter(event.target.value)}
                 placeholder="Search store name"
                 aria-label="Store name"
+                disabled={isExporting}
                 className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
               />
             </label>
-            <label className="text-xs font-medium text-muted-foreground sm:col-span-2">
-              Categories <span className="font-normal">(choose any)</span>
-              <select
-                multiple
-                value={receiptFilterCategories}
-                onChange={(event) => setReceiptFilterCategories(Array.from(event.target.selectedOptions, (option) => option.value))}
-                aria-label="Filter receipt categories"
-                className="mt-1 min-h-16 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
-              >
-                {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
-            </label>
-            <label className="text-xs font-medium text-muted-foreground">
-              From date
-              <input
-                type="date"
-                value={receiptFromDate}
-                onChange={(event) => setReceiptFromDate(event.target.value)}
-                aria-label="Filter from date"
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
-              />
-            </label>
-            <label className="text-xs font-medium text-muted-foreground">
-              To date
-              <input
-                type="date"
-                value={receiptToDate}
-                onChange={(event) => setReceiptToDate(event.target.value)}
-                aria-label="Filter to date"
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
-              />
-            </label>
+            <div className="grid gap-2.5 sm:grid-cols-[1fr_1fr_1.35fr]">
+              <label className="text-xs font-medium text-muted-foreground">
+                From date
+                <input
+                  type="date"
+                  value={receiptFromDate}
+                  onChange={(event) => updateReceiptDate(setReceiptFromDate, event.target.value)}
+                  aria-label="Filter from date"
+                  disabled={isExporting}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+                />
+              </label>
+              <label className="text-xs font-medium text-muted-foreground">
+                To date
+                <input
+                  type="date"
+                  value={receiptToDate}
+                  onChange={(event) => updateReceiptDate(setReceiptToDate, event.target.value)}
+                  aria-label="Filter to date"
+                  disabled={isExporting}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+                />
+              </label>
+              <details className="relative min-w-0">
+                <summary
+                  aria-label="Filter receipt categories"
+                  className="mt-0.5 flex h-10 cursor-pointer list-none items-center justify-between rounded-md border bg-background px-3 text-xs font-medium text-foreground marker:hidden"
+                >
+                  <span className="truncate">{receiptFilterCategories.length > 0 ? `${receiptFilterCategories.length} categor${receiptFilterCategories.length === 1 ? "y" : "ies"}` : "All categories"}</span>
+                  <span className="ml-2 text-muted-foreground">⌄</span>
+                </summary>
+                <div className="absolute left-0 right-0 z-20 mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-2 shadow-md">
+                  <p className="mb-1 px-1 text-xs font-medium text-muted-foreground">Categories</p>
+                  {categoryOptions.length === 0 ? (
+                    <p className="px-1 py-2 text-xs text-muted-foreground">No categories yet</p>
+                  ) : categoryOptions.map((category) => (
+                    <label key={category} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-secondary">
+                      <input
+                        type="checkbox"
+                        checked={receiptFilterCategories.includes(category)}
+                        onChange={(event) => updateReceiptCategories(category, event.target.checked)}
+                        disabled={isExporting}
+                      />
+                      <span className="truncate">{category}</span>
+                    </label>
+                  ))}
+                </div>
+              </details>
+            </div>
           </div>
           {invalidReceiptDateRange && (
             <p className="mt-2 text-xs text-destructive" role="alert">From date must be on or before the to date.</p>
           )}
-        </section>
-        <section className="mb-6 rounded-xl border bg-card p-4 shadow-sm" aria-label="Download receipts">
-          <div className="mb-3">
-            <h2 className="text-sm font-semibold">Download Receipts</h2>
-            <p className="text-xs text-muted-foreground">Export matching receipts as JPEG images in one ZIP.</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-medium text-muted-foreground">
-              From date
-              <input
-                type="date"
-                value={exportFromDate}
-                onChange={(event) => {
-                  setExportFromDate(event.target.value);
-                  resetExportStatus();
-                }}
-                disabled={isExporting}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
-              />
-            </label>
-            <label className="text-xs font-medium text-muted-foreground">
-              To date
-              <input
-                type="date"
-                value={exportToDate}
-                onChange={(event) => {
-                  setExportToDate(event.target.value);
-                  resetExportStatus();
-                }}
-                disabled={isExporting}
-                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
-              />
-            </label>
-          </div>
-          <label className="mt-3 block text-xs font-medium text-muted-foreground">
-            Categories <span className="font-normal">(all by default)</span>
-            <select
-              multiple
-              value={exportCategories}
-              onChange={(event) => {
-                setExportCategories(Array.from(event.target.selectedOptions, (option) => option.value));
-                resetExportStatus();
-              }}
-              disabled={isExporting}
-              aria-label="Receipt categories"
-              className="mt-1 min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
-            >
-              {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-            </select>
-          </label>
           {matchingReceiptCount !== null && (
             <p className="mt-3 text-xs text-muted-foreground" role="status">
               {matchingReceiptCount} matching receipt{matchingReceiptCount === 1 ? "" : "s"}
