@@ -4,6 +4,7 @@ import {
   analyzeGst288Receipts,
   buildGst288Csv,
   calculateGstCents,
+  formatGst288ItemDescription,
   gst288CsvFilename,
   inferTaxableDescription,
 } from "@/lib/gst288Export";
@@ -33,6 +34,13 @@ const readText = (blob: Blob): Promise<string> => new Promise((resolve, reject) 
 });
 
 describe("GST288 export", () => {
+  it("formats item quantities with the GST288 multiplication sign", () => {
+    expect(formatGst288ItemDescription("Activation fee", 1)).toBe("Activation fee");
+    expect(formatGst288ItemDescription("Activation fee", 2)).toBe("2 × Activation fee");
+    expect(formatGst288ItemDescription("Activation fee", 0)).toBe("Activation fee");
+    expect(formatGst288ItemDescription("Activation fee", "not-a-number")).toBe("Activation fee");
+  });
+
   it("finds the unique taxable subset in the prepaid example", () => {
     const result = inferTaxableDescription(receipt({
       items: [
@@ -57,6 +65,16 @@ describe("GST288 export", () => {
     expect(result).toEqual({ status: "matched", description: "Sale item" });
   });
 
+  it("includes quantity in a subtotal-first description", () => {
+    const result = inferTaxableDescription(receipt({
+      subtotal: 10,
+      tax: 1.3,
+      items: [{ name: "Bulk item", quantity: 2, price: 5 }],
+    }), 13);
+
+    expect(result).toEqual({ status: "matched", description: "2 × Bulk item" });
+  });
+
   it("gives subtotal matching precedence over an ambiguous item subset", () => {
     const result = inferTaxableDescription(receipt({
       subtotal: 10,
@@ -77,7 +95,7 @@ describe("GST288 export", () => {
       items: [{ name: "Two taxable items", quantity: 2, price: 2.77 }],
       tax: 0.72,
     }), 13);
-    expect(result).toEqual({ status: "matched", description: "Two taxable items" });
+    expect(result).toEqual({ status: "matched", description: "2 × Two taxable items" });
   });
 
   it("falls back to the item subset when subtotal does not match", () => {
@@ -90,6 +108,16 @@ describe("GST288 export", () => {
       ],
     }), 13);
     expect(vanilla).toEqual({ status: "matched", description: "Activation fee" });
+
+    const threeFees = inferTaxableDescription(receipt({
+      subtotal: 105.5,
+      tax: 2.15,
+      items: [{ name: "Vanilla Prepaid Visa $5.50 Activation Fee", quantity: 3, price: 5.5 }],
+    }), 13);
+    expect(threeFees).toEqual({
+      status: "matched",
+      description: "3 × Vanilla Prepaid Visa $5.50 Activation Fee",
+    });
   });
 
   it("leaves ambiguous and unmatched subsets blank", () => {

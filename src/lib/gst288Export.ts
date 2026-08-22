@@ -75,10 +75,21 @@ const normalizedFilterDate = (value?: string): string | null => {
 
 interface TaxableCandidate {
   name: string;
+  quantity: number | null;
   cents: number;
 }
 
 const nonPurchaseLinePattern = /\b(?:discount|coupon|adjustment)\b/i;
+
+export const formatGst288ItemDescription = (name: string, quantity: unknown): string => {
+  const description = name.trim();
+  if (!description) return "";
+  const numericQuantity = finiteNumber(quantity);
+  if (numericQuantity !== null && numericQuantity > 1) {
+    return `${numericQuantity} × ${description}`;
+  }
+  return description;
+};
 
 const positivePurchasedItemNames = (receipt: Receipt): string[] =>
   (Array.isArray(receipt.items) ? receipt.items : []).flatMap((item) => {
@@ -89,7 +100,7 @@ const positivePurchasedItemNames = (receipt: Receipt): string[] =>
     if (quantity === null || price === null || quantity <= 0 || price <= 0 || !name || nonPurchaseLinePattern.test(name)) {
       return [];
     }
-    return [name];
+    return [formatGst288ItemDescription(name, quantity)];
   });
 
 /**
@@ -118,7 +129,11 @@ export const inferTaxableDescription = (
     const price = finiteNumber(item.price);
     if (quantity === null || price === null || quantity < 0 || price < 0) return [];
     const cents = Math.round((quantity * price + Number.EPSILON) * 100);
-    return [{ name: typeof item.name === "string" ? item.name.trim() : "", cents }];
+    return [{
+      name: typeof item.name === "string" ? item.name.trim() : "",
+      quantity,
+      cents,
+    }];
   });
 
   let selectionsByAmount = new Map<number, number[][]>([[0, [[]]]]);
@@ -156,7 +171,7 @@ export const inferTaxableDescription = (
   if (matches.length === 0) return { status: "unmatched", description: "" };
   if (matches.length > 1) return { status: "ambiguous", description: "" };
   const description = matches[0]
-    .map((index) => candidates[index].name)
+    .map((index) => formatGst288ItemDescription(candidates[index].name, candidates[index].quantity))
     .filter(Boolean)
     .join("; ");
   return { status: "matched", description };
