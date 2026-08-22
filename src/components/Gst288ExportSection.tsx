@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import type { Receipt } from "@/hooks/useReceiptApi";
 import { buildGst288Export, gst288CsvFilename, type Gst288ExportSummary } from "@/lib/gst288Export";
 import { buildGst288Pdf, gst288PdfFilename, type Gst288ClaimantDetails } from "@/lib/gst288Pdf";
+import { readGst288NameSettings, writeGst288NameSettings } from "@/lib/gst288Settings";
 
 interface Gst288ExportSectionProps {
   fetchAllReceipts: () => Promise<Receipt[]>;
@@ -14,6 +16,7 @@ const summaryText = (summary: Gst288ExportSummary): string =>
   `${summary.totalReceipts} receipts · ${summary.matched} matched · ${summary.ambiguous} ambiguous · ${summary.unmatched} unmatched`;
 
 export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionProps) {
+  const { firebaseUID, user } = useAuth();
   const { toast } = useToast();
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -25,6 +28,29 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const isBusy = isExporting || isExportingPdf;
   const invalidDateRange = Boolean(fromDate && toDate && fromDate > toDate);
+  const settingsIdentity = user?.email?.trim().toLowerCase() || firebaseUID || "";
+  const loadedSettingsIdentityRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    loadedSettingsIdentityRef.current = null;
+    if (!settingsIdentity) {
+      setLastName("");
+      setFirstName("");
+      return;
+    }
+    const saved = readGst288NameSettings(settingsIdentity);
+    setLastName(saved.lastName);
+    setFirstName(saved.firstName);
+    loadedSettingsIdentityRef.current = settingsIdentity;
+  }, [settingsIdentity]);
+
+  useEffect(() => {
+    if (!settingsIdentity || loadedSettingsIdentityRef.current !== settingsIdentity) return;
+    const timeout = window.setTimeout(() => {
+      writeGst288NameSettings(settingsIdentity, { firstName, lastName });
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [firstName, lastName, settingsIdentity]);
 
   const validateInputs = (): number | null => {
     if (invalidDateRange) {

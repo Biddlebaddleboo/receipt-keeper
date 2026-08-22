@@ -1,10 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Gst288ExportSection } from "@/components/Gst288ExportSection";
 import type { Receipt } from "@/hooks/useReceiptApi";
+import { gst288SettingsStorageKey } from "@/lib/gst288Settings";
 
-const mocks = vi.hoisted(() => ({ toast: vi.fn(), buildPdf: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  toast: vi.fn(),
+  buildPdf: vi.fn(),
+  auth: { firebaseUID: "gst288-test-user", user: { email: "gst288@example.com" } },
+}));
 
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => mocks.auth }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock("@/lib/gst288Pdf", () => ({
   buildGst288Pdf: mocks.buildPdf,
@@ -28,6 +34,12 @@ const receipt = (id: string, date: string): Receipt => ({
 });
 
 describe("Gst288ExportSection", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mocks.toast.mockReset();
+    mocks.buildPdf.mockReset();
+  });
+
   it("fetches the complete receipt set, downloads CSV, and shows the summary", async () => {
     const fetchAllReceipts = vi.fn().mockResolvedValue([
       receipt("older", "2026-08-01"),
@@ -66,5 +78,37 @@ describe("Gst288ExportSection", () => {
       { lastName: "Example", firstName: "Alex" },
     ));
     expect(await screen.findByRole("status")).toHaveTextContent("1 receipts · 1 matched · 0 ambiguous · 0 unmatched");
+  });
+
+  it("loads names from user settings and debounced autosaves them without a business number", async () => {
+    window.localStorage.setItem(
+      gst288SettingsStorageKey("gst288@example.com"),
+      JSON.stringify({ firstName: "Saved First", lastName: "Saved Last", businessNumber: "123456789RT0001" }),
+    );
+
+    render(<Gst288ExportSection fetchAllReceipts={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "GST288 first name" })).toHaveValue("Saved First");
+    expect(screen.getByRole("textbox", { name: "GST288 last name" })).toHaveValue("Saved Last");
+
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 first name" }), { target: { value: "Updated First" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 last name" }), { target: { value: "Updated Last" } });
+
+    await waitFor(() => {
+      const saved = JSON.parse(window.localStorage.getItem(gst288SettingsStorageKey("gst288@example.com")) ?? "{}");
+      expect(saved).toEqual({ firstName: "Updated First", lastName: "Updated Last" });
+    });
+    expect(screen.queryByRole("textbox", { name: "GST288 business number" })).not.toBeInTheDocument();
+  });
+
+  it("reloads the persisted names for the same user", async () => {
+    const { unmount } = render(<Gst288ExportSection fetchAllReceipts={vi.fn()} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 first name" }), { target: { value: "Alex" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "GST288 last name" }), { target: { value: "Example" } });
+    await waitFor(() => expect(window.localStorage.getItem(gst288SettingsStorageKey("gst288@example.com"))).toContain("Alex"));
+
+    unmount();
+    render(<Gst288ExportSection fetchAllReceipts={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "GST288 first name" })).toHaveValue("Alex");
+    expect(screen.getByRole("textbox", { name: "GST288 last name" })).toHaveValue("Example");
   });
 });
