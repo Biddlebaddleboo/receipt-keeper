@@ -9,8 +9,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CreditCard, ScanLine, Plus, Settings, LogOut, RefreshCw, Download, Loader2 } from "lucide-react";
 import { preloadReceiptImageConverter } from "@/lib/ffmpegImageConverter";
 import { useCategoryApi } from "@/hooks/useCategoryApi";
-import { buildReceiptExportZip, filterReceiptsForExport, receiptExportZipFilename, type ReceiptExportProgress } from "@/lib/receiptExport";
+import { buildReceiptExportZip, filterReceipts, filterReceiptsForExport, receiptExportZipFilename, type ReceiptExportProgress } from "@/lib/receiptExport";
 import { fetchSignedReceiptImageUrl } from "@/lib/receiptImage";
+import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
 import { toast } from "sonner";
 
 const Index = () => {
@@ -30,11 +31,56 @@ const Index = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [matchingReceiptCount, setMatchingReceiptCount] = useState<number | null>(null);
   const [exportProgress, setExportProgress] = useState<ReceiptExportProgress | null>(null);
+  const [vendorFilter, setVendorFilter] = useState("");
+  const [receiptFilterCategories, setReceiptFilterCategories] = useState<string[]>([]);
+  const [receiptFromDate, setReceiptFromDate] = useState("");
+  const [receiptToDate, setReceiptToDate] = useState("");
+  const [allReceiptsForFiltering, setAllReceiptsForFiltering] = useState<typeof receipts | null>(null);
+  const [isLoadingFilteredReceipts, setIsLoadingFilteredReceipts] = useState(false);
+
+  const hasReceiptFilters = Boolean(
+    vendorFilter.trim() ||
+    receiptFilterCategories.length > 0 ||
+    receiptFromDate ||
+    receiptToDate
+  );
+  const invalidReceiptDateRange = Boolean(receiptFromDate && receiptToDate && receiptFromDate > receiptToDate);
 
   const categoryOptions = useMemo(
-    () => Array.from(new Set([...categories.map((category) => category.name), ...receipts.map((receipt) => receipt.category).filter(Boolean)])).sort((a, b) => a.localeCompare(b)),
-    [categories, receipts]
+    () => Array.from(new Set([
+      ...categories.map((category) => category.name),
+      ...receipts.map((receipt) => receipt.category),
+      ...(allReceiptsForFiltering ?? []).map((receipt) => receipt.category),
+    ].filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [allReceiptsForFiltering, categories, receipts]
   );
+
+  useEffect(() => {
+    if (!hasReceiptFilters) {
+      setAllReceiptsForFiltering(null);
+      setIsLoadingFilteredReceipts(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingFilteredReceipts(true);
+    void fetchAllReceipts()
+      .then((allReceipts) => {
+        if (cancelled) return;
+        setAllReceiptsForFiltering(allReceipts);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAllReceiptsForFiltering([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingFilteredReceipts(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchAllReceipts, hasReceiptFilters]);
 
   useEffect(() => {
     preloadReceiptImageConverter();
@@ -53,8 +99,42 @@ const Index = () => {
 
   const totalSpent = receipts.reduce((sum, r) => sum + r.total, 0);
   const selectedReceipt = selectedReceiptId
-    ? receipts.find((receipt) => receipt.id === selectedReceiptId) ?? null
+    ? receipts.find((receipt) => receipt.id === selectedReceiptId)
+      ?? allReceiptsForFiltering?.find((receipt) => receipt.id === selectedReceiptId)
+      ?? null
     : null;
+
+  const filteredReceiptsByDate = useMemo(() => {
+    if (!hasReceiptFilters) return receiptsByDate;
+    if (!allReceiptsForFiltering) return {};
+
+    const matchingReceipts = filterReceipts(allReceiptsForFiltering, {
+      vendor: vendorFilter,
+      categories: receiptFilterCategories,
+      fromDate: receiptFromDate,
+      toDate: receiptToDate,
+    });
+
+    return matchingReceipts.reduce<Record<string, typeof receipts>>((groups, receipt) => {
+      const dateLabel = receipt.purchase_date
+        ? formatReceiptPurchaseDate(receipt.purchase_date, {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          })
+        : "Unknown Date";
+      if (!groups[dateLabel]) groups[dateLabel] = [];
+      groups[dateLabel].push(receipt);
+      return groups;
+    }, {});
+  }, [allReceiptsForFiltering, hasReceiptFilters, receiptFilterCategories, receiptFromDate, receiptToDate, receiptsByDate, vendorFilter]);
+
+  const clearReceiptFilters = () => {
+    setVendorFilter("");
+    setReceiptFilterCategories([]);
+    setReceiptFromDate("");
+    setReceiptToDate("");
+  };
 
   const resetExportStatus = () => {
     setMatchingReceiptCount(null);
@@ -159,6 +239,70 @@ const Index = () => {
 
       {/* Main content */}
       <main className="max-w-2xl mx-auto px-4 py-6 pb-28">
+        <section className="mb-4 rounded-xl border bg-card p-4 shadow-sm" aria-label="Filter receipts">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold">Find receipts</h2>
+              <p className="text-xs text-muted-foreground">Search all of your receipts</p>
+            </div>
+            <button
+              type="button"
+              onClick={clearReceiptFilters}
+              disabled={!hasReceiptFilters}
+              className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Clear filters
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-muted-foreground sm:col-span-2">
+              Store name
+              <input
+                type="search"
+                value={vendorFilter}
+                onChange={(event) => setVendorFilter(event.target.value)}
+                placeholder="Search store name"
+                aria-label="Store name"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+              />
+            </label>
+            <label className="text-xs font-medium text-muted-foreground sm:col-span-2">
+              Categories <span className="font-normal">(choose any)</span>
+              <select
+                multiple
+                value={receiptFilterCategories}
+                onChange={(event) => setReceiptFilterCategories(Array.from(event.target.selectedOptions, (option) => option.value))}
+                aria-label="Filter receipt categories"
+                className="mt-1 min-h-16 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+              >
+                {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </label>
+            <label className="text-xs font-medium text-muted-foreground">
+              From date
+              <input
+                type="date"
+                value={receiptFromDate}
+                onChange={(event) => setReceiptFromDate(event.target.value)}
+                aria-label="Filter from date"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+              />
+            </label>
+            <label className="text-xs font-medium text-muted-foreground">
+              To date
+              <input
+                type="date"
+                value={receiptToDate}
+                onChange={(event) => setReceiptToDate(event.target.value)}
+                aria-label="Filter to date"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm font-normal text-foreground"
+              />
+            </label>
+          </div>
+          {invalidReceiptDateRange && (
+            <p className="mt-2 text-xs text-destructive" role="alert">From date must be on or before the to date.</p>
+          )}
+        </section>
         <section className="mb-6 rounded-xl border bg-card p-4 shadow-sm" aria-label="Download receipts">
           <div className="mb-3">
             <h2 className="text-sm font-semibold">Download Receipts</h2>
@@ -247,11 +391,13 @@ const Index = () => {
           </button>
         </section>
         <ReceiptList
-          receiptsByDate={receiptsByDate}
+          receiptsByDate={filteredReceiptsByDate}
           onReceiptClick={(receipt) => setSelectedReceiptId(receipt.id)}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          onLoadMore={loadNextPage}
+          hasMore={hasReceiptFilters ? false : hasMore}
+          isLoadingMore={hasReceiptFilters ? isLoadingFilteredReceipts : isLoadingMore}
+          onLoadMore={hasReceiptFilters ? undefined : loadNextPage}
+          emptyMessage={hasReceiptFilters ? (isLoadingFilteredReceipts ? "Loading receipts…" : "No receipts match your filters") : undefined}
+          emptyDescription={hasReceiptFilters ? "Try adjusting your filters or clear them to see every receipt" : undefined}
         />
       </main>
 

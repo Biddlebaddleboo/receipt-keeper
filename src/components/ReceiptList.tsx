@@ -9,9 +9,19 @@ interface ReceiptListProps {
   hasMore?: boolean;
   isLoadingMore?: boolean;
   onLoadMore?: () => void;
+  emptyMessage?: string;
+  emptyDescription?: string;
 }
 
-export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoadingMore, onLoadMore }: ReceiptListProps) {
+export function ReceiptList({
+  receiptsByDate,
+  onReceiptClick,
+  hasMore,
+  isLoadingMore,
+  onLoadMore,
+  emptyMessage = "No receipts yet",
+  emptyDescription = "Take a photo or upload from your gallery",
+}: ReceiptListProps) {
   const dateKeys = Object.keys(receiptsByDate);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -21,10 +31,8 @@ export function ReceiptList({ receiptsByDate, onReceiptClick, hasMore, isLoading
         <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">
           <ReceiptText className="w-7 h-7 text-muted-foreground" />
         </div>
-        <p className="text-muted-foreground font-medium mb-1">No receipts yet</p>
-        <p className="text-sm text-muted-foreground/70">
-          Take a photo or upload from your gallery
-        </p>
+        <p className="text-muted-foreground font-medium mb-1">{emptyMessage}</p>
+        <p className="text-sm text-muted-foreground/70">{emptyDescription}</p>
       </div>
     );
   }

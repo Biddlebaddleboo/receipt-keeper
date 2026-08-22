@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Receipt } from "@/hooks/useReceiptApi";
 import {
   buildReceiptExportZip,
+  filterReceipts,
   filterReceiptsForExport,
   receiptExportFilename,
   receiptExportZipFilename,
@@ -90,6 +91,22 @@ describe("receipt export", () => {
       toDate: "2026-08-21",
       categories: ["Food", "Travel"],
     }).map((item) => item.id)).toEqual(["start", "end"]);
+  });
+
+  it("shares canonical vendor/category/date filtering semantics with the receipt list", () => {
+    const receipts = [
+      receipt({ id: "match", vendor: "Walmart Supercenter", category: "Food", purchase_date: "06/21/26" }),
+      receipt({ id: "wrong-store", vendor: "Target", category: "Food", purchase_date: "2026-06-21" }),
+      receipt({ id: "wrong-date", vendor: "Walmart Express", category: "Food", purchase_date: "2026-06-22" }),
+      receipt({ id: "wrong-category", vendor: "Walmart Neighborhood", category: "Travel", purchase_date: "2026-06-21" }),
+    ];
+
+    expect(filterReceipts(receipts, {
+      vendor: "SUPER",
+      categories: ["Food", "Travel"],
+      fromDate: "2026-06-21",
+      toDate: "2026-06-21",
+    }).map((item) => item.id)).toEqual(["match"]);
   });
 
   it("normalizes slash dates for filenames and inclusive filtering", () => {

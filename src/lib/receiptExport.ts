@@ -8,6 +8,8 @@ export interface ReceiptExportFilters {
   fromDate?: string;
   toDate?: string;
   categories?: readonly string[];
+  /** Case-insensitive partial match against the current canonical vendor. */
+  vendor?: string;
 }
 
 export type ReceiptExportPhase = "fetching" | "converting" | "packaging" | "complete";
@@ -43,19 +45,29 @@ const cleanFilenamePart = (value: string, fallback: string): string => {
   return cleaned || fallback;
 };
 
-export const filterReceiptsForExport = (receipts: Receipt[], filters: ReceiptExportFilters = {}): Receipt[] => {
+/**
+ * Apply the shared receipt filtering semantics used by both the main list and
+ * ZIP exports. Dates are normalized before comparison and category selection
+ * remains OR-based while all filter types combine with AND.
+ */
+export const filterReceipts = (receipts: Receipt[], filters: ReceiptExportFilters = {}): Receipt[] => {
   const fromDate = normalizeReceiptPurchaseDate(filters.fromDate?.trim() || "") ?? "";
   const toDate = normalizeReceiptPurchaseDate(filters.toDate?.trim() || "") ?? "";
   const categories = new Set((filters.categories ?? []).map((category) => category.trim()).filter(Boolean));
+  const vendorQuery = filters.vendor?.trim().toLowerCase() ?? "";
 
   return receipts.filter((receipt) => {
     const date = receiptDate(receipt.purchase_date || "");
     if (fromDate && (!date || date < fromDate)) return false;
     if (toDate && (!date || date > toDate)) return false;
     if (categories.size > 0 && !categories.has(receipt.category.trim())) return false;
+    if (vendorQuery && !receipt.vendor.trim().toLowerCase().includes(vendorQuery)) return false;
     return true;
   });
 };
+
+export const filterReceiptsForExport = (receipts: Receipt[], filters: ReceiptExportFilters = {}): Receipt[] =>
+  filterReceipts(receipts, filters);
 
 export const receiptExportFilename = (receipt: Receipt, usedNames: Map<string, number>): string => {
   const date = receiptDate(receipt.purchase_date || "") ?? "unknown-date";
