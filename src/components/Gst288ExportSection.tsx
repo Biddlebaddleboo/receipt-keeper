@@ -113,7 +113,7 @@ export function Gst288ExportSection({ fetchAllReceipts }: Gst288ExportSectionPro
     <section className="rounded-xl bg-card p-4 receipt-shadow" aria-label="GST288 export">
       <div className="mb-3">
         <h2 className="text-sm font-semibold">GST288 export</h2>
-        <p className="text-xs text-muted-foreground">Create a filtered GST/HST CSV from your receipts.</p>
+        <p className="text-xs text-muted-foreground">Create a filtered GST/HST CSV or PDF from your receipts.</p>
       </div>
       <div className="mb-2 grid grid-cols-2 gap-2">
         <label className="col-span-2 text-xs font-medium text-muted-foreground">
