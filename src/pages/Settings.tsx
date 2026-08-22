@@ -14,6 +14,9 @@ import { CreditCard, AlertTriangle } from "lucide-react";
 import { PAYMENT_PAGE_URL, API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { AIAccessSettings } from "@/components/AIAccessSettings";
+import { Gst288ExportSection } from "@/components/Gst288ExportSection";
+import { usePrepaidStatus } from "@/hooks/usePrepaidApi";
+import { useReceiptApi } from "@/hooks/useReceiptApi";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +34,8 @@ const Settings = () => {
   const { token } = useAuth();
   const { userPlan, isLoading: userPlanLoading, refetch: refetchUserPlan } = useUserPlanApi();
   const { plans, isLoading: plansLoading, error } = usePaymentPlanApi();
+  const { enabled: prepaidEnabled } = usePrepaidStatus();
+  const { fetchAllReceipts } = useReceiptApi({ pollingPaused: true });
 
   const [confirmPlan, setConfirmPlan] = useState<{ id: string; name: string; amount: string } | null>(null);
   const [isActivating, setIsActivating] = useState(false);
@@ -318,6 +323,8 @@ const Settings = () => {
         </div>
 
         <AIAccessSettings />
+
+        {prepaidEnabled && <Gst288ExportSection fetchAllReceipts={fetchAllReceipts} />}
 
         {/* Account */}
         <div>
