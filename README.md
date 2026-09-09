@@ -59,7 +59,10 @@ npm run dev
 npm run build
 npm run preview
 npm run test
+npm run benchmark:receipt-crop
 ```
+
+The receipt auto-crop benchmark is documented in [benchmarks/receipt-crop-report.md](benchmarks/receipt-crop-report.md). It is an offline classical-CV sweep with tuning, validation, and untouched final splits. The optional MIDV-500 adapter and download instructions are in [benchmarks/midv500.md](benchmarks/midv500.md).
 
 ## Firestore Rules Expectations
 

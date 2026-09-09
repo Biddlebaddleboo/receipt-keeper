@@ -2,6 +2,66 @@ export const RECEIPT_CROP_ANALYSIS_MAX_DIMENSION = 800;
 export const RECEIPT_CROP_MARGIN = 0.04;
 export const RECEIPT_ALREADY_CROPPED_MARGIN = 0.06;
 
+/**
+ * The detector is intentionally configurable so offline benchmark runs can
+ * compare conservative classical-CV configurations without copying the
+ * production implementation. These options are all inexpensive operations
+ * on the analysis-sized image and are safe to expose as a browser API.
+ */
+export interface ReceiptCropDetectorOptions {
+  minimumBrightness: number;
+  brightnessDelta: number;
+  darkBrightnessDelta: number;
+  thresholdOffsets: number[];
+  polarity: "bright" | "both";
+  morphologyRadius: number;
+  borderCandidateRejectRatio: number;
+  minFillRatio: number;
+  minAreaRatio: number;
+  maxAreaRatio: number;
+  minCornerConfidence: number;
+  minConfidence: number;
+  minScore: number;
+}
+
+/** Exact settings for the detector that shipped before the benchmark work. */
+export const RECEIPT_CROP_BASELINE_OPTIONS: ReceiptCropDetectorOptions = {
+  minimumBrightness: 180,
+  brightnessDelta: 25,
+  darkBrightnessDelta: 25,
+  thresholdOffsets: [0],
+  polarity: "bright",
+  morphologyRadius: 0,
+  borderCandidateRejectRatio: 0.45,
+  minFillRatio: 0.45,
+  minAreaRatio: 0.02,
+  maxAreaRatio: 0.92,
+  minCornerConfidence: 0.55,
+  minConfidence: 0.72,
+  minScore: 0,
+};
+
+/**
+ * Selected after the offline validation sweep. It remains deliberately
+ * conservative: the extra recall comes from threshold diversity and a small
+ * closing operation, while geometry and confidence gates stay strict.
+ */
+export const RECEIPT_CROP_DETECTOR_OPTIONS: ReceiptCropDetectorOptions = {
+  minimumBrightness: 180,
+  brightnessDelta: 16,
+  darkBrightnessDelta: 1,
+  thresholdOffsets: [-10, 0, 10],
+  polarity: "bright",
+  morphologyRadius: 1,
+  borderCandidateRejectRatio: 0.45,
+  minFillRatio: 0.48,
+  minAreaRatio: 0.02,
+  maxAreaRatio: 0.92,
+  minCornerConfidence: 0.55,
+  minConfidence: 0.74,
+  minScore: 0.66,
+};
+
 export interface ReceiptCorner {
   x: number;
   y: number;
@@ -200,55 +260,84 @@ const medianFromHistogram = (histogram: Uint32Array, count: number): number => {
   return 0;
 };
 
-/**
- * Conservative bright-paper detector. It deliberately rejects low-contrast,
- * fragmented, or nearly full-frame candidates. Edge-touching candidates are
- * retained so the crop stage can protect those individual image sides.
- */
-export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetection | null => {
-  const { width, height, data } = imageData;
-  if (!width || !height || data.length < width * height * 4) return null;
-
-  const borderDepth = Math.max(1, Math.round(Math.min(width, height) * 0.05));
-  const borderHistogram = new Uint32Array(256);
-  let borderCount = 0;
-  let borderBrightCount = 0;
-  const borderPixels = (x: number, y: number) =>
-    x < borderDepth || y < borderDepth || x >= width - borderDepth || y >= height - borderDepth;
-
+const closeBinaryMask = (mask: Uint8Array, width: number, height: number, radius: number): Uint8Array => {
+  if (radius <= 0) return mask;
+  const dilated = new Uint8Array(mask.length);
+  const closed = new Uint8Array(mask.length);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (!borderPixels(x, y)) continue;
-      const value = luminance(data, (y * width + x) * 4);
-      borderHistogram[value] += 1;
-      borderCount += 1;
-    }
-  }
-  if (!borderCount) return null;
-
-  const borderMedian = medianFromHistogram(borderHistogram, borderCount);
-  const threshold = clamp(Math.max(180, borderMedian + 25), 180, 250);
-  const mask = new Uint8Array(width * height);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const value = luminance(data, (y * width + x) * 4);
-      if (value >= threshold) {
-        const index = y * width + x;
-        mask[index] = 1;
-        if (borderPixels(x, y)) borderBrightCount += 1;
+      let on = false;
+      for (let offsetY = -radius; offsetY <= radius && !on; offsetY += 1) {
+        for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+          const nextX = x + offsetX;
+          const nextY = y + offsetY;
+          if (nextX >= 0 && nextX < width && nextY >= 0 && nextY < height && mask[nextY * width + nextX]) {
+            on = true;
+            break;
+          }
+        }
       }
+      dilated[y * width + x] = on ? 1 : 0;
     }
   }
-  if (borderBrightCount / borderCount > 0.45) return null;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let on = true;
+      for (let offsetY = -radius; offsetY <= radius && on; offsetY += 1) {
+        for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+          const nextX = x + offsetX;
+          const nextY = y + offsetY;
+          if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height || !dilated[nextY * width + nextX]) {
+            on = false;
+            break;
+          }
+        }
+      }
+      closed[y * width + x] = on ? 1 : 0;
+    }
+  }
+  return closed;
+};
 
+interface ReceiptCandidate {
+  pixels: number[];
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  fillRatio: number;
+  areaRatio: number;
+  cornerConfidence: number;
+  contrast: number;
+  score: number;
+}
+
+const isLegacyBaselineOptions = (options: ReceiptCropDetectorOptions) =>
+  options.minimumBrightness === 180
+  && options.brightnessDelta === 25
+  && options.thresholdOffsets.length === 1
+  && options.thresholdOffsets[0] === 0
+  && options.polarity === "bright"
+  && options.morphologyRadius === 0
+  && options.minFillRatio === 0.45
+  && options.minAreaRatio === 0.02
+  && options.maxAreaRatio === 0.92
+  && options.minCornerConfidence === 0.55
+  && options.minConfidence === 0.72
+  && options.minScore === 0;
+
+const findCandidate = (
+  mask: Uint8Array,
+  imageData: ImageData,
+  borderMedian: number,
+  threshold: number,
+  polarity: "bright" | "dark",
+  options: ReceiptCropDetectorOptions,
+): ReceiptCandidate | null => {
+  const { width, height, data } = imageData;
   const visited = new Uint8Array(mask.length);
-  let bestPixels: number[] = [];
-  let bestCount = 0;
-  let bestLeft = 0;
-  let bestTop = 0;
-  let bestRight = 0;
-  let bestBottom = 0;
-
+  const imageArea = width * height;
+  let best: ReceiptCandidate | null = null;
   for (let start = 0; start < mask.length; start += 1) {
     if (!mask[start] || visited[start]) continue;
     const queue = [start];
@@ -258,7 +347,6 @@ export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetecti
     let top = height;
     let right = 0;
     let bottom = 0;
-
     while (queue.length) {
       const index = queue.pop()!;
       pixels.push(index);
@@ -283,48 +371,127 @@ export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetecti
       }
     }
 
-    if (pixels.length > bestCount) {
-      bestPixels = pixels;
-      bestCount = pixels.length;
-      bestLeft = left;
-      bestTop = top;
-      bestRight = right;
-      bestBottom = bottom;
+    const boxWidth = right - left + 1;
+    const boxHeight = bottom - top + 1;
+    const boxArea = boxWidth * boxHeight;
+    const fillRatio = boxArea ? pixels.length / boxArea : 0;
+    const areaRatio = imageArea ? boxArea / imageArea : 0;
+    if (!pixels.length || fillRatio < options.minFillRatio || areaRatio < options.minAreaRatio || areaRatio > options.maxAreaRatio) continue;
+
+    const borderDistance = Math.min(left, top, width - 1 - right, height - 1 - bottom);
+    const borderPenalty = borderDistance === 0 ? 0.02 : 0;
+    const contrast = Math.min(1, Math.abs(threshold - borderMedian) / 80);
+    const targets = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: left, y: bottom },
+    ];
+    const nearestDistances = targets.map((target) => {
+      let nearest = Number.POSITIVE_INFINITY;
+      for (const index of pixels) {
+        const x = index % width;
+        const y = Math.floor(index / width);
+        nearest = Math.min(nearest, Math.hypot(x - target.x, y - target.y));
+      }
+      return nearest;
+    });
+    const diagonal = Math.max(1, Math.hypot(boxWidth, boxHeight));
+    const cornerConfidence = Math.min(...nearestDistances.map((distance) => Math.max(0, 1 - distance / diagonal)));
+    if (cornerConfidence < options.minCornerConfidence) continue;
+
+    let interiorTotal = 0;
+    let interiorCount = 0;
+    const insetX = Math.max(1, Math.round(boxWidth * 0.1));
+    const insetY = Math.max(1, Math.round(boxHeight * 0.1));
+    for (let y = top + insetY; y <= bottom - insetY; y += 1) {
+      for (let x = left + insetX; x <= right - insetX; x += 1) {
+        interiorTotal += luminance(data, (y * width + x) * 4);
+        interiorCount += 1;
+      }
+    }
+    const interiorMean = interiorCount ? interiorTotal / interiorCount : threshold;
+    const interiorContrast = Math.min(1, Math.abs(interiorMean - borderMedian) / 80);
+    const score = fillRatio * 0.38 + cornerConfidence * 0.28 + contrast * 0.16 + interiorContrast * 0.18 - borderPenalty;
+    const candidate = { pixels, left, top, right, bottom, fillRatio, areaRatio, cornerConfidence, contrast, score };
+    const useLegacyLargestComponent = isLegacyBaselineOptions(options);
+    if (!best || (useLegacyLargestComponent
+      ? candidate.pixels.length > best.pixels.length
+      : candidate.score > best.score || (candidate.score === best.score && candidate.pixels.length > best.pixels.length))) best = candidate;
+  }
+  return best;
+};
+
+/**
+ * Conservative classical document detector. It evaluates a few brightness
+ * hypotheses and selects the strongest geometrically plausible component.
+ * No learned model or perspective warp is used; uncertain cases return null.
+ */
+export const detectReceiptCorners = (
+  imageData: ImageData,
+  options: ReceiptCropDetectorOptions = RECEIPT_CROP_DETECTOR_OPTIONS,
+): ReceiptCornerDetection | null => {
+  const { width, height, data } = imageData;
+  if (!width || !height || data.length < width * height * 4) return null;
+  const borderDepth = Math.max(1, Math.round(Math.min(width, height) * 0.05));
+  const borderHistogram = new Uint32Array(256);
+  let borderCount = 0;
+  let borderBrightCount = 0;
+  const borderPixels = (x: number, y: number) =>
+    x < borderDepth || y < borderDepth || x >= width - borderDepth || y >= height - borderDepth;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!borderPixels(x, y)) continue;
+      const value = luminance(data, (y * width + x) * 4);
+      borderHistogram[value] += 1;
+      borderCount += 1;
     }
   }
-
-  const boxWidth = bestRight - bestLeft + 1;
-  const boxHeight = bestBottom - bestTop + 1;
-  const boxArea = boxWidth * boxHeight;
-  const imageArea = width * height;
-  const fillRatio = boxArea ? bestCount / boxArea : 0;
-  const areaRatio = imageArea ? boxArea / imageArea : 0;
-  if (!bestCount || fillRatio < 0.45 || areaRatio < 0.02 || areaRatio > 0.92) return null;
-
-  const confidence = Math.min(1, fillRatio * 0.65 + Math.min(1, (threshold - borderMedian) / 100) * 0.35);
-  const targets = [
-    { x: bestLeft, y: bestTop },
-    { x: bestRight, y: bestTop },
-    { x: bestRight, y: bestBottom },
-    { x: bestLeft, y: bestBottom },
-  ];
-  const nearestDistances = targets.map((target) => {
-    let nearest = Number.POSITIVE_INFINITY;
-    for (const index of bestPixels) {
-      const x = index % width;
-      const y = Math.floor(index / width);
-      nearest = Math.min(nearest, Math.hypot(x - target.x, y - target.y));
+  if (!borderCount) return null;
+  const borderMedian = medianFromHistogram(borderHistogram, borderCount);
+  const baseThreshold = clamp(Math.max(options.minimumBrightness, borderMedian + options.brightnessDelta), 0, 250);
+  const candidates: ReceiptCandidate[] = [];
+  for (const offset of options.thresholdOffsets) {
+    const brightThreshold = clamp(baseThreshold + offset, 0, 250);
+    const brightMask = new Uint8Array(width * height);
+    for (let index = 0; index < width * height; index += 1) {
+      const value = luminance(data, index * 4);
+      if (value >= brightThreshold) {
+        brightMask[index] = 1;
+        const x = index % width;
+        const y = Math.floor(index / width);
+        if (borderPixels(x, y)) borderBrightCount += 1;
+      }
     }
-    return nearest;
-  });
-  const diagonal = Math.max(1, Math.hypot(boxWidth, boxHeight));
-  const cornerConfidence = Math.min(...nearestDistances.map((distance) => Math.max(0, 1 - distance / diagonal)));
-  if (cornerConfidence < 0.55 || confidence < 0.72) return null;
-
+    const brightCandidate = findCandidate(closeBinaryMask(brightMask, width, height, options.morphologyRadius), imageData, borderMedian, brightThreshold, "bright", options);
+    if (brightCandidate) candidates.push(brightCandidate);
+    if (options.polarity === "both") {
+      const darkThreshold = clamp(borderMedian - options.darkBrightnessDelta - offset, 5, 250);
+      const darkMask = new Uint8Array(width * height);
+      for (let index = 0; index < width * height; index += 1) {
+        if (luminance(data, index * 4) <= darkThreshold) darkMask[index] = 1;
+      }
+      const darkCandidate = findCandidate(closeBinaryMask(darkMask, width, height, options.morphologyRadius), imageData, borderMedian, darkThreshold, "dark", options);
+      if (darkCandidate) candidates.push(darkCandidate);
+    }
+  }
+  if (!candidates.length || borderBrightCount / (borderCount * Math.max(1, options.thresholdOffsets.length)) > options.borderCandidateRejectRatio) return null;
+  const best = candidates.reduce((current, candidate) => candidate.score > current.score ? candidate : current);
+  if (best.score < options.minScore) return null;
+  const confidence = isLegacyBaselineOptions(options)
+    ? Math.min(1, best.fillRatio * 0.65 + Math.min(1, best.contrast * 0.8) * 0.35)
+    : Math.min(1, best.fillRatio * 0.55 + best.cornerConfidence * 0.25 + best.contrast * 0.10 + Math.min(1, best.contrast + best.fillRatio * 0.05) * 0.10);
+  if (best.cornerConfidence < options.minCornerConfidence || confidence < options.minConfidence) return null;
+  const targets = [
+    { x: best.left, y: best.top },
+    { x: best.right, y: best.top },
+    { x: best.right, y: best.bottom },
+    { x: best.left, y: best.bottom },
+  ];
   const cornerPoints = targets.map((target) => {
-    let nearestIndex = bestPixels[0];
+    let nearestIndex = best.pixels[0];
     let nearestDistance = Number.POSITIVE_INFINITY;
-    for (const index of bestPixels) {
+    for (const index of best.pixels) {
       const x = index % width;
       const y = Math.floor(index / width);
       const distance = Math.hypot(x - target.x, y - target.y);
@@ -335,9 +502,6 @@ export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetecti
     }
     return { x: nearestIndex % width, y: Math.floor(nearestIndex / width) };
   });
-
-  // These points are used only to find an enclosing rectangle. No warp or
-  // perspective correction is applied, which is safest for angled receipts.
   return {
     corners: {
       topLeft: cornerPoints[0],
@@ -345,7 +509,7 @@ export const detectReceiptCorners = (imageData: ImageData): ReceiptCornerDetecti
       bottomRight: cornerPoints[2],
       bottomLeft: cornerPoints[3],
     },
-    confidence: confidence * 0.75 + cornerConfidence * 0.25,
+    confidence: confidence * 0.75 + best.cornerConfidence * 0.25,
   };
 };
 

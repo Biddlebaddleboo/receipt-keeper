@@ -5,7 +5,9 @@ import {
   calculateReceiptCropWithSideMarginGuard,
   detectReceiptCorners,
   RECEIPT_ALREADY_CROPPED_MARGIN,
+  RECEIPT_CROP_BASELINE_OPTIONS,
   RECEIPT_CROP_MARGIN,
+  RECEIPT_CROP_DETECTOR_OPTIONS,
 } from "@/lib/receiptAutoCrop";
 import type { ReceiptCorners } from "@/lib/receiptAutoCrop";
 
@@ -55,6 +57,28 @@ const makePolygonImageData = (width: number, height: number, polygon: Array<{ x:
   return { width, height, data } as ImageData;
 };
 
+const makeValueImageData = (
+  width: number,
+  height: number,
+  rectangle: { left: number; top: number; right: number; bottom: number },
+  background: number,
+  foreground: number,
+) => {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const inside = x >= rectangle.left && x <= rectangle.right && y >= rectangle.top && y <= rectangle.bottom;
+      const value = inside ? foreground : background;
+      const offset = (y * width + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  return { width, height, data } as ImageData;
+};
+
 describe("receipt auto-cropping", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -80,6 +104,39 @@ describe("receipt auto-cropping", () => {
       right: Math.ceil(319 + detectedWidth * RECEIPT_CROP_MARGIN),
       bottom: Math.ceil(239 + detectedHeight * RECEIPT_CROP_MARGIN),
     });
+  });
+
+  it("keeps the shipped baseline available for apples-to-apples benchmark runs", () => {
+    const detection = detectReceiptCorners(
+      makeImageData(400, 300, { left: 80, top: 60, right: 319, bottom: 239 }),
+      RECEIPT_CROP_BASELINE_OPTIONS,
+    );
+    expect(detection?.confidence).toBeGreaterThanOrEqual(RECEIPT_CROP_BASELINE_OPTIONS.minConfidence);
+    expect(RECEIPT_CROP_BASELINE_OPTIONS.thresholdOffsets).toEqual([0]);
+    expect(RECEIPT_CROP_BASELINE_OPTIONS.morphologyRadius).toBe(0);
+  });
+
+  it("can score a subtle dark receipt against a light frame without weakening geometry gates", () => {
+    const detection = detectReceiptCorners(
+      makeValueImageData(400, 300, { left: 80, top: 60, right: 319, bottom: 239 }, 220, 216),
+      { ...RECEIPT_CROP_DETECTOR_OPTIONS, polarity: "both", darkBrightnessDelta: 1 },
+    );
+    expect(detection).not.toBeNull();
+    expect(detection!.confidence).toBeGreaterThanOrEqual(RECEIPT_CROP_DETECTOR_OPTIONS.minConfidence);
+  });
+
+  it("uses the bounded closing pass to bridge a one-pixel shadow seam", () => {
+    const image = makeValueImageData(400, 300, { left: 80, top: 60, right: 319, bottom: 239 }, 25, 255);
+    for (let x = 80; x <= 319; x += 1) {
+      const offset = (150 * image.width + x) * 4;
+      image.data[offset] = 25;
+      image.data[offset + 1] = 25;
+      image.data[offset + 2] = 25;
+    }
+    const baseline = detectReceiptCorners(image, RECEIPT_CROP_BASELINE_OPTIONS);
+    const improved = detectReceiptCorners(image, RECEIPT_CROP_DETECTOR_OPTIONS);
+    expect(baseline?.corners.bottomLeft.y).toBeLessThan(160);
+    expect(improved?.corners.bottomLeft.y).toBeGreaterThan(230);
   });
 
   it("accepts long narrow receipts and maps analysis coordinates to full resolution", async () => {
