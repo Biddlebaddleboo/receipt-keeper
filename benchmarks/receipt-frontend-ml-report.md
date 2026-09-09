@@ -74,4 +74,4 @@ npm run benchmark:receipt-frontend:score
 
 The first command trains offline and exports only coefficients. The browser OCR command is the expensive all-500/all-production run; its ignored cache is used by the score command. The frontend review/edit/Reject/Use AI actions and backend unresolved-field prompt behavior are unchanged.
 
-Commit SHA: to be filled after implementation commit.
+Implementation commit: `7563260` (frontend); backend ML-source validation commit: `3aec861`.
