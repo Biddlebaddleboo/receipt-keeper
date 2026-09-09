@@ -78,6 +78,7 @@ const safeEmptyPass = (strategy: ReceiptOcrStrategy): ReceiptOcrPass => ({
 
 const run = async () => {
   const entries = await sourceEntries();
+  const initializationStarted = performance.now();
   const workers = await Promise.all([0, 1].map(() => createWorker("eng", 1, {
     logger: () => undefined,
     errorHandler: () => undefined,
@@ -89,6 +90,8 @@ const run = async () => {
     langPath: "/",
     gzip: false,
   })));
+  const initializationMs = performance.now() - initializationStarted;
+  let firstInferenceMs: number | null = null;
   const strategyResults: Record<string, Array<Record<string, unknown>>> = Object.fromEntries(
     strategies.map((strategy) => [strategy.name, []]),
   );
@@ -105,6 +108,7 @@ const run = async () => {
         let ocrError = false;
         try {
           pass = await recognizeReceiptOcrPass(worker, entry.url, strategy);
+          if (firstInferenceMs === null) firstInferenceMs = pass.durationMs;
         } catch {
           // A decode/worker error is a measured fail-open row, not a reason to
           // remove the image from the denominator.
@@ -158,7 +162,14 @@ const run = async () => {
     name,
     rows.sort((left, right) => String(left.id).localeCompare(String(right.id))),
   ]));
-  if (output) output.textContent = JSON.stringify({ dataset, subset, sampleSize: entries.length, strategies: ordered });
+  if (output) output.textContent = JSON.stringify({
+    dataset,
+    subset,
+    sampleSize: entries.length,
+    initializationMs,
+    firstInferenceMs,
+    strategies: ordered,
+  });
 };
 
 try {
