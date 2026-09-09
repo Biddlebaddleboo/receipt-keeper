@@ -13,6 +13,8 @@
     "benchmark:receipt-frontend": "vitest run --config vitest.benchmark.config.ts scripts/receipt-frontend-benchmark.test.ts",
     "benchmark:receipt-frontend:browser-ocr": "RUN_BROWSER_OCR=1 vitest run --config vitest.benchmark.config.ts scripts/receipt-frontend-benchmark.test.ts",
     "benchmark:receipt-frontend:score": "vitest run --config vitest.benchmark.config.ts scripts/score-receipt-frontend-browser-ocr.test.ts",
+    "benchmark:receipt-frontend:ml": "vitest run --config vitest.benchmark.config.ts scripts/receipt-frontend-ml-benchmark.test.ts",
+    "train:receipt-frontend:model": "python3 scripts/train_receipt_field_model.py",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

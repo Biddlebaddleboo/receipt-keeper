@@ -24,6 +24,8 @@ benchmarks/receipt-frontend-benchmark-results.json
 benchmarks/receipt-frontend-browser-ocr.jsonl
 benchmarks/receipt-frontend-browser-ocr-results.json
 benchmarks/receipt-frontend-production-browser-ocr.jsonl
+benchmarks/receipt-frontend-ml-results.json
+benchmarks/receipt-frontend-ml-production-summary.json
 *.traineddata
 
 # Editor directories and files

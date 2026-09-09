@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   decisionFromExtraction,
+  extractReceiptFieldsFromOcrLines,
   extractReceiptFieldsFromText,
   parseReceiptAmount,
+  receiptOcrLinesFromTesseractData,
 } from "@/lib/receiptFrontendExtractor";
 
 describe("receipt frontend extractor", () => {
@@ -61,5 +63,35 @@ describe("receipt frontend extractor", () => {
   it("parses comma-grouped currency without using it as cross-field evidence", () => {
     expect(parseReceiptAmount("$1,234.56")).toBe(1234.56);
     expect(parseReceiptAmount("1.234,56")).toBe(1234.56);
+  });
+
+  it("keeps learned tax ranking from resolving multiple labelled tax amounts", () => {
+    const lines = ["STORE MART", "Tax 1.00", "Tax 2.00", "Total 21.00"].map((text, index) => ({
+      text,
+      confidence: 96,
+      bbox: { x0: 10, y0: index * 20, x1: 200, y1: index * 20 + 15 },
+    }));
+    const extraction = extractReceiptFieldsFromOcrLines(lines, "rules-only", undefined, { useModel: true });
+    expect(extraction.fields.tax.value).toBeNull();
+    expect(extraction.fields.tax.status).toBe("missing");
+    expect(extraction.fields.total.value).toBe("21.00");
+  });
+
+  it("does not promote the shadow model into live OCR without a promotion decision", () => {
+    const lines = ["STORE MART", "Date 25/12/2018", "Total 21.00"].map((text, index) => ({
+      text,
+      confidence: 96,
+      bbox: { x0: 10, y0: index * 20, x1: 200, y1: index * 20 + 15 },
+    }));
+    const extraction = extractReceiptFieldsFromOcrLines(lines);
+    expect(extraction.fields.purchase_date.source).not.toBe("ml");
+    expect(extraction.fields.total.source).not.toBe("ml");
+  });
+
+  it("reads browser OCR line boxes from Tesseract block output", () => {
+    const lines = receiptOcrLinesFromTesseractData({
+      blocks: [{ paragraphs: [{ lines: [{ text: "TOTAL 21.00", confidence: 94, bbox: { x0: 4, y0: 8, x1: 80, y1: 20 } }] }] }],
+    });
+    expect(lines).toEqual([{ text: "TOTAL 21.00", confidence: 94, bbox: { x0: 4, y0: 8, x1: 80, y1: 20 } }]);
   });
 });

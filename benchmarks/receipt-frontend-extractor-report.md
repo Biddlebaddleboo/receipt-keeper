@@ -27,17 +27,17 @@ Reference-OCR proxy results for the selected conservative rules (500 records; su
 | field | trusted | precision | recall |
 | --- | ---: | ---: | ---: |
 | store name | 0 | n/a | 0.0% |
-| date | 200 | 99.1% | 40.1% |
+| date | 200 | 100.0% | 45.0% |
 | subtotal | 83 | n/a | n/a |
 | tax | 168 | n/a | n/a |
-| total | 217 | 60.6% | 26.3% |
+| total | 217 | 76.5% | 33.3% |
 
 Actual Tesseract.js image benchmark results over all 500 images, rescored from the raw OCR text with the locked parser:
 
 | field | trusted | precision | recall |
 | --- | ---: | ---: | ---: |
 | store name | 2 | 100.0% | 0.4% |
-| date | 211 | 88.8% | 39.1% |
+| date | 211 | 89.4% | 41.9% |
 | subtotal | 89 | n/a | n/a |
 | tax | 216 | n/a | n/a |
 | total | 246 | 64.5% | 31.7% |
@@ -54,7 +54,7 @@ The strict parser intentionally abstains heavily on noisy OCR. The measured brow
 | GPT fallback | 100% | 100% in this benchmark; only when at least one field remains unresolved |
 | GPT calls when all five fields are reviewed | 1 | 0 |
 | estimated extraction prompt tokens | full field + items prompt | short plain-text prompt listing unresolved fields only |
-| estimated field-level prompt/work reduction | 0% | 29.2% public / 28.1% production |
+| estimated field-level prompt/work reduction | 0% | 30.6% public / 28.1% production |
 | estimated token saving for a no-AI upload | 0% | 100% of extraction prompt/call (0 no-AI cases observed) |
 | real production field ground truth | unavailable | review queue required |
 
@@ -65,6 +65,8 @@ Crop safety remains fail-open. The existing [real-corpus crop report](./receipt-
 White/light paper, shadows, glare, crumpling, long thermal receipts, perspective, partial receipts, already-cropped images, frame-edge contact, multiple papers, coloured paper, and low contrast remain explicit review categories. Walmart receipts with faint bottom date/time/footer text are especially important: the crop detector must preserve the original when the paper boundary is uncertain, and field extraction must leave ambiguous footer values unresolved for GPT.
 
 ## Implementation and remaining work
+
+The trained-classical-ML follow-up is documented in [receipt-frontend-ml-report.md](./receipt-frontend-ml-report.md). The logistic candidate model was benchmarked against a tiny stump forest and the rules baseline, but was kept shadow-only because actual Tesseract OCR produced no safe additional trusted coverage. This prevents a boxed-OCR validation result from becoming an unsafe browser regression.
 
 - Browser OCR is lazy-loaded with Tesseract.js; failure returns five unresolved fields and preserves fail-open behavior.
 - Rules require a unique explicit label for subtotal, tax, and total. Tax is never calculated from other amounts.

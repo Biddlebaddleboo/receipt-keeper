@@ -1,7 +1,7 @@
 import { appendFile, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { extractReceiptFieldsFromImage, extractReceiptFieldsFromText, type ReceiptFrontendField } from "@/lib/receiptFrontendExtractor";
+import { extractReceiptFieldsFromImage, extractReceiptFieldsFromOcrLines, extractReceiptFieldsFromText, receiptOcrLinesFromTesseractData, type ReceiptFrontendField } from "@/lib/receiptFrontendExtractor";
 
 const root = process.cwd();
 const sampleRoot = path.join(root, "benchmarks/sroie500");
@@ -85,7 +85,7 @@ describe("receipt frontend benchmark", () => {
     const outputPath = path.join(root, "benchmarks/receipt-frontend-browser-ocr.jsonl");
     await writeFile(outputPath, "");
     const { createWorker } = await import("tesseract.js");
-    const workers = await Promise.all([0, 1].map(() => createWorker("eng", 1)));
+    const workers = await Promise.all([0, 1].map(() => createWorker("eng", 1, { errorHandler: () => undefined })));
     let nextIndex = 0;
     let completed = 0;
     const runWorker = async (worker: Awaited<ReturnType<typeof createWorker>>) => {
@@ -96,10 +96,15 @@ describe("receipt frontend benchmark", () => {
         let extraction;
         try {
           const recognized = await Promise.race([
-            worker.recognize(path.join(sampleRoot, "images", `${id}.jpg`)),
+            worker.recognize(path.join(sampleRoot, "images", `${id}.jpg`), {}, { blocks: true }),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error("OCR image timeout")), 45_000)),
           ]);
-          extraction = extractReceiptFieldsFromText(recognized.data.text ?? "", "tesseract.js");
+          const recognizedData = recognized.data as typeof recognized.data;
+          const ocrLines = receiptOcrLinesFromTesseractData(recognizedData);
+          const rules = extractReceiptFieldsFromText(recognizedData.text ?? "", "tesseract.js");
+          const ml = ocrLines.length ? extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "", { fallbackToRules: false, useModel: true }) : rules;
+          extraction = ocrLines.length ? extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "", { useModel: true }) : rules;
+          extraction = { ...extraction, rulesFields: rules.fields, mlFields: ml.fields } as typeof extraction & { rulesFields: typeof rules.fields; mlFields: typeof ml.fields };
         } catch {
           extraction = extractReceiptFieldsFromText("", "unavailable");
         }
@@ -122,7 +127,7 @@ describe("receipt frontend benchmark", () => {
     const imageNames = (await readdir(productionRoot)).filter((name) => /\.(?:jpe?g|png|webp)$/i.test(name));
     const output: string[] = [];
     const { createWorker } = await import("tesseract.js");
-    const workers = await Promise.all([0, 1].map(() => createWorker("eng", 1)));
+    const workers = await Promise.all([0, 1].map(() => createWorker("eng", 1, { errorHandler: () => undefined })));
     let nextIndex = 0;
     let completed = 0;
     const runWorker = async (worker: Awaited<ReturnType<typeof createWorker>>) => {
@@ -131,16 +136,33 @@ describe("receipt frontend benchmark", () => {
         if (index >= imageNames.length) return;
         const name = imageNames[index];
         let extraction;
+        let mlShadow = extractReceiptFieldsFromText("", "unavailable");
+        let combined = mlShadow;
         try {
           const recognized = await Promise.race([
-            worker.recognize(path.join(productionRoot, name)),
+            worker.recognize(path.join(productionRoot, name), {}, { blocks: true }),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error("OCR image timeout")), 45_000)),
           ]);
-          extraction = extractReceiptFieldsFromText(recognized.data.text ?? "", "tesseract.js");
+          const recognizedData = recognized.data as typeof recognized.data;
+          const ocrLines = receiptOcrLinesFromTesseractData(recognizedData);
+          extraction = ocrLines.length
+            ? extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "")
+            : extractReceiptFieldsFromText(recognizedData.text ?? "", "tesseract.js");
+          if (ocrLines.length) {
+            mlShadow = extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "", { fallbackToRules: false, useModel: true });
+            combined = extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "", { useModel: true });
+          }
         } catch {
           extraction = extractReceiptFieldsFromText("", "unavailable");
         }
-        output[index] = JSON.stringify({ id: name, fields: extraction.fields, unresolvedFields: extraction.unresolvedFields, engine: extraction.engine });
+        output[index] = JSON.stringify({
+          id: name,
+          fields: extraction.fields,
+          unresolvedFields: extraction.unresolvedFields,
+          mlShadowTrustedFields: fields.filter((field) => mlShadow.fields[field].status === "trusted"),
+          mlCombinedTrustedFields: fields.filter((field) => combined.fields[field].status === "trusted"),
+          engine: extraction.engine,
+        });
         completed += 1;
         if (completed % 10 === 1) console.log(`production browser OCR ${completed}/${imageNames.length}`);
       }

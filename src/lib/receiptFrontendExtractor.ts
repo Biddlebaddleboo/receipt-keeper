@@ -1,8 +1,9 @@
 import { normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
+import fieldModelJson from "@/lib/receiptFieldModel.json";
 
 export const RECEIPT_FRONTEND_FIELDS = ["vendor", "purchase_date", "subtotal", "tax", "total"] as const;
 export type ReceiptFrontendField = (typeof RECEIPT_FRONTEND_FIELDS)[number];
-export type ReceiptFrontendFieldSource = "browser-ocr" | "rule" | "manual";
+export type ReceiptFrontendFieldSource = "browser-ocr" | "rule" | "ml" | "manual";
 export type ReceiptFrontendFieldStatus = "trusted" | "uncertain" | "missing";
 
 export interface ReceiptFrontendFieldResult {
@@ -21,7 +22,41 @@ export interface ReceiptFrontendExtraction {
   unresolvedFields: ReceiptFrontendField[];
   durationMs: number;
   engine: "tesseract.js" | "unavailable" | "rules-only";
+  ocrLines?: ReceiptOcrLine[];
 }
+
+export interface ReceiptOcrLine {
+  text: string;
+  confidence?: number;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+type TesseractLineData = { text?: string; confidence?: number; bbox?: ReceiptOcrLine["bbox"] };
+
+export const receiptOcrLinesFromTesseractData = (data: unknown): ReceiptOcrLine[] => {
+  const blocks = (data as { blocks?: Array<{ paragraphs?: Array<{ lines?: TesseractLineData[] }> }> } | null)?.blocks ?? [];
+  return blocks.flatMap((block) => (block.paragraphs ?? []).flatMap((paragraph) => (paragraph.lines ?? []).map((line) => ({
+    text: line.text ?? "",
+    confidence: line.confidence,
+    bbox: line.bbox,
+  }))));
+};
+
+interface FieldModel {
+  type: "logistic";
+  weights: number[];
+  threshold: number;
+  min_margin: number;
+  calibration: Array<{ max: number; accuracy: number }>;
+}
+
+interface ReceiptFieldModel {
+  version: number;
+  feature_names: string[];
+  fields: Record<ReceiptFrontendField, FieldModel>;
+}
+
+const fieldModel = fieldModelJson as ReceiptFieldModel;
 
 export interface ReceiptFrontendDecision {
   mode: "remaining" | "entire" | "none";
@@ -48,6 +83,102 @@ const linesFromText = (text: string): string[] => text
   .filter((line) => line.length > 0);
 
 const amountPattern = /(?:[$€£]\s*)?\(?\s*-?\d{1,6}(?:[,.]\d{3})*(?:[,.]\d{2})\s*\)?/g;
+const datePattern = /\b(?:20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.](?:20)?\d{2}|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:,\s*|\s+)20\d{2})\b/gi;
+
+const featureKeywords = [
+  "total", "grand", "due", "payable", "after", "adj", "adjustment", "incl", "inclusive",
+  "excl", "excluding", "sales", "summary", "tax", "gst", "subtotal", "sub-total", "rounding",
+  "round", "cash", "change", "tender", "paid", "payment", "qty", "quantity", "item", "price",
+  "discount", "amount", "final", "balance", "before", "invoice", "date", "time", "issued", "store",
+  "receipt", "member", "address", "thank",
+] as const;
+
+const fieldLabelPatterns: Record<ReceiptFrontendField, RegExp> = {
+  vendor: /never-match/i,
+  purchase_date: /\b(?:date|time|issued|invoice)\b/i,
+  subtotal: /\b(?:sub[ -]?total|before tax)\b/i,
+  tax: /\b(?:tax|gst|hst|vat|sales tax)\b/i,
+  total: /\b(?:total|amount due|balance due|payable)\b/i,
+};
+
+const hasKeyword = (text: string, keyword: string): number => {
+  if (keyword.includes("-")) return text.toLowerCase().includes(keyword) ? 1 : 0;
+  return new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`, "i").test(text) ? 1 : 0;
+};
+
+const normalizedOcrLines = (ocrLines: ReceiptOcrLine[]): Array<ReceiptOcrLine & {
+  normalized: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> => {
+  const lines = ocrLines
+    .map((line) => ({ ...line, normalized: normalizeLine(line.text) }))
+    .filter((line) => line.normalized.length > 0);
+  const maxX = Math.max(1, ...lines.map((line) => line.bbox?.x1 ?? 0));
+  const maxY = Math.max(1, ...lines.map((line) => line.bbox?.y1 ?? 0));
+  return lines.map((line, index) => {
+    const bbox = line.bbox ?? { x0: 0, y0: index, x1: 1, y1: index + 1 };
+    return {
+      ...line,
+      x: Math.min(bbox.x0, bbox.x1) / maxX,
+      y: Math.min(bbox.y0, bbox.y1) / maxY,
+      width: Math.max(0, Math.max(bbox.x0, bbox.x1) - Math.min(bbox.x0, bbox.x1)) / maxX,
+      height: Math.max(0, Math.max(bbox.y0, bbox.y1) - Math.min(bbox.y0, bbox.y1)) / maxY,
+    };
+  });
+};
+
+const modelFeatures = (
+  lines: ReturnType<typeof normalizedOcrLines>,
+  index: number,
+  field: ReceiptFrontendField,
+  rawAmount?: string,
+): number[] => {
+  const line = lines[index];
+  const text = line.normalized;
+  const previous = index > 0 ? lines[index - 1].normalized : "";
+  const next = index + 1 < lines.length ? lines[index + 1].normalized : "";
+  amountPattern.lastIndex = 0;
+  const amounts = text.match(amountPattern) ?? [];
+  amountPattern.lastIndex = 0;
+  const values = [
+    line.y, line.x, line.width, line.height,
+    index === 0 ? 1 : 0, index === lines.length - 1 ? 1 : 0,
+    line.y < 0.22 ? 1 : 0, line.y > 0.78 ? 1 : 0,
+    Math.min(text.length, 80) / 80,
+    (text.match(/[A-Za-z]/g) ?? []).length / Math.max(text.length, 1),
+    (text.match(/[0-9]/g) ?? []).length / Math.max(text.length, 1),
+    Math.min(amounts.length, 4) / 4, amounts.length > 0 ? 1 : 0,
+    datePattern.test(text) ? 1 : 0,
+    /[$€£]|\b(?:rm|usd|cad|gbp)\b/i.test(text) ? 1 : 0,
+    Math.max(0, Math.min(1, line.confidence == null ? 0.8 : line.confidence / 100)),
+    fieldLabelPatterns[field].test(text) ? 1 : 0,
+    fieldLabelPatterns[field].test(previous) ? 1 : 0,
+    fieldLabelPatterns[field].test(next) ? 1 : 0,
+    hasAmount(previous) ? 1 : 0,
+    hasAmount(next) ? 1 : 0,
+    ...featureKeywords.map((keyword) => hasKeyword(text, keyword)),
+    ...featureKeywords.map((keyword) => hasKeyword(previous, keyword)),
+    ...featureKeywords.map((keyword) => hasKeyword(next, keyword)),
+  ];
+  datePattern.lastIndex = 0;
+  amountPattern.lastIndex = 0;
+  if (!rawAmount) values.push(0, 0);
+  else {
+    const position = Math.max(text.indexOf(rawAmount), 0);
+    values.push(position / Math.max(text.length, 1), position >= text.length * 0.5 ? 1 : 0);
+  }
+  return values;
+};
+
+const sigmoid = (value: number): number => 1 / (1 + Math.exp(-Math.max(-40, Math.min(40, value))));
+
+const calibrateModelProbability = (raw: number, calibration: FieldModel["calibration"]): number => {
+  const point = calibration.find((candidate) => raw < candidate.max) ?? calibration[calibration.length - 1];
+  return Math.max(0, Math.min(1, point?.accuracy ?? raw));
+};
 
 export const parseReceiptAmount = (raw: string): number | null => {
   let value = raw.replace(/[\s$€£]/g, "").replace(/[()]/g, "");
@@ -125,6 +256,103 @@ const extractVendor = (lines: string[]): ReceiptFrontendFieldResult => {
   return result(candidates[0], merchantSignature.test(candidates[0]) ? 0.96 : 0.9, candidates[0]);
 };
 
+const hasAmount = (text: string): boolean => {
+  amountPattern.lastIndex = 0;
+  const found = amountPattern.test(text);
+  amountPattern.lastIndex = 0;
+  return found;
+};
+
+const modelCandidateResult = (
+  lines: ReturnType<typeof normalizedOcrLines>,
+  field: ReceiptFrontendField,
+): ReceiptFrontendFieldResult => {
+  const configuration = fieldModel.fields[field];
+  if (!configuration || configuration.type !== "logistic" || !configuration.weights.length) return emptyField();
+  const candidates: Array<{ index: number; value: string; evidence: string; features: number[]; raw: number }> = [];
+  const addCandidate = (index: number, value: string, rawAmount?: string) => {
+    const features = modelFeatures(lines, index, field, rawAmount);
+    const raw = sigmoid(configuration.weights[0] + configuration.weights.slice(1).reduce((sum, weight, position) => sum + weight * (features[position] ?? 0), 0));
+    candidates.push({ index, value, evidence: lines[index].normalized, features, raw });
+  };
+
+  if (field === "vendor") {
+    const blocked = /^(?:store|shop)$|\b(?:receipt|invoice|subtotal|sub-total|total|tax|gst|hst|date|cashier|address|tel|phone|thank|change|tender)\b/i;
+    lines.slice(0, 12).forEach((line, index) => {
+      const letters = (line.normalized.match(/[A-Za-z]/g) ?? []).length;
+      if (letters >= 3 && letters / Math.max(line.normalized.length, 1) >= 0.35 && line.normalized.length <= 80 && !blocked.test(line.normalized) && !hasAmount(line.normalized)) addCandidate(index, line.normalized);
+    });
+  } else if (field === "purchase_date") {
+    lines.forEach((line, index) => {
+      datePattern.lastIndex = 0;
+      const matches = [...line.normalized.matchAll(datePattern)];
+      datePattern.lastIndex = 0;
+      matches.forEach((match) => {
+        const parsed = extractDate([match[0]]);
+        if (parsed.value) addCandidate(index, parsed.value);
+      });
+    });
+  } else {
+    lines.forEach((line, index) => {
+      amountPattern.lastIndex = 0;
+      const amounts = line.normalized.match(amountPattern) ?? [];
+      amountPattern.lastIndex = 0;
+      amounts.forEach((rawAmount) => {
+        if (parseReceiptAmount(rawAmount) !== null) addCandidate(index, rawAmount.replace(/[€£]/g, "$"), rawAmount);
+      });
+    });
+  }
+  if (!candidates.length) return emptyField();
+  candidates.sort((left, right) => right.raw - left.raw);
+  const top = candidates[0];
+  const second = candidates[1]?.raw ?? 0;
+  const margin = top.raw - second;
+  const confidence = calibrateModelProbability(top.raw, configuration.calibration);
+  const previousText = top.index > 0 ? lines[top.index - 1].normalized : "";
+  const nextText = top.index + 1 < lines.length ? lines[top.index + 1].normalized : "";
+  const fieldEvidence = field === "vendor"
+    || fieldLabelPatterns[field].test(top.evidence)
+    || fieldLabelPatterns[field].test(previousText)
+    || fieldLabelPatterns[field].test(nextText);
+  const uniqueLabeledAmounts = field === "subtotal" || field === "tax"
+    ? new Set(lines.flatMap((line, index) => {
+      const previousLine = index > 0 ? lines[index - 1].normalized : "";
+      const nextLine = index + 1 < lines.length ? lines[index + 1].normalized : "";
+      if (!fieldLabelPatterns[field].test(line.normalized)
+        && !fieldLabelPatterns[field].test(previousLine)
+        && !fieldLabelPatterns[field].test(nextLine)) return [];
+      amountPattern.lastIndex = 0;
+      const values = line.normalized.match(amountPattern) ?? [];
+      amountPattern.lastIndex = 0;
+      return values.map((value) => value.replace(/[€£]/g, "$"));
+    })).size
+    : 0;
+  // SROIE has no independent subtotal/tax labels.  Never let a learned
+  // ranking choose among multiple tax/subtotal amounts; the existing unique
+  // labelled-value rule remains the only autonomous path for these fields.
+  const uniqueWeaklySupervisedAmount = (field !== "subtotal" && field !== "tax") || uniqueLabeledAmounts === 1;
+  const safe = top.raw >= configuration.threshold
+    && confidence >= TRUST_THRESHOLD
+    && margin >= configuration.min_margin
+    && fieldEvidence
+    && uniqueWeaklySupervisedAmount;
+  const parsedValue = field === "vendor" ? top.value : field === "purchase_date" ? top.value : top.value;
+  return {
+    value: parsedValue,
+    confidence,
+    status: safe ? "trusted" : "uncertain",
+    source: "ml",
+    evidence: `${top.evidence} (model ${Math.round(confidence * 100)}%)`,
+  };
+};
+
+const browserOcrFields = (fields: ReceiptFrontendFields): ReceiptFrontendFields => Object.fromEntries(
+  RECEIPT_FRONTEND_FIELDS.map((field) => [field, {
+    ...fields[field],
+    source: fields[field].value && fields[field].source === "rule" ? "browser-ocr" : fields[field].source,
+  }]),
+) as ReceiptFrontendFields;
+
 export const extractReceiptFieldsFromText = (text: string, engine: ReceiptFrontendExtraction["engine"] = "rules-only"): ReceiptFrontendExtraction => {
   const lines = linesFromText(text);
   const fields: ReceiptFrontendFields = {
@@ -140,6 +368,34 @@ export const extractReceiptFieldsFromText = (text: string, engine: ReceiptFronte
   return { text, fields, unresolvedFields, durationMs: 0, engine };
 };
 
+export const extractReceiptFieldsFromOcrLines = (
+  ocrLines: ReceiptOcrLine[],
+  engine: ReceiptFrontendExtraction["engine"] = "tesseract.js",
+  textOverride?: string,
+  options?: { fallbackToRules?: boolean; useModel?: boolean },
+): ReceiptFrontendExtraction => {
+  const text = textOverride ?? ocrLines.map((line) => normalizeLine(line.text)).filter(Boolean).join("\n");
+  const rules = extractReceiptFieldsFromText(text, engine);
+  const lines = normalizedOcrLines(ocrLines);
+  // The model is deliberately shadow-only until it clears the real browser
+  // OCR promotion gate.  Callers that opt in are benchmark/test code; live
+  // extraction remains the validated rules path and stays fail-open.
+  if (options?.useModel !== true || !lines.length || fieldModel.version !== 1) return { ...rules, fields: browserOcrFields(rules.fields), ocrLines };
+  const fallbackToRules = options?.fallbackToRules !== false;
+  const fields = Object.fromEntries(RECEIPT_FRONTEND_FIELDS.map((field) => {
+    const ml = modelCandidateResult(lines, field);
+    const rule = rules.fields[field];
+    // A model proposal may fill an unresolved field, but it never displaces
+    // an independently trusted rule result.  This keeps the ML path
+    // additive and preserves fail-open behavior for uncertain candidates.
+    if (ml.status === "trusted" && (rule.status !== "trusted" || !fallbackToRules)) return [field, ml];
+    if (!fallbackToRules) return [field, ml];
+    return [field, rule];
+  })) as ReceiptFrontendFields;
+  const unresolvedFields = RECEIPT_FRONTEND_FIELDS.filter((field) => fields[field].status !== "trusted");
+  return { text, fields, unresolvedFields, durationMs: 0, engine, ocrLines };
+};
+
 export const extractReceiptFieldsFromImage = async (
   file: Blob | string,
   onProgress?: (progress: number) => void,
@@ -148,15 +404,18 @@ export const extractReceiptFieldsFromImage = async (
   try {
     onProgress?.(5);
     const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng", 1, { logger: (message) => onProgress?.(5 + Math.round((message.progress || 0) * 75)) });
+    const worker = await createWorker("eng", 1, {
+      logger: (message) => onProgress?.(5 + Math.round((message.progress || 0) * 75)),
+      errorHandler: () => undefined,
+    });
     try {
-      const recognized = await worker.recognize(file);
-      const parsed = extractReceiptFieldsFromText(recognized.data.text ?? "", "tesseract.js");
-      const browserFields = Object.fromEntries(RECEIPT_FRONTEND_FIELDS.map((field) => [field, {
-        ...parsed.fields[field],
-        source: parsed.fields[field].value ? "browser-ocr" : parsed.fields[field].source,
-      }])) as ReceiptFrontendFields;
-      return { ...parsed, fields: browserFields, durationMs: Date.now() - started };
+      const recognized = await worker.recognize(file, {}, { blocks: true });
+      const recognizedData = recognized.data as typeof recognized.data;
+      const ocrLines = receiptOcrLinesFromTesseractData(recognizedData);
+      const parsed = ocrLines.length
+        ? extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "")
+        : extractReceiptFieldsFromText(recognizedData.text ?? "", "tesseract.js");
+      return { ...parsed, fields: browserOcrFields(parsed.fields), durationMs: Date.now() - started };
     } finally {
       await worker.terminate();
     }
