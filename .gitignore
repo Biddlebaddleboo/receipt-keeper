@@ -19,6 +19,12 @@ benchmarks/real-receipt-manifest.json
 benchmarks/real-receipt-results.json
 benchmarks/real-receipt-review-queue.json
 benchmarks/real-receipt-splits.json
+benchmarks/sroie500/
+benchmarks/receipt-frontend-benchmark-results.json
+benchmarks/receipt-frontend-browser-ocr.jsonl
+benchmarks/receipt-frontend-browser-ocr-results.json
+benchmarks/receipt-frontend-production-browser-ocr.jsonl
+*.traineddata
 
 # Editor directories and files
 .vscode/*

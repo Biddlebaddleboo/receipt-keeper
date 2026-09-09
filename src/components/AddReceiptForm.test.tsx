@@ -6,11 +6,16 @@ const mocks = vi.hoisted(() => ({
   convertReceiptImageFile: vi.fn(),
   autoCropReceiptImage: vi.fn(),
   convertImageFileToGrayscale: vi.fn(),
+  extractReceiptFieldsFromImage: vi.fn(),
 }));
 
 vi.mock("@/lib/ffmpegImageConverter", () => ({ convertReceiptImageFile: mocks.convertReceiptImageFile }));
 vi.mock("@/lib/receiptAutoCrop", () => ({ autoCropReceiptImage: mocks.autoCropReceiptImage }));
 vi.mock("@/lib/nativeImageConverter", () => ({ convertImageFileToGrayscale: mocks.convertImageFileToGrayscale }));
+vi.mock("@/lib/receiptFrontendExtractor", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/receiptFrontendExtractor")>("@/lib/receiptFrontendExtractor");
+  return { ...actual, extractReceiptFieldsFromImage: mocks.extractReceiptFieldsFromImage };
+});
 
 const baseCameraConstraints = {
   facingMode: { exact: "environment" },
@@ -29,6 +34,20 @@ const createStream = (track: ReturnType<typeof createTrack>) => ({
   getVideoTracks: () => [track],
   getTracks: () => [track],
 }) as unknown as MediaStream;
+
+const actualEmptyFrontendExtraction = () => ({
+  text: "",
+  durationMs: 0,
+  engine: "unavailable" as const,
+  unresolvedFields: ["vendor", "purchase_date", "subtotal", "tax", "total"] as const,
+  fields: {
+    vendor: { value: null, confidence: 0, status: "missing" as const, source: "rule" as const, evidence: "" },
+    purchase_date: { value: null, confidence: 0, status: "missing" as const, source: "rule" as const, evidence: "" },
+    subtotal: { value: null, confidence: 0, status: "missing" as const, source: "rule" as const, evidence: "" },
+    tax: { value: null, confidence: 0, status: "missing" as const, source: "rule" as const, evidence: "" },
+    total: { value: null, confidence: 0, status: "missing" as const, source: "rule" as const, evidence: "" },
+  },
+});
 
 describe("AddReceiptForm camera", () => {
   let originalMediaDevices: MediaDevices | undefined;
@@ -50,6 +69,7 @@ describe("AddReceiptForm camera", () => {
     mocks.autoCropReceiptImage.mockImplementation(async (file: File) => file);
     mocks.convertImageFileToGrayscale.mockImplementation(async (file: File) => file);
     mocks.convertReceiptImageFile.mockResolvedValue(new File(["converted"], "receipt.webp", { type: "image/webp" }));
+    mocks.extractReceiptFieldsFromImage.mockResolvedValue(actualEmptyFrontendExtraction());
   });
 
   afterEach(() => {
@@ -333,12 +353,14 @@ describe("AddReceiptForm camera", () => {
     await screen.findByLabelText("Rear camera preview");
     fireEvent.click(screen.getByRole("button", { name: "Capture photo" }));
     await screen.findByAltText("Receipt preview");
-    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Continue" }).some((button) => !button.hasAttribute("disabled"))).toBe(true));
+    fireEvent.click(screen.getAllByRole("button", { name: "Continue" })[0]);
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ type: "image/webp" }),
       expect.any(Function),
       true,
+      expect.objectContaining({ mode: "remaining" }),
     ));
     expect(mocks.convertImageFileToGrayscale).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));
     expect(mocks.convertReceiptImageFile).toHaveBeenCalledWith(expect.objectContaining({ type: "image/jpeg" }));

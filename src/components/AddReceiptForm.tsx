@@ -1,13 +1,22 @@
-import { useRef, useState } from "react";
-import { X, Camera, Upload } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Camera, Upload, Loader2, Sparkles, CheckCircle2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { autoCropReceiptImage } from "@/lib/receiptAutoCrop";
 import { BrowserCamera, type CameraColorMode } from "@/components/BrowserCamera";
 import { convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  extractReceiptFieldsFromImage,
+  RECEIPT_FRONTEND_FIELDS,
+  type ReceiptFrontendDecision,
+  type ReceiptFrontendExtraction,
+  type ReceiptFrontendField,
+} from "@/lib/receiptFrontendExtractor";
 
 interface AddReceiptFormProps {
-  onSubmit: (file: File, onProgress?: (progress: number) => void, imageGrayscale?: boolean) => Promise<void> | void;
+  onSubmit: (file: File, onProgress?: (progress: number) => void, imageGrayscale?: boolean, decision?: ReceiptFrontendDecision) => Promise<void> | void;
   onClose: () => void;
   disabled?: boolean;
 }
@@ -20,7 +29,33 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [imageGrayscale, setImageGrayscale] = useState(false);
+  const [extraction, setExtraction] = useState<ReceiptFrontendExtraction | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [fieldValues, setFieldValues] = useState<Partial<Record<ReceiptFrontendField, string>>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setExtraction(null);
+      setFieldValues({});
+      setIsExtracting(false);
+      return;
+    }
+    let cancelled = false;
+    setIsExtracting(true);
+    setOcrProgress(1);
+    void extractReceiptFieldsFromImage(file, setOcrProgress)
+      .then((next) => {
+        if (cancelled) return;
+        setExtraction(next);
+        setFieldValues(Object.fromEntries(RECEIPT_FRONTEND_FIELDS.map((field) => [field, next.fields[field].value ?? ""])));
+      })
+      .finally(() => {
+        if (!cancelled) setIsExtracting(false);
+      });
+    return () => { cancelled = true; };
+  }, [file]);
 
   const handleFile = (f: File, colorMode: CameraColorMode = "color") => {
     if (!f.type.startsWith("image/")) {
@@ -47,7 +82,34 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
     onClose();
   };
 
-  const handleSubmit = async () => {
+  const buildDecision = (mode: ReceiptFrontendDecision["mode"]): ReceiptFrontendDecision => {
+    const fields = extraction?.fields;
+    const trusted: ReceiptFrontendDecision["fields"] = {};
+    const unresolved: ReceiptFrontendField[] = [];
+    RECEIPT_FRONTEND_FIELDS.forEach((field) => {
+      const value = (fieldValues[field] ?? "").trim();
+      if (!value) {
+        unresolved.push(field);
+        return;
+      }
+      const original = fields?.[field];
+      const unchangedTrusted = original?.status === "trusted" && original.value === value;
+      const manuallyReviewed = !original || original.value !== value || original.source === "manual";
+      if (unchangedTrusted || manuallyReviewed) {
+        trusted[field] = unchangedTrusted ? original : {
+          value,
+          confidence: 1,
+          status: "trusted",
+          source: "manual",
+          evidence: "User reviewed or edited this value",
+        };
+      }
+    });
+    if (mode === "entire") return { mode, fields: {}, unresolvedFields: [...RECEIPT_FRONTEND_FIELDS], ocrText: extraction?.text ?? "" };
+    return { mode: unresolved.length ? "remaining" : "none", fields: trusted, unresolvedFields: unresolved, ocrText: extraction?.text ?? "" };
+  };
+
+  const handleSubmit = async (mode?: ReceiptFrontendDecision["mode"]) => {
     if (!file) return;
     if (isQueueingUpload) return;
 
@@ -74,7 +136,7 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       if (convertedFile.type !== "image/webp") {
         throw new Error(`WebP conversion failed. Got type: ${convertedFile.type || "unknown"}`);
       }
-      await onSubmit(convertedFile, (progress) => setUploadProgress(progress), imageGrayscale);
+      await onSubmit(convertedFile, (progress) => setUploadProgress(progress), imageGrayscale, buildDecision(mode ?? (extraction ? "remaining" : "entire")));
       onClose();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
@@ -85,6 +147,23 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
       if (conversionProgressTimer) window.clearInterval(conversionProgressTimer);
       setIsQueueingUpload(false);
     }
+  };
+
+  const updateField = (field: ReceiptFrontendField, value: string) => {
+    setFieldValues((current) => ({ ...current, [field]: value }));
+    setExtraction((current) => current ? {
+      ...current,
+      fields: { ...current.fields, [field]: { ...current.fields[field], value: value || null, status: value ? "trusted" : "missing", confidence: value ? 1 : 0, source: "manual", evidence: "User edited this value" } },
+      unresolvedFields: RECEIPT_FRONTEND_FIELDS.filter((candidate) => candidate === field ? !value : current.fields[candidate].status !== "trusted"),
+    } : current);
+  };
+
+  const fieldLabels: Record<ReceiptFrontendField, string> = {
+    vendor: "Store name",
+    purchase_date: "Receipt date",
+    subtotal: "Subtotal",
+    tax: "Tax",
+    total: "Total",
   };
 
   return (
@@ -102,14 +181,14 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
             </button>
             <h2 className="text-sm font-semibold">New Receipt</h2>
             <button
-              onClick={handleSubmit}
-              disabled={!file || disabled || isQueueingUpload}
+              onClick={() => handleSubmit()}
+              disabled={!file || disabled || isQueueingUpload || isExtracting}
               className={cn(
                 "px-4 py-1.5 rounded-md text-sm font-medium transition-all active:scale-95",
                 file ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground pointer-events-none"
               )}
             >
-              Upload
+              Continue
             </button>
       </header>
 
@@ -139,6 +218,46 @@ export function AddReceiptForm({ onSubmit, onClose, disabled }: AddReceiptFormPr
                   style={{ width: `${Math.max(1, Math.min(100, uploadProgress))}%` }}
                 />
               </div>
+            )}
+            {!isQueueingUpload && (
+              <section aria-label="Receipt extraction review" className="rounded-lg border bg-card p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">Review extracted fields</h3>
+                    <p className="text-xs text-muted-foreground">Only high-confidence fields skip AI. Blank or uncertain fields stay unresolved.</p>
+                  </div>
+                  {isExtracting && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-label="OCR in progress" />}
+                </div>
+                {isExtracting ? (
+                  <div className="text-xs text-muted-foreground">Reading receipt locally… {ocrProgress}%</div>
+                ) : (
+                  <div className="space-y-2">
+                    {RECEIPT_FRONTEND_FIELDS.map((field) => {
+                      const item = extraction?.fields[field];
+                      const trusted = item?.status === "trusted" && item.value === fieldValues[field];
+                      return (
+                        <div key={field} className="space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <label htmlFor={`receipt-${field}`} className="font-medium">{fieldLabels[field]}</label>
+                            <span className={cn("flex items-center gap-1", trusted ? "text-emerald-600" : "text-amber-600")}>
+                              {trusted ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                              {trusted ? `High confidence (${Math.round((item?.confidence ?? 1) * 100)}%)` : "Needs review / AI"}
+                            </span>
+                          </div>
+                          <Input id={`receipt-${field}`} value={fieldValues[field] ?? ""} onChange={(event) => updateField(field, event.target.value)} placeholder="Not detected" disabled={isQueueingUpload} />
+                          {item?.evidence && <p className="truncate text-[11px] text-muted-foreground">Evidence: {item.evidence}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Button onClick={() => handleSubmit()} disabled={isExtracting || isQueueingUpload} className="w-full">Continue</Button>
+                  <Button onClick={() => handleSubmit("remaining")} disabled={isExtracting || isQueueingUpload} variant="secondary" className="w-full"><Sparkles />Use AI for remaining</Button>
+                  <Button onClick={() => handleSubmit("entire")} disabled={isExtracting || isQueueingUpload} variant="outline" className="w-full"><Sparkles />Use AI for entire receipt</Button>
+                </div>
+                <Button onClick={handleClose} disabled={isQueueingUpload} variant="ghost" className="w-full">Reject</Button>
+              </section>
             )}
           </div>
         ) : (

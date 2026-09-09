@@ -10,6 +10,9 @@
     "lint": "eslint .",
     "benchmark:receipt-crop": "vitest run --config vitest.benchmark.config.ts",
     "benchmark:receipt-crop:real": "node scripts/run-real-receipt-benchmark.mjs && node scripts/render-real-receipt-diagnostics.mjs",
+    "benchmark:receipt-frontend": "vitest run --config vitest.benchmark.config.ts scripts/receipt-frontend-benchmark.test.ts",
+    "benchmark:receipt-frontend:browser-ocr": "RUN_BROWSER_OCR=1 vitest run --config vitest.benchmark.config.ts scripts/receipt-frontend-benchmark.test.ts",
+    "benchmark:receipt-frontend:score": "vitest run --config vitest.benchmark.config.ts scripts/score-receipt-frontend-browser-ocr.test.ts",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -65,6 +68,7 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tesseract.js": "^7.0.0",
     "vaul": "^0.9.9"
   },
   "devDependencies": {

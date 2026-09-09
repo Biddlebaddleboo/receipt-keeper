@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore/lite";
 import { db } from "@/lib/firebase";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
+import type { ReceiptFrontendDecision, ReceiptFrontendField, ReceiptFrontendFieldResult } from "@/lib/receiptFrontendExtractor";
 
 export interface ExtractedField {
   label: string;
@@ -17,7 +18,7 @@ export interface ReceiptItem {
   price: number;
 }
 
-interface ReceiptUploadMeta {
+export interface ReceiptUploadMeta {
   vendor?: string;
   subtotal?: number;
   tax?: number;
@@ -26,6 +27,12 @@ interface ReceiptUploadMeta {
   purchase_date?: string;
   invoice_id?: string;
   image_grayscale?: boolean;
+  frontend_extraction?: {
+    mode: ReceiptFrontendDecision["mode"];
+    trusted_fields: Partial<Record<ReceiptFrontendField, ReceiptFrontendFieldResult>>;
+    unresolved_fields: ReceiptFrontendField[];
+    ocr_text?: string;
+  };
 }
 
 interface SignedUploadResponse {
@@ -470,7 +477,12 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return [...mergedIncoming, ...rest.filter((r) => !incomingMap.has(r.id))];
   }, []);
 
-  const uploadReceipt = async (file: File, onProgress?: UploadProgressCallback, imageGrayscale = false) => {
+  const uploadReceipt = async (
+    file: File,
+    onProgress?: UploadProgressCallback,
+    imageGrayscale = false,
+    frontendDecision?: ReceiptFrontendDecision,
+  ) => {
     if (authLoading || !tokenRef.current) return;
 
     const id = crypto.randomUUID();
@@ -499,9 +511,18 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     setIsUploading(true);
 
     try {
+      const uploadMeta: ReceiptUploadMeta | undefined = frontendDecision ? {
+        ...(imageGrayscale ? { image_grayscale: true } : {}),
+        frontend_extraction: {
+          mode: frontendDecision.mode,
+          trusted_fields: frontendDecision.fields,
+          unresolved_fields: frontendDecision.unresolvedFields,
+          ocr_text: frontendDecision.ocrText,
+        },
+      } : (imageGrayscale ? { image_grayscale: true } : undefined);
       const data = (await createReceiptViaSignedUpload(
         file,
-        imageGrayscale ? { image_grayscale: true } : undefined,
+        uploadMeta,
         onProgress,
       )) as Record<string, unknown>;
 
