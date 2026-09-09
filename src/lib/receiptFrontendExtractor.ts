@@ -1,5 +1,9 @@
 import { normalizeReceiptPurchaseDate } from "@/lib/receiptDate";
+import { RECEIPT_OCR_LIVE_STRATEGY, recognizeReceiptOcrPass, type ReceiptOcrLine } from "@/lib/receiptOcr";
 import fieldModelJson from "@/lib/receiptFieldModel.json";
+
+export { receiptOcrLinesFromTesseractData } from "@/lib/receiptOcr";
+export type { ReceiptOcrLine } from "@/lib/receiptOcr";
 
 export const RECEIPT_FRONTEND_FIELDS = ["vendor", "purchase_date", "subtotal", "tax", "total"] as const;
 export type ReceiptFrontendField = (typeof RECEIPT_FRONTEND_FIELDS)[number];
@@ -24,23 +28,6 @@ export interface ReceiptFrontendExtraction {
   engine: "tesseract.js" | "unavailable" | "rules-only";
   ocrLines?: ReceiptOcrLine[];
 }
-
-export interface ReceiptOcrLine {
-  text: string;
-  confidence?: number;
-  bbox?: { x0: number; y0: number; x1: number; y1: number };
-}
-
-type TesseractLineData = { text?: string; confidence?: number; bbox?: ReceiptOcrLine["bbox"] };
-
-export const receiptOcrLinesFromTesseractData = (data: unknown): ReceiptOcrLine[] => {
-  const blocks = (data as { blocks?: Array<{ paragraphs?: Array<{ lines?: TesseractLineData[] }> }> } | null)?.blocks ?? [];
-  return blocks.flatMap((block) => (block.paragraphs ?? []).flatMap((paragraph) => (paragraph.lines ?? []).map((line) => ({
-    text: line.text ?? "",
-    confidence: line.confidence,
-    bbox: line.bbox,
-  }))));
-};
 
 interface FieldModel {
   type: "logistic";
@@ -409,12 +396,10 @@ export const extractReceiptFieldsFromImage = async (
       errorHandler: () => undefined,
     });
     try {
-      const recognized = await worker.recognize(file, {}, { blocks: true });
-      const recognizedData = recognized.data as typeof recognized.data;
-      const ocrLines = receiptOcrLinesFromTesseractData(recognizedData);
-      const parsed = ocrLines.length
-        ? extractReceiptFieldsFromOcrLines(ocrLines, "tesseract.js", recognizedData.text ?? "")
-        : extractReceiptFieldsFromText(recognizedData.text ?? "", "tesseract.js");
+      const pass = await recognizeReceiptOcrPass(worker, file, RECEIPT_OCR_LIVE_STRATEGY);
+      const parsed = pass.lines.length
+        ? extractReceiptFieldsFromOcrLines(pass.lines, "tesseract.js", pass.text)
+        : extractReceiptFieldsFromText(pass.text, "tesseract.js");
       return { ...parsed, fields: browserOcrFields(parsed.fields), durationMs: Date.now() - started };
     } finally {
       await worker.terminate();
