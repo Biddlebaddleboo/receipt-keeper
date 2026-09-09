@@ -1,6 +1,8 @@
 export const RECEIPT_CROP_ANALYSIS_MAX_DIMENSION = 800;
 export const RECEIPT_CROP_MARGIN = 0.04;
 export const RECEIPT_ALREADY_CROPPED_MARGIN = 0.06;
+/** Keep the original bottom edge when the detected paper is already close to it. */
+export const RECEIPT_BOTTOM_SAFETY_MARGIN = 0.15;
 
 /**
  * The detector is intentionally configurable so offline benchmark runs can
@@ -22,6 +24,8 @@ export interface ReceiptCropDetectorOptions {
   minCornerConfidence: number;
   minConfidence: number;
   minScore: number;
+  minCandidateHeightRatio: number;
+  partialCandidateTopRatio: number;
 }
 
 /** Exact settings for the detector that shipped before the benchmark work. */
@@ -39,6 +43,8 @@ export const RECEIPT_CROP_BASELINE_OPTIONS: ReceiptCropDetectorOptions = {
   minCornerConfidence: 0.55,
   minConfidence: 0.72,
   minScore: 0,
+  minCandidateHeightRatio: 0,
+  partialCandidateTopRatio: 1,
 };
 
 /**
@@ -60,6 +66,8 @@ export const RECEIPT_CROP_DETECTOR_OPTIONS: ReceiptCropDetectorOptions = {
   minCornerConfidence: 0.55,
   minConfidence: 0.74,
   minScore: 0.66,
+  minCandidateHeightRatio: 0.4,
+  partialCandidateTopRatio: 0.35,
 };
 
 export interface ReceiptCorner {
@@ -240,7 +248,10 @@ export const calculateReceiptCropWithSideMarginGuard = (
     left: margins.left <= RECEIPT_ALREADY_CROPPED_MARGIN ? 0 : paddedCrop.left,
     top: margins.top <= RECEIPT_ALREADY_CROPPED_MARGIN ? 0 : paddedCrop.top,
     right: margins.right <= RECEIPT_ALREADY_CROPPED_MARGIN ? sourceWidth : paddedCrop.right,
-    bottom: margins.bottom <= RECEIPT_ALREADY_CROPPED_MARGIN ? sourceHeight : paddedCrop.bottom,
+    // Thermal receipts often have a faint footer below the strongest paper
+    // component. The bottom edge is therefore guarded more conservatively than
+    // the other sides; extra background is preferable to clipping content.
+    bottom: margins.bottom <= RECEIPT_BOTTOM_SAFETY_MARGIN ? sourceHeight : paddedCrop.bottom,
   };
   if (crop.right - crop.left >= sourceWidth && crop.bottom - crop.top >= sourceHeight) return null;
   if (crop.right - crop.left < 2 || crop.bottom - crop.top < 2) return null;
@@ -249,6 +260,36 @@ export const calculateReceiptCropWithSideMarginGuard = (
 
 const luminance = (data: Uint8ClampedArray, index: number) =>
   Math.round(0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2]);
+
+/**
+ * Reject a proposed crop when visible dark content remains outside it. This
+ * is intentionally a one-sided safety check: dark background can cause a
+ * missed crop, but must never be allowed to make an accepted crop smaller.
+ */
+export const hasPotentialReceiptContentBelowCrop = (
+  imageData: ImageData,
+  crop: ReceiptCropRect,
+  corners: ReceiptCorners,
+): boolean => {
+  const { width, height, data } = imageData;
+  const points = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
+  const detectedLeft = clamp(Math.floor(Math.min(...points.map((point) => point.x))), 0, width);
+  const detectedRight = clamp(Math.ceil(Math.max(...points.map((point) => point.x))), 0, width);
+  const detectedBottom = clamp(Math.ceil(Math.max(...points.map((point) => point.y))), 0, height);
+  const left = clamp(detectedLeft, 0, width);
+  const right = clamp(detectedRight, 0, width);
+  const top = clamp(Math.ceil(crop.bottom), 0, height);
+  const bottom = height;
+  const area = (right - left) * (bottom - top);
+  if (area < 4) return false;
+  let darkPixels = 0;
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      if (luminance(data, (y * width + x) * 4) < 145) darkPixels += 1;
+    }
+  }
+  return darkPixels / area > 0.01;
+};
 
 const medianFromHistogram = (histogram: Uint32Array, count: number): number => {
   let cumulative = 0;
@@ -324,7 +365,9 @@ const isLegacyBaselineOptions = (options: ReceiptCropDetectorOptions) =>
   && options.maxAreaRatio === 0.92
   && options.minCornerConfidence === 0.55
   && options.minConfidence === 0.72
-  && options.minScore === 0;
+  && options.minScore === 0
+  && options.minCandidateHeightRatio === 0
+  && options.partialCandidateTopRatio === 1;
 
 const findCandidate = (
   mask: Uint8Array,
@@ -478,6 +521,11 @@ export const detectReceiptCorners = (
   if (!candidates.length || borderBrightCount / (borderCount * Math.max(1, options.thresholdOffsets.length)) > options.borderCandidateRejectRatio) return null;
   const best = candidates.reduce((current, candidate) => candidate.score > current.score ? candidate : current);
   if (best.score < options.minScore) return null;
+  const candidateHeightRatio = (best.bottom - best.top + 1) / height;
+  // A small component near the lower half is usually printed content, not the
+  // physical paper boundary. Cropping it can discard the receipt above it, so
+  // fail open unless the candidate has meaningful vertical support.
+  if (candidateHeightRatio < options.minCandidateHeightRatio && best.top / height > options.partialCandidateTopRatio) return null;
   const confidence = isLegacyBaselineOptions(options)
     ? Math.min(1, best.fillRatio * 0.65 + Math.min(1, best.contrast * 0.8) * 0.35)
     : Math.min(1, best.fillRatio * 0.55 + best.cornerConfidence * 0.25 + best.contrast * 0.10 + Math.min(1, best.contrast + best.fillRatio * 0.05) * 0.10);
@@ -552,6 +600,17 @@ export const autoCropReceiptImage = async (file: File): Promise<File> => {
     ) as unknown as ReceiptCorners;
     const crop = calculateReceiptCropWithSideMarginGuard(mappedCorners, decoded.width, decoded.height);
     if (!crop) return file;
+    const analysisCrop = {
+      left: crop.left / decoded.width * analysisWidth,
+      top: crop.top / decoded.height * analysisHeight,
+      right: crop.right / decoded.width * analysisWidth,
+      bottom: crop.bottom / decoded.height * analysisHeight,
+    };
+    if (hasPotentialReceiptContentBelowCrop(
+      analysisContext.getImageData(0, 0, analysisWidth, analysisHeight),
+      analysisCrop,
+      detection.corners,
+    )) return file;
 
     cropCanvas = document.createElement("canvas");
     cropCanvas.width = crop.right - crop.left;

@@ -1,0 +1,50 @@
+[
+  {
+    "caseId": "real-003",
+    "source": "private-production-derived-geometry",
+    "shape": "long-thermal-receipt",
+    "beforeCropBottomRatio": 0.9276,
+    "knownFailure": "footer content below connected-component boundary",
+    "expected": "fail-open"
+  },
+  {
+    "caseId": "real-008",
+    "source": "private-production-derived-geometry",
+    "shape": "long-thermal-receipt",
+    "beforeCropBottomRatio": 0.9385,
+    "knownFailure": "date/time/footer content below connected-component boundary",
+    "expected": "fail-open"
+  },
+  {
+    "caseId": "real-019",
+    "source": "private-production-derived-geometry",
+    "shape": "long-receipt-with-low-contrast-footer",
+    "beforeCropBottomRatio": 0.8753,
+    "knownFailure": "paper and printed footer continue below candidate",
+    "expected": "fail-open"
+  },
+  {
+    "caseId": "real-024",
+    "source": "private-production-derived-geometry",
+    "shape": "long-thermal-receipt",
+    "beforeCropBottomRatio": 0.9010,
+    "knownFailure": "lower receipt content clipped",
+    "expected": "fail-open"
+  },
+  {
+    "caseId": "real-026",
+    "source": "private-production-derived-geometry",
+    "shape": "lower-fragment-connected-component",
+    "beforeCropTopRatio": 0.7728,
+    "knownFailure": "detector selected a small lower component",
+    "expected": "fail-open"
+  },
+  {
+    "caseId": "real-032",
+    "source": "private-production-derived-geometry",
+    "shape": "Walmart-like-long-receipt",
+    "beforeCropBottomRatio": 0.9076,
+    "knownFailure": "Walmart footer/date-time/barcode below candidate",
+    "expected": "fail-open"
+  }
+]

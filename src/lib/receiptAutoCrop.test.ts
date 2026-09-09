@@ -5,9 +5,11 @@ import {
   calculateReceiptCropWithSideMarginGuard,
   detectReceiptCorners,
   RECEIPT_ALREADY_CROPPED_MARGIN,
+  RECEIPT_BOTTOM_SAFETY_MARGIN,
   RECEIPT_CROP_BASELINE_OPTIONS,
   RECEIPT_CROP_MARGIN,
   RECEIPT_CROP_DETECTOR_OPTIONS,
+  hasPotentialReceiptContentBelowCrop,
 } from "@/lib/receiptAutoCrop";
 import type { ReceiptCorners } from "@/lib/receiptAutoCrop";
 
@@ -218,13 +220,9 @@ describe("receipt auto-cropping", () => {
     bottomLeft: { x: margins.left * 1000, y: (1 - margins.bottom) * 1000 },
   });
 
-  it("crops only the bottom when only the bottom margin exceeds 6%", () => {
-    expect(calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0.04, right: 0.05, top: 0.04, bottom: 0.12 }), 1000, 1000)).toEqual({
-      left: 0,
-      top: 0,
-      right: 1000,
-      bottom: 914,
-    });
+  it("keeps the bottom edge when the detected paper is within the asymmetric safety margin", () => {
+    expect(calculateReceiptCropWithSideMarginGuard(cornersFromMargins({ left: 0.04, right: 0.05, top: 0.04, bottom: 0.12 }), 1000, 1000)).toBeNull();
+    expect(RECEIPT_BOTTOM_SAFETY_MARGIN).toBe(0.15);
   });
 
   it("crops only one qualifying horizontal side", () => {
@@ -241,7 +239,7 @@ describe("receipt auto-cropping", () => {
       left: 86,
       top: 0,
       right: 1000,
-      bottom: 914,
+      bottom: 1000,
     });
   });
 
@@ -250,7 +248,7 @@ describe("receipt auto-cropping", () => {
       left: 0,
       top: 68,
       right: 934,
-      bottom: 932,
+      bottom: 1000,
     });
   });
 
@@ -274,6 +272,29 @@ describe("receipt auto-cropping", () => {
       right: 884,
       bottom: 853,
     });
+  });
+
+  it("fails open when dark receipt content is visible below the proposed crop", () => {
+    const image = makeValueImageData(100, 100, { left: 20, top: 10, right: 79, bottom: 89 }, 25, 230);
+    for (let y = 90; y < 100; y += 1) {
+      for (let x = 30; x < 70; x += 1) {
+        const offset = (y * image.width + x) * 4;
+        image.data[offset] = 40;
+        image.data[offset + 1] = 40;
+        image.data[offset + 2] = 40;
+      }
+    }
+    expect(hasPotentialReceiptContentBelowCrop(image, { left: 15, top: 5, right: 85, bottom: 88 }, {
+      topLeft: { x: 20, y: 10 },
+      topRight: { x: 79, y: 10 },
+      bottomRight: { x: 79, y: 89 },
+      bottomLeft: { x: 20, y: 89 },
+    })).toBe(true);
+  });
+
+  it("rejects a small lower connected component instead of cropping to it", () => {
+    const image = makeValueImageData(200, 400, { left: 80, top: 300, right: 119, bottom: 350 }, 25, 230);
+    expect(detectReceiptCorners(image)).toBeNull();
   });
 
   it("leaves the original unchanged when corners are missing or geometry is invalid", async () => {

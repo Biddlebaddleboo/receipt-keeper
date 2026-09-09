@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 __pycache__/
+benchmarks/real-receipts/
+benchmarks/real-receipt-diagnostics/
+benchmarks/real-receipt-records.jsonl
+benchmarks/real-receipt-manifest.json
+benchmarks/real-receipt-results.json
+benchmarks/real-receipt-review-queue.json
+benchmarks/real-receipt-splits.json
 
 # Editor directories and files
 .vscode/*

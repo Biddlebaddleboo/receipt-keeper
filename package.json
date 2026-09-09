@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "benchmark:receipt-crop": "vitest run --config vitest.benchmark.config.ts",
+    "benchmark:receipt-crop:real": "node scripts/run-real-receipt-benchmark.mjs && node scripts/render-real-receipt-diagnostics.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

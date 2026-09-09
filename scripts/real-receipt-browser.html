@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Real receipt crop benchmark</title>
+<pre id="output">running</pre>
+<script type="module">
+import {
+  calculateReceiptCropWithSideMarginGuard,
+  calculateReceiptCrop,
+  detectReceiptCorners,
+  hasPotentialReceiptContentBelowCrop,
+  RECEIPT_CROP_BASELINE_OPTIONS,
+  RECEIPT_CROP_DETECTOR_OPTIONS,
+} from "/src/lib/receiptAutoCrop.ts";
+
+const manifest = await (await fetch("/benchmarks/real-receipt-manifest.json")).json();
+const output = [];
+const LEGACY_PRODUCTION_OPTIONS = {
+  ...RECEIPT_CROP_DETECTOR_OPTIONS,
+  minCandidateHeightRatio: 0,
+  partialCandidateTopRatio: 1,
+};
+const loadImage = (url) => new Promise((resolve, reject) => {
+  const image = new Image();
+  image.onload = () => resolve(image);
+  image.onerror = () => reject(new Error(`Unable to decode ${url}`));
+  image.src = url;
+});
+const luminance = (data, index) => Math.round(0.2126 * data[index] + 0.7152 * data[index + 1] + 0.0722 * data[index + 2]);
+const mapCorners = (corners, analysisWidth, analysisHeight, sourceWidth, sourceHeight) => Object.fromEntries(
+  Object.entries(corners).map(([name, point]) => [name, {
+    x: point.x / analysisWidth * sourceWidth,
+    y: point.y / analysisHeight * sourceHeight,
+  }]),
+);
+
+const legacySideMarginGuard = (corners, sourceWidth, sourceHeight) => {
+  const paddedCrop = calculateReceiptCrop(corners, sourceWidth, sourceHeight);
+  if (!paddedCrop) return null;
+  const points = Object.values(corners);
+  const margins = {
+    left: Math.min(...points.map((point) => point.x)) / sourceWidth,
+    right: (sourceWidth - Math.max(...points.map((point) => point.x))) / sourceWidth,
+    top: Math.min(...points.map((point) => point.y)) / sourceHeight,
+    bottom: (sourceHeight - Math.max(...points.map((point) => point.y))) / sourceHeight,
+  };
+  const crop = {
+    left: margins.left <= 0.06 ? 0 : paddedCrop.left,
+    top: margins.top <= 0.06 ? 0 : paddedCrop.top,
+    right: margins.right <= 0.06 ? sourceWidth : paddedCrop.right,
+    bottom: margins.bottom <= 0.06 ? sourceHeight : paddedCrop.bottom,
+  };
+  return crop.left === 0 && crop.top === 0 && crop.right === sourceWidth && crop.bottom === sourceHeight ? null : crop;
+};
+
+const evaluate = (imageData, sourceWidth, sourceHeight, options, cropCalculator, applySafetyGuard) => {
+  const detection = detectReceiptCorners(imageData, options);
+  if (!detection) return { detection: null, mappedCorners: null, crop: null, margins: null, darkBelowCropRatio: 0 };
+  const mappedCorners = mapCorners(detection.corners, imageData.width, imageData.height, sourceWidth, sourceHeight);
+  const proposedCrop = cropCalculator(mappedCorners, sourceWidth, sourceHeight);
+  const points = Object.values(mappedCorners);
+  const detectedLeft = Math.min(...points.map((point) => point.x));
+  const detectedRight = Math.max(...points.map((point) => point.x));
+  const analysisCrop = proposedCrop ? {
+    left: proposedCrop.left / sourceWidth * imageData.width,
+    top: proposedCrop.top / sourceHeight * imageData.height,
+    right: proposedCrop.right / sourceWidth * imageData.width,
+    bottom: proposedCrop.bottom / sourceHeight * imageData.height,
+  } : null;
+  let darkBelowCrop = 0;
+  let belowCropPixels = 0;
+  if (analysisCrop && analysisCrop.bottom < imageData.height) {
+    const left = Math.max(0, Math.floor(detectedLeft / sourceWidth * imageData.width));
+    const right = Math.min(imageData.width - 1, Math.ceil(detectedRight / sourceWidth * imageData.width));
+    for (let y = Math.max(0, Math.floor(analysisCrop.bottom)); y < imageData.height; y += 1) {
+      for (let x = left; x <= right; x += 1) {
+        belowCropPixels += 1;
+        if (luminance(imageData.data, (y * imageData.width + x) * 4) < 160) darkBelowCrop += 1;
+      }
+    }
+  }
+  const rejectedForOutsideContent = applySafetyGuard && analysisCrop
+    ? hasPotentialReceiptContentBelowCrop(imageData, analysisCrop, detection.corners)
+    : false;
+  const crop = proposedCrop && !rejectedForOutsideContent ? proposedCrop : null;
+  const margins = proposedCrop ? {
+    left: proposedCrop.left / sourceWidth,
+    top: proposedCrop.top / sourceHeight,
+    right: (sourceWidth - proposedCrop.right) / sourceWidth,
+    bottom: (sourceHeight - proposedCrop.bottom) / sourceHeight,
+  } : null;
+  return { detection, mappedCorners, proposedCrop, crop, margins, rejectedForOutsideContent, darkBelowCropRatio: darkBelowCrop / Math.max(1, belowCropPixels) };
+};
+
+for (const entry of manifest) {
+  try {
+    const image = await loadImage(`/benchmarks/real-receipts/${encodeURIComponent(entry.filename)}`);
+    const sourceWidth = image.naturalWidth;
+    const sourceHeight = image.naturalHeight;
+    const scale = Math.min(1, 800 / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0, width, height);
+    const imageData = context.getImageData(0, 0, width, height);
+    const before = evaluate(imageData, sourceWidth, sourceHeight, LEGACY_PRODUCTION_OPTIONS, legacySideMarginGuard, false);
+    const baseline = evaluate(imageData, sourceWidth, sourceHeight, RECEIPT_CROP_BASELINE_OPTIONS, calculateReceiptCropWithSideMarginGuard, true);
+    const selected = evaluate(imageData, sourceWidth, sourceHeight, RECEIPT_CROP_DETECTOR_OPTIONS, calculateReceiptCropWithSideMarginGuard, true);
+    const bottomBandStart = Math.floor(height * 0.82);
+    let darkBottomBand = 0;
+    let bottomBandPixels = 0;
+    for (let y = bottomBandStart; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        bottomBandPixels += 1;
+        if (luminance(imageData.data, (y * width + x) * 4) < 160) darkBottomBand += 1;
+      }
+    }
+    const reviewReasons = [];
+    if (!selected.detection) reviewReasons.push("no-detection");
+    if (selected.crop && selected.darkBelowCropRatio > 0.01) reviewReasons.push("dark-content-below-proposed-bottom", "bottom-edge-review");
+    if (entry.vendor && /walmart/i.test(entry.vendor)) reviewReasons.push("walmart-review");
+    output.push({ ...entry, originalWidth: sourceWidth, originalHeight: sourceHeight, analysisWidth: width, analysisHeight: height, before, baseline, selected, darkBottomBandRatio: darkBottomBand / Math.max(1, bottomBandPixels), reviewReasons });
+  } catch (error) {
+    output.push({ ...entry, error: String(error), reviewReasons: ["decode-error"] });
+  }
+}
+document.querySelector("#output").textContent = JSON.stringify(output);
+</script>
