@@ -6,7 +6,7 @@ This report covers the classical frontend field extractor added in `src/lib/rece
 
 - 500 receipts from the public [ICDAR 2019 SROIE repository](https://github.com/zzzDavid/ICDAR-2019-SROIE), with the repository's OCR box text and key labels. The image/OCR cache is ignored and is not committed.
 - 52 historical receipt images were downloaded read-only from `gs://ai-receipt-tracker/receipts/**`. They have no reliable paper/field ground truth, so they are used for coverage, abstention, and manual-review-queue checks only. Production objects were not modified.
-- The public sample is split at receipt level into tuning (the first 300 representatives), validation (100 representatives), and an untouched final slice (100 representatives). Three exact-duplicate groups were detected; each group is assigned wholly to the representative's split rather than leaking across boundaries. No customer images are committed. The production corpus is kept group-local and is never mixed with the public final set.
+- The public sample is split at receipt level into 301 tuning, 100 validation, and 99 untouched final records. Three exact-duplicate groups were detected; each group is assigned wholly to the representative's split rather than leaking across boundaries, which shifts one record from the nominal final slice into tuning. No customer images are committed. The production corpus is kept group-local and is never mixed with the public final set.
 - The final set is not used to choose thresholds. Where a physical paper or field boundary cannot be determined automatically, the result is classified as review-required rather than treating the current crop or AI value as truth.
 
 ## Before / after
