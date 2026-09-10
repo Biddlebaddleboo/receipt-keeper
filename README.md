@@ -64,6 +64,8 @@ npm run benchmark:receipt-crop
 
 The receipt auto-crop benchmark is documented in [benchmarks/receipt-crop-report.md](benchmarks/receipt-crop-report.md). It is an offline classical-CV sweep with tuning, validation, and untouched final splits. The optional MIDV-500 adapter and download instructions are in [benchmarks/midv500.md](benchmarks/midv500.md).
 
+The experimental PP-OCRv6 tiny overlapping-band benchmark is documented in [benchmarks/receipt-band-ocr-report.md](benchmarks/receipt-band-ocr-report.md). With the local SROIE and read-only production caches available, run `npm run benchmark:receipt-band:score` to score the cached runs, `npm run train:receipt-band:models` to compare tiny offline selector models, or `npm run benchmark:receipt-band-ocr` to generate a browser OCR run. Production receipt caches contain private data and are ignored; never stage them.
+
 ## Firestore Rules Expectations
 
 Current app behavior expects rules that:

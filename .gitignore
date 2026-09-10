@@ -22,6 +22,8 @@ benchmarks/real-receipt-splits.json
 benchmarks/sroie500/
 benchmarks/modern-ocr-models/
 benchmarks/receipt-modern-ocr-*.json
+benchmarks/receipt-band-ocr-*.json
+benchmarks/receipt-band-model-comparison.json
 benchmarks/receipt-ppocrv6-extractor-*.json
 benchmarks/receipt-frontend-benchmark-results.json
 benchmarks/receipt-frontend-browser-ocr.jsonl
