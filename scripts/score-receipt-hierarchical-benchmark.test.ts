@@ -93,6 +93,10 @@ const simulateExperts = (observations: RawLine[], bands: ReceiptRouterBandInput[
     byKey.set(key, [...(byKey.get(key) ?? []), line]);
   });
   const experts: ReceiptHierarchicalObservation[] = [];
+  // Cached replay has one OCR observation per proposed crop. Early stopping is
+  // exercised by the browser runner, where trust can be checked immediately
+  // after each sequential OCR call; replay keeps the full crop set so that the
+  // quality comparison is not confounded by a cost-only simulation.
   crops.forEach((crop) => {
     const source = byKey.get(crop.sourceObservationKey) ?? [];
     const lines = source.filter((line) => {
@@ -102,7 +106,10 @@ const simulateExperts = (observations: RawLine[], bands: ReceiptRouterBandInput[
     });
     lines.forEach((line) => experts.push({ ...line, bandIndex: crop.sourceBandIndex, bandTop: crop.top, bandBottom: crop.bottom, observationKey: crop.cropId, sourcePass: "expert", expertCategory: crop.category, cropId: crop.cropId, routerProbability: crop.routerProbability }));
   });
-  return { predictions, crops, experts };
+  const processedCrops = crops;
+  const specialistCropsSkippedEarly = 0;
+  const viewCount = config.expertPreprocessingVariants?.length ?? 1;
+  return { predictions, crops, processedCrops, experts, specialistCropsSkippedEarly, specialistViewInvocations: processedCrops.length * viewCount };
 };
 
 const scoreExtraction = async (rows: Array<{ id: string; extraction: ReceiptHierarchicalExtraction | { fields?: ReceiptFrontendFields }; unresolvedFields?: ReceiptFrontendField[] }>) => {
@@ -194,7 +201,7 @@ const replay = async (rawRows: RawRow[], config: ReceiptHierarchicalConfig) => {
     rows.push({ id: raw.id, extraction });
     firstPassLines += input.first.length;
     expertLines += simulated.experts.length;
-    specialistInvocations += simulated.crops.length;
+    specialistInvocations += simulated.processedCrops.length;
     mergedLines += extraction.mergedLines.length;
   }
   return { rows, score: await scoreExtraction(rows), router: await routerMetrics(rawRows, config), firstPassLines, expertLines, specialistInvocations, meanMergedLines: mergedLines / Math.max(1, rawRows.length) };
@@ -236,7 +243,10 @@ const browserCost = (file: RawFile | null) => file ? {
   totalP95Ms: file.totalMs?.p95 ?? null,
   preparationMeanMs: file.preparationMs?.mean ?? null,
   firstPassInvocationsPerReceipt: meanRowNumber(file.rows, "firstPassOcrInvocations"),
+  specialistCropsProposedPerReceipt: meanRowNumber(file.rows, "specialistCropsProposed"),
   specialistInvocationsPerReceipt: meanRowNumber(file.rows, "specialistInvocations"),
+  specialistViewInvocationsPerReceipt: meanRowNumber(file.rows, "specialistViewInvocations"),
+  specialistCropsSkippedEarlyPerReceipt: meanRowNumber(file.rows, "specialistCropsSkippedEarly"),
   totalOcrInvocationsPerReceipt: (meanRowNumber(file.rows, "firstPassOcrInvocations") ?? 0) + (meanRowNumber(file.rows, "specialistInvocations") ?? 0),
   firstPassLinesPerReceipt: meanRowNumber(file.rows, "firstPassLineCount"),
   expertLinesPerReceipt: meanRowNumber(file.rows, "expertLineCount"),
@@ -264,11 +274,21 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
       return;
     }
     const raw = JSON.parse(await readFile(inputPath, "utf8")) as RawFile;
-    const replayResults = await Promise.all(RECEIPT_HIERARCHICAL_SCREENING_CONFIGS.map(async (config) => ({ config, ...(await replay(raw.rows, config)) })));
+    // Keep the untouched final receipts out of every candidate screen. The
+    // selected configuration is replayed on final exactly once below, after
+    // validation-only selection has completed.
+    const screenRows = raw.rows.filter((row) => splitFor(row.id) !== "final");
+    const finalRows = raw.rows.filter((row) => splitFor(row.id) === "final");
+    const replayResults = await Promise.all(RECEIPT_HIERARCHICAL_SCREENING_CONFIGS.map(async (config) => ({ config, ...(await replay(screenRows, config)) })));
     const validationResults = await Promise.all(replayResults.map(async (item) => ({ ...item, validation: await scoreExtraction(item.rows.filter((row) => splitFor(row.id) === "validation")), validationRouter: await routerMetrics(raw.rows.filter((row) => splitFor(row.id) === "validation"), item.config) })));
     const safeValidation = validationResults.filter((item) => item.validation.known.wrongTrusted === 0);
     const selected = [...(safeValidation.length ? safeValidation : validationResults)].sort((left, right) => right.validation.known.correct - left.validation.known.correct || left.specialistInvocations - right.specialistInvocations)[0] ?? replayResults[0];
     const selectedValidation = await scoreExtraction(selected.rows.filter((row) => splitFor(row.id) === "validation"));
+    // This is the only selected-pipeline evaluation on the untouched final
+    // split. Do not use it for configuration selection or threshold tuning.
+    const selectedFinalReplay = await replay(finalRows, selected.config);
+    const selectedAllReplayRows = [...selected.rows, ...selectedFinalReplay.rows];
+    const selectedAllReplay = await scoreExtraction(selectedAllReplayRows);
     const controls: Record<string, unknown> = {};
     if (await exists(tesseractPath)) {
       const file = JSON.parse(await readFile(tesseractPath, "utf8"));
@@ -281,6 +301,10 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
     // The committed prior benchmark reports this selector as an aggregate;
     // retain it as a control without re-reading/tuning its private raw rows.
     controls["ppocrv6-current-adapted-selector"] = { sampleSize: raw.rows.length, known: { trusted: 134, correct: 129, wrongTrusted: 4, precision: 129 / 133, coverage: 134 / (raw.rows.length * knownFields.length) }, meanUnresolvedFields: 4.41, gptWorkUnits: 2207, wholeReceiptResolvedRate: 0 };
+    // Commit 5569ad1 is the immediately preceding top-3 hierarchical
+    // selector. Keep its aggregate as a fixed control; it is not used for
+    // specialist fitting or validation selection.
+    controls["commit-5569ad1-hierarchical"] = { sampleSize: raw.rows.length, known: { trusted: 145, correct: 142, wrongTrusted: 2, precision: 142 / 144, coverage: 145 / (raw.rows.length * knownFields.length) }, meanUnresolvedFields: 4.71, gptWorkUnits: 2354, wholeReceiptResolvedRate: 0 };
     // Commit 8a3aac4 is the previous all-band hybrid. Its aggregate is kept
     // as a historical control from the committed report; its raw private
     // production artifacts are intentionally not reloaded here.
@@ -289,8 +313,13 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
     // fresh-browser output is retained as a control, but it is not reused for
     // threshold selection or final evaluation.
     controls["commit-8d2e757-hierarchical"] = { sampleSize: raw.rows.length, known: { trusted: 6, correct: 6, wrongTrusted: 0, precision: 1, coverage: 6 / (raw.rows.length * knownFields.length) }, meanUnresolvedFields: 4.98, gptWorkUnits: 2492, wholeReceiptResolvedRate: 0 };
-    const selectedBrowserPath = path.join(root, `benchmarks/receipt-hierarchical-sroie-all-${selected.config.name}.json`);
-    const selectedBrowser = await exists(selectedBrowserPath) ? JSON.parse(await readFile(selectedBrowserPath, "utf8")) as RawFile : null;
+    const selectedBrowserPaths = [
+      path.join(root, `benchmarks/receipt-hierarchical-sroie-all-${selected.config.name}.json`),
+      path.join(root, `benchmarks/receipt-hierarchical-sroie-validation-${selected.config.name}.json`),
+      path.join(root, `benchmarks/receipt-hierarchical-sroie-final-${selected.config.name}.json`),
+    ];
+    const selectedBrowserFiles = (await Promise.all(selectedBrowserPaths.map(async (candidate) => await exists(candidate) ? JSON.parse(await readFile(candidate, "utf8")) as RawFile : null))).filter((file): file is RawFile => Boolean(file));
+    const selectedBrowser = selectedBrowserFiles.length ? { ...selectedBrowserFiles[0], rows: selectedBrowserFiles.flatMap((file) => file.rows) } : null;
     const selectedActualRows = selectedBrowser?.rows.map(browserRowToRaw).map((row) => ({ id: row.id, extraction: row.extraction as unknown as ReceiptHierarchicalExtraction, unresolvedFields: (row.extraction as { unresolvedFields?: ReceiptFrontendField[] } | undefined)?.unresolvedFields })) ?? [];
     const selectedActual = selectedActualRows.length ? await scoreExtraction(selectedActualRows) : null;
     const selectedActualAll = selectedActual && selectedActual.sampleSize === raw.rows.length ? selectedActual : null;
@@ -309,12 +338,12 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
       }
     }
     const production = productionPath ? JSON.parse(await readFile(productionPath, "utf8")) as RawFile : null;
-    const selectedFinal = await scoreExtraction(selected.rows.filter((row) => splitFor(row.id) === "final"));
+    const selectedFinal = selectedFinalReplay.score;
     const selectedValidationReport = selectedActualValidation ?? selectedValidation;
     const selectedFinalReport = selectedActualFinal ?? selectedFinal;
-    const selectedAllReport = selectedActualAll ?? selected.score;
+    const selectedAllReport = selectedActualAll ?? selectedAllReplay;
     const selectedReplayValidationFunnel = funnelAggregate(selected.rows.filter((row) => splitFor(row.id) === "validation"));
-    const selectedReplayFinalFunnel = funnelAggregate(selected.rows.filter((row) => splitFor(row.id) === "final"));
+    const selectedReplayFinalFunnel = funnelAggregate(selectedFinalReplay.rows);
     const selectedActualFunnel = selectedActualRows.length ? funnelAggregate(selectedActualRows) : null;
     const selectedActualValidationFunnel = selectedActualRows.length ? funnelAggregate(selectedActualRows.filter((row) => splitFor(row.id) === "validation")) : null;
     const selectedActualFinalFunnel = selectedActualRows.length ? funnelAggregate(selectedActualRows.filter((row) => splitFor(row.id) === "final")) : null;
@@ -333,7 +362,7 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
     const productionOther = production?.rows.filter((row) => row.category !== "walmart") ?? [];
     const productionInventory = production ? { source: productionPath ? path.basename(productionPath) : null, sampleSize: production.rows.length, statusOnly: true, walmartReceipts: productionWalmart.length, fieldCounts: productionStatus(production.rows).fieldCounts, meanUnresolvedFields: productionStatus(production.rows).meanUnresolvedFields, walmart: productionStatus(productionWalmart), other: productionStatus(productionOther) } : { statusOnly: true, unavailable: true };
     const allGptWork = selectedAllReport.gptWorkUnits;
-    const gptComparison = ["tesseract-rules", "ppocrv6-whole-old-rules", "ppocrv6-current-adapted-selector", "commit-8a3aac4-band-hybrid"].map((name) => `${name} ${gptWorkFor(controls, name) ?? "n/a"} (${percentageDelta(gptWorkFor(controls, name), allGptWork)} reduction)`).join(", ");
+    const gptComparison = ["tesseract-rules", "ppocrv6-whole-old-rules", "ppocrv6-current-adapted-selector", "commit-5569ad1-hierarchical", "commit-8a3aac4-band-hybrid"].map((name) => `${name} ${gptWorkFor(controls, name) ?? "n/a"} (${percentageDelta(gptWorkFor(controls, name), allGptWork)} reduction)`).join(", ");
     const reportLines = [
       "# Hierarchical PP-OCRv6 tiny mixture-of-experts benchmark", "",
       "The hierarchical path is experimental and is not wired into live receipt extraction. The current production path and fail-open behavior are unchanged.", "",
@@ -349,19 +378,19 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
       "| configuration | first-pass geometry | known precision | known coverage | wrong trusted | mean unresolved | specialist calls/receipt |", "|---|---|---:|---:|---:|---:|---:|",
       ...validationResults.map((item) => "| " + item.config.name + " | " + firstPassDescription(item.config.firstPassConfigName) + " | " + percentage(item.validation.known.precision) + " | " + percentage(item.validation.known.coverage) + " | " + item.validation.known.wrongTrusted + " | " + item.validation.meanUnresolvedFields.toFixed(2) + " | " + (item.specialistInvocations / Math.max(1, raw.rows.length)).toFixed(2) + " |"),
       "", "Selected configuration: **" + selected.config.name + "**. No final labels were used for selection.", "",
-      "Second-pass screen varied tight/medium/wide/adaptive windows, crop padding, one/two/three independent-support gates, fan-out, and specialist thresholds. The replay screen reuses cached PP-OCRv6 observations; only the selected geometry was rerun through fresh browser OCR.",
+      "Second-pass screen varied tight/medium/wide/adaptive windows, crop padding, one/two/three independent-support gates, fan-out, and specialist thresholds. The replay screen reuses cached PP-OCRv6 observations; no new browser OCR artifact was available for the selected configuration, so fresh-browser rows are not claimed below.",
       "## Controls and selected pipeline", "",
       "| path | known precision | known coverage | wrong trusted | mean unresolved | whole-receipt resolved |", "|---|---:|---:|---:|---:|---:|",
       ...Object.entries(controls).filter((entry): entry is [string, Awaited<ReturnType<typeof scoreExtraction>>] => typeof entry[1] !== "string").map(([name, value]) => "| " + name + " | " + percentage(value.known.precision) + " | " + percentage(value.known.coverage) + " | " + value.known.wrongTrusted + " | " + value.meanUnresolvedFields.toFixed(2) + " | " + percentage(value.wholeReceiptResolvedRate) + " |"),
-      "| hierarchical fresh validation (" + (selectedActualValidation?.sampleSize ?? 0) + ") | " + percentage(selectedValidationReport.known.precision) + " | " + percentage(selectedValidationReport.known.coverage) + " | " + selectedValidationReport.known.wrongTrusted + " | " + selectedValidationReport.meanUnresolvedFields.toFixed(2) + " | " + percentage(selectedValidationReport.wholeReceiptResolvedRate) + " |",
-      "| hierarchical fresh untouched final (" + (selectedActualFinal?.sampleSize ?? 0) + ") | " + percentage(selectedFinalReport.known.precision) + " | " + percentage(selectedFinalReport.known.coverage) + " | " + selectedFinalReport.known.wrongTrusted + " | " + selectedFinalReport.meanUnresolvedFields.toFixed(2) + " | " + percentage(selectedFinalReport.wholeReceiptResolvedRate) + " |",
+      "| hierarchical " + (selectedActualValidation ? "fresh" : "replay") + " validation (" + selectedValidationReport.sampleSize + ") | " + percentage(selectedValidationReport.known.precision) + " | " + percentage(selectedValidationReport.known.coverage) + " | " + selectedValidationReport.known.wrongTrusted + " | " + selectedValidationReport.meanUnresolvedFields.toFixed(2) + " | " + percentage(selectedValidationReport.wholeReceiptResolvedRate) + " |",
+      "| hierarchical " + (selectedActualFinal ? "fresh" : "replay") + " untouched final (" + selectedFinalReport.sampleSize + ") | " + percentage(selectedFinalReport.known.precision) + " | " + percentage(selectedFinalReport.known.coverage) + " | " + selectedFinalReport.known.wrongTrusted + " | " + selectedFinalReport.meanUnresolvedFields.toFixed(2) + " | " + percentage(selectedFinalReport.wholeReceiptResolvedRate) + " |",
       "| hierarchical all 500 replay | " + percentage(selectedAllReport.known.precision) + " | " + percentage(selectedAllReport.known.coverage) + " | " + selectedAllReport.known.wrongTrusted + " | " + selectedAllReport.meanUnresolvedFields.toFixed(2) + " | " + percentage(selectedAllReport.wholeReceiptResolvedRate) + " |", "",
       "### All-500 replay field results", "", "| field | trusted | correct | wrong trusted | precision | recall | coverage |", "|---|---:|---:|---:|---:|---:|---:|",
       ...fields.map((field) => { const metric = selectedAllReport.fields[field] as Record<string, number | null>; return "| " + field + " | " + metric.trusted + " | " + metric.correct + " | " + metric.wrongTrusted + " | " + percentage(metric.precision) + " | " + percentage(metric.recall) + " | " + percentage(metric.coverage) + " |"; }),
-      "", "### Fresh untouched-final field results", "", "| field | trusted | correct | wrong trusted | precision | recall | coverage |", "|---|---:|---:|---:|---:|---:|---:|",
+      "", "### Untouched-final field results", "", "| field | trusted | correct | wrong trusted | precision | recall | coverage |", "|---|---:|---:|---:|---:|---:|---:|",
       ...fields.map((field) => { const metric = selectedFinalReport.fields[field] as Record<string, number | null>; return "| " + field + " | " + metric.trusted + " | " + metric.correct + " | " + metric.wrongTrusted + " | " + percentage(metric.precision) + " | " + percentage(metric.recall) + " | " + percentage(metric.coverage) + " |"; }),
       "", "All-500 whole-receipt local resolution: " + percentage(selectedAllReport.wholeReceiptResolvedRate) + "; mean unresolved " + selectedAllReport.meanUnresolvedFields.toFixed(2) + "; GPT field work " + selectedAllReport.gptWorkUnits + ".", "",
-      "GPT work comparison (delta versus the named control; positive means reduction, negative means increase): " + gptComparison + ". The selected fresh-browser path therefore does not reduce GPT work on this corpus.", "",
+      "GPT work comparison (delta versus the named control; positive means reduction, negative means increase): " + gptComparison + ". The selected replay reduces unresolved-field work versus 5569 on the cached corpus; no new full browser run is claimed.", "",
       "## Router precision/recall", "", "| category | precision | recall | TP | FP | FN | TN |", "|---|---:|---:|---:|---:|---:|---:|",
       ...categories.map((category) => { const metric = selectedRouter[category] as Record<string, number | null | Record<string, number | null>>; return "| " + category + " | " + percentage(metric.precision as number | null) + " | " + percentage(metric.recall as number | null) + " | " + metric.tp + " | " + metric.fp + " | " + metric.fn + " | " + metric.tn + " |"; }),
       "", "These are multi-label one-vs-rest metrics. One band may correctly route multiple categories; this is not a mutually-exclusive confusion matrix.", "",
@@ -377,14 +406,14 @@ describe("hierarchical PP-OCRv6 benchmark", () => {
       ...expertModelLines.map((line) => line.replace(/^\| expert ([^|]+) \| /, "| expert $1 | n/a | n/a | ")),
       "", "The shipped representation is logistic for all router/specialist categories; stump-forest and boosted-stump router candidates are benchmarked above but are not encoded in the browser bundle because they did not provide a safe validated advantage at their tested size.", "",
       "## Cost, deduplication, and production", "",
-      "Replay plan: " + (selected.firstPassLines / Math.max(1, raw.rows.length)).toFixed(2) + " first-pass line observations/receipt, " + (selected.specialistInvocations / Math.max(1, raw.rows.length)).toFixed(2) + " specialist crops/receipt, " + (selected.expertLines / Math.max(1, raw.rows.length)).toFixed(2) + " specialist line observations/receipt. Replay is a selector/router screen over cached PP-OCRv6 observations; it does not claim new OCR quality.",
-      "Full selected browser run: " + (selectedBrowser ? JSON.stringify(browserCost(selectedBrowser)) : "not cached yet") + ". Hierarchical model JSON: " + JSON.stringify(modelInfo) + " bytes by serialized component; PP-OCRv6 asset/runtime sizes are included in the browser-cost object. Peak heap is an optional browser metric.",
+      "Replay plan: " + ((selected.firstPassLines + selectedFinalReplay.firstPassLines) / Math.max(1, raw.rows.length)).toFixed(2) + " first-pass line observations/receipt, " + ((selected.specialistInvocations + selectedFinalReplay.specialistInvocations) / Math.max(1, raw.rows.length)).toFixed(2) + " specialist crops/receipt, " + ((selected.expertLines + selectedFinalReplay.expertLines) / Math.max(1, raw.rows.length)).toFixed(2) + " specialist line observations/receipt. Replay is a selector/router screen over cached PP-OCRv6 observations; it does not claim new OCR quality.",
+      "Full selected browser run: " + (selectedBrowser ? JSON.stringify(browserCost(selectedBrowser)) : "not cached; replay specialist cost is an upper bound because the browser now early-stops a category after safe trust") + ". Hierarchical model JSON: " + JSON.stringify(modelInfo) + " bytes by serialized component; PP-OCRv6 asset/runtime sizes are included in the browser-cost object. Peak heap is an optional browser metric.",
       "Specialist invocation is category-routed: a total crop is sent only to the total expert, and a crop with no selected category receives no specialist. Overlapping copies are merged before support counts; identical observation keys never count twice.",
       "Read-only GCS status inventory: " + JSON.stringify(productionInventory) + ". Production has no independent field labels, so it is not used for precision claims or tuning.", "",
-      "## Decision", "", "No promotion is made. The adaptive path remains experimental: SROIE has only vendor/date/total labels, production receipts have no independent labels, and any trusted-field error is safety-critical. Uncertain fields remain unresolved for GPT. No 99.5% or 99.9% retention claim is made; fresh-browser coverage remains low and the untouched final split contains only 99 receipts.", "",
+      "## Decision", "", "No promotion is made. The adaptive path remains experimental: SROIE has only vendor/date/total labels, production receipts have no independent labels, and any trusted-field error is safety-critical. Uncertain fields remain unresolved for GPT. No 99.5% or 99.9% retention claim is made; a full selected browser run is not cached and the untouched final split contains only 99 receipts.", "",
     ];
     await writeFile(path.join(root, "benchmarks/receipt-hierarchical-benchmark-report.md"), reportLines.join("\n"));
-    await writeFile(path.join(root, "benchmarks/receipt-hierarchical-benchmark-results.json"), JSON.stringify({ controls, selected: { config: selected.config.name, replay: selected.score, validation: selectedValidationReport, final: selectedFinalReport, actualBrowser: selectedActual, replayValidationFunnel: selectedReplayValidationFunnel, replayFinalFunnel: selectedReplayFinalFunnel, actualFunnel: selectedActualFunnel, actualValidationFunnel: selectedActualValidationFunnel, actualFinalFunnel: selectedActualFinalFunnel }, configurations: replayResults.map((item) => ({ config: item.config.name, score: item.score, router: item.router, specialistInvocations: item.specialistInvocations, validationFunnel: funnelAggregate(item.rows.filter((row) => splitFor(row.id) === "validation")), finalFunnel: funnelAggregate(item.rows.filter((row) => splitFor(row.id) === "final")) })), production: productionInventory, browser: browserCost(selectedBrowser), model: modelInfo }, null, 2));
+    await writeFile(path.join(root, "benchmarks/receipt-hierarchical-benchmark-results.json"), JSON.stringify({ controls, selected: { config: selected.config.name, replay: selectedAllReplay, validation: selectedValidationReport, final: selectedFinalReport, actualBrowser: selectedActual, replayValidationFunnel: selectedReplayValidationFunnel, replayFinalFunnel: funnelAggregate(selectedFinalReplay.rows), actualFunnel: selectedActualFunnel, actualValidationFunnel: selectedActualValidationFunnel, actualFinalFunnel: selectedActualFinalFunnel }, configurations: replayResults.map((item) => ({ config: item.config.name, screenScore: item.score, router: item.router, specialistInvocations: item.specialistInvocations, validationFunnel: funnelAggregate(item.rows.filter((row) => splitFor(row.id) === "validation")) })), production: productionInventory, browser: browserCost(selectedBrowser), model: modelInfo }, null, 2));
     expect(raw.rows.length).toBeGreaterThanOrEqual(500);
   }, 600_000);
 });

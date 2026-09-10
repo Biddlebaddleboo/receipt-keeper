@@ -86,7 +86,7 @@ const renderBand = (image: HTMLImageElement, dimensions: ImageDimensions, top: n
   return { canvas, scale, top, bottom, bandIndex, observationKey };
 };
 
-const renderExpert = (image: HTMLImageElement, dimensions: ImageDimensions, crop: ReceiptExpertCrop, candidate: ReceiptBandConfig): PreparedInput => renderBand(image, dimensions, crop.top, crop.bottom, dimensions.width, candidate, crop.sourceBandIndex, crop.cropId);
+const renderExpert = (image: HTMLImageElement, dimensions: ImageDimensions, crop: ReceiptExpertCrop, candidate: ReceiptBandConfig, preprocessing = candidate.preprocessing): PreparedInput => renderBand(image, dimensions, crop.top, crop.bottom, dimensions.width, { ...candidate, preprocessing }, crop.sourceBandIndex, crop.cropId);
 
 const paddleOptions = (candidate: ReceiptBandConfig) => ({
   textDetectionModelName: "PP-OCRv6_tiny_det",
@@ -147,6 +147,8 @@ const run = async () => {
       let preparationMs = 0;
       let firstPassMs = 0;
       let expertMs = 0;
+      let specialistViewInvocations = 0;
+      let specialistCropsSkippedEarly = 0;
       const heapBefore = heapBytes();
       try {
         image = await loadImage(entry.url);
@@ -175,20 +177,54 @@ const run = async () => {
         }));
         predictions = classifyReceiptBands(routerBands, config);
         crops = buildAdaptiveExpertCrops(routerBands, predictions, config);
-        const expertPrepStarted = performance.now();
-        const expertInputs = crops.map((crop) => renderExpert(image as HTMLImageElement, dimensions, crop, candidate));
-        preparationMs += performance.now() - expertPrepStarted;
         const expertStarted = performance.now();
-        const expertResults = expertInputs.length ? await ocr.predict(expertInputs.map((input) => input.canvas)) : [];
+        const trustedCategories = new Set<string>();
+        const fieldForCategory: Record<string, string | undefined> = { vendor: "vendor", purchase_date: "purchase_date", subtotal: "subtotal", tax: "tax", total: "total" };
+        const views = config.expertPreprocessingVariants?.length ? [...config.expertPreprocessingVariants] : [candidate.preprocessing];
+        const byCategory = new Map<string, ReceiptExpertCrop[]>();
+        crops.forEach((crop) => byCategory.set(crop.category, [...(byCategory.get(crop.category) ?? []), crop]));
+        const categoryOrder = ["vendor", "purchase_date", "subtotal", "tax", "total", "receipt_id", "item"];
+        const processExpertBatch = async (batch: ReceiptExpertCrop[]) => {
+          if (!batch.length) return;
+          const prepBatchStarted = performance.now();
+          const expertInputs = batch.flatMap((crop) => views.map((view) => renderExpert(image as HTMLImageElement, dimensions, crop, candidate, view)));
+          preparationMs += performance.now() - prepBatchStarted;
+          const expertResults = expertInputs.length ? await ocr.predict(expertInputs.map((input) => input.canvas)) : [];
+          specialistViewInvocations += expertInputs.length;
+          (Array.isArray(expertResults) ? expertResults : []).forEach((result, index) => {
+            const input = expertInputs[index];
+            const crop = batch[Math.floor(index / views.length)];
+            if (!input || !crop) return;
+            const lines = receiptOcrLinesFromPaddleItems(result?.items).map((line: ReceiptModernOcrLine) => mapReceiptBandLineToSource(line, input.top, input.scale));
+            // All preprocessing views of one crop retain the same observation
+            // identity. They can corroborate text, but cannot manufacture an
+            // independent agreement vote.
+            expertObservations.push(...lines.map((line) => ({ ...line, bandIndex: crop.sourceBandIndex, bandTop: crop.top, bandBottom: crop.bottom, observationKey: crop.cropId, sourcePass: "expert" as const, expertCategory: crop.category, cropId: crop.cropId, routerProbability: crop.routerProbability })));
+          });
+          expertInputs.forEach((input) => { input.canvas.width = 1; input.canvas.height = 1; });
+        };
+        for (const category of categoryOrder) {
+          const categoryCrops = byCategory.get(category) ?? [];
+          if (!categoryCrops.length) continue;
+          if (!config.earlyStopTrustedFields) {
+            await processExpertBatch(categoryCrops);
+            continue;
+          }
+          if (trustedCategories.has(category)) {
+            specialistCropsSkippedEarly += categoryCrops.length;
+            continue;
+          }
+          await processExpertBatch(categoryCrops.slice(0, 1));
+          const interim = extractReceiptFieldsFromHierarchicalBands(firstPassObservations, expertObservations, { config, routerPredictions: predictions, expertCrops: crops, pageWidth: dimensions.width, pageHeight: dimensions.height });
+          const field = fieldForCategory[category];
+          const trusted = field ? interim.fields[field as keyof typeof interim.fields].status === "trusted" : interim.specialists[category as "receipt_id" | "item"].status === "trusted";
+          if (trusted) {
+            trustedCategories.add(category);
+            specialistCropsSkippedEarly += Math.max(0, categoryCrops.length - 1);
+          } else await processExpertBatch(categoryCrops.slice(1));
+        }
         expertMs = performance.now() - expertStarted;
-        (Array.isArray(expertResults) ? expertResults : []).forEach((result, index) => {
-          const input = expertInputs[index];
-          const crop = crops[index];
-          if (!input || !crop) return;
-          const lines = receiptOcrLinesFromPaddleItems(result?.items).map((line: ReceiptModernOcrLine) => mapReceiptBandLineToSource(line, input.top, input.scale));
-          expertObservations.push(...lines.map((line) => ({ ...line, bandIndex: crop.sourceBandIndex, bandTop: crop.top, bandBottom: crop.bottom, observationKey: crop.cropId, sourcePass: "expert" as const, expertCategory: crop.category, cropId: crop.cropId, routerProbability: crop.routerProbability })));
-        });
-        [...firstInputs, ...expertInputs].forEach((input) => { input.canvas.width = 1; input.canvas.height = 1; });
+        [...firstInputs].forEach((input) => { input.canvas.width = 1; input.canvas.height = 1; });
       } catch {
         ocrError = true;
       }
@@ -198,7 +234,7 @@ const run = async () => {
       const extraction = extractReceiptFieldsFromHierarchicalBands(firstPassObservations, expertObservations, { config, routerPredictions: predictions, expertCrops: crops, pageWidth: dimensions.width || undefined, pageHeight: dimensions.height || undefined });
       const totalMs = performance.now() - started;
       totalTimes.push(totalMs);
-      const row: Record<string, unknown> = { id: entry.id, category: entry.category, config: config.name, ocrError, durationMs: totalMs, firstPassMs, expertMs, preparationMs, firstPassOcrInvocations: firstBands.length, specialistInvocations: crops.length, firstPassLineCount: firstPassObservations.length, expertLineCount: expertObservations.length, heapBefore, heapAfter: heapBytes(), extraction: serializableExtraction(extraction, includeValues) };
+      const row: Record<string, unknown> = { id: entry.id, category: entry.category, config: config.name, ocrError, durationMs: totalMs, firstPassMs, expertMs, preparationMs, firstPassOcrInvocations: firstBands.length, specialistCropsProposed: crops.length, specialistInvocations: Math.max(0, crops.length - specialistCropsSkippedEarly), specialistViewInvocations, specialistCropsSkippedEarly, firstPassLineCount: firstPassObservations.length, expertLineCount: expertObservations.length, heapBefore, heapAfter: heapBytes(), extraction: serializableExtraction(extraction, includeValues) };
       if (includeValues) { row.firstPassObservations = firstPassObservations.map(serializableLine); row.expertObservations = expertObservations.map(serializableLine); }
       rows.push(row);
       completed += 1;

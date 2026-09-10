@@ -118,7 +118,7 @@ describe("hierarchical PP-OCRv6 band routing", () => {
       config: { name: "test", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 2, minIndependentObservations: 2, windowPadding: 1 },
       expertCrops: [
         { cropId: "crop-total-a", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
-        { cropId: "crop-total-b", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-total-b", category: "total", mode: "medium", left: 0, top: 200, right: 400, bottom: 400, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 285 },
       ],
       routerPredictions: [],
       pageWidth: 400,
@@ -182,5 +182,76 @@ describe("hierarchical PP-OCRv6 band routing", () => {
       pageHeight: 400,
     });
     expect(extraction.fields.total.status).not.toBe("trusted");
+  });
+
+  it("accepts an already-normalized ISO date after independent date validation", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("DATE: 13/12/2024", "crop-date", "purchase_date", 0),
+    ], {
+      config: {
+        name: "test-date",
+        windowMode: "medium",
+        maxCategoriesPerBand: 1,
+        maxExpertInvocations: 1,
+        minIndependentObservations: 1,
+        windowPadding: 1,
+        expertThresholds: { purchase_date: 0 },
+        expertMinConfidence: { purchase_date: 0 },
+        allowStrongSingleObservation: { purchase_date: true },
+        strongPredictionThreshold: { purchase_date: 0 },
+        strongConfidenceThreshold: { purchase_date: 0 },
+      },
+      expertCrops: [{ cropId: "crop-date", category: "purchase_date", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.01, anchorLineIndex: 0, anchorY: 85 }],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.purchase_date.value).toBe("2024-12-13");
+    expect(extraction.fields.purchase_date.status).toBe("trusted");
+  });
+
+  it("merges a one-character receipt-ID OCR variant without double-counting the crop", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("Receipt No: ABC12345", "crop-id-a", "receipt_id", 0),
+      expertLine("RECEIPT NO: ABC1234S", "crop-id-b", "receipt_id", 1),
+    ], {
+      config: {
+        name: "test-id-equivalence",
+        windowMode: "medium",
+        maxCategoriesPerBand: 1,
+        maxExpertInvocations: 2,
+        minIndependentObservations: 2,
+        windowPadding: 1,
+        expertThresholds: { receipt_id: 0 },
+        expertMinConfidence: { receipt_id: 0 },
+      },
+      expertCrops: [
+        { cropId: "crop-id-a", category: "receipt_id", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.01, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-id-b", category: "receipt_id", mode: "medium", left: 0, top: 200, right: 400, bottom: 400, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.01, anchorLineIndex: 0, anchorY: 285 },
+      ],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.specialists.receipt_id.independentObservationCount).toBe(2);
+    expect(extraction.specialists.receipt_id.status).toBe("trusted");
+  });
+
+  it("rejects GST percentage tokens and vendor registration metadata", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("TOTAL INCL.GST 6.00%", "crop-rate", "total", 0),
+      expertLine("REG NO 123456", "crop-reg", "vendor", 1),
+    ], {
+      config: { name: "test-hard-negatives", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 2, minIndependentObservations: 1, windowPadding: 1, expertThresholds: { total: 0, vendor: 0 }, expertMinConfidence: { total: 0, vendor: 0 } },
+      expertCrops: [
+        { cropId: "crop-rate", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-reg", category: "vendor", mode: "medium", left: 0, top: 200, right: 400, bottom: 400, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 285 },
+      ],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.total.status).not.toBe("trusted");
+    expect(extraction.fields.vendor.status).not.toBe("trusted");
   });
 });

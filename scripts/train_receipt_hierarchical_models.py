@@ -73,7 +73,8 @@ EXPERT_FEATURE_NAMES = (
     "currency", "category_keyword", "previous_category_keyword", "next_category_keyword",
     "previous_amount", "next_amount", "previous_date", "next_date", "amount_position",
     "amount_right_half", "right_aligned", "gap_previous", "gap_next", "router_probability",
-    "top_region", "bottom_region", "long_text", "strong_label",
+    "top_region", "bottom_region", "long_text", "strong_label", "opposing_label",
+    "strong_semantic_label", "numeric_only", "label_distance", "line_length_bucket",
 )
 
 AMOUNT_RE = re.compile(r"(?:[$€£]|\b(?:rm|usd|cad|gbp)\b)?\s*\(?\s*-?\d{1,6}(?:[,.]\d{3})*(?:[,.]\d{2})\s*\)?", re.I)
@@ -93,6 +94,11 @@ KEYWORDS = {
     "item": re.compile(r"\b(?:item|qty|quantity|price|sku|product|description|unit)\b", re.I),
     "other": re.compile(r"$^"),
 }
+VENDOR_METADATA_RE = re.compile(r"\b(?:reg(?:istration)?\.?\s*(?:no|number)?|co-?reg|gstn?|sst|tax\s*id|tel(?:ephone)?|phone|mobile|whatsapp|address|jalan|street|road|postcode|postal|owned\s+by|dba|branch|cashier|terminal|register)\b", re.I)
+RECEIPT_ID_HARD_NEGATIVE_RE = re.compile(r"\b(?:auth(?:orization)?|approval|terminal|register|cashier|reference|ref(?:erence)?|rrn|stan|trace|batch|gst|tax|tel|phone|mobile|member|card|serial|sku)\b", re.I)
+EXCLUDED_TOTAL_RE = re.compile(r"\b(?:qty|quantity|items?|excluding|excl\.?|before\s+tax|subtotal|sub-total|tax\s+amount|round(?:ing)?\s+adjustment|suppl(?:y|ies)|saving|discount|payment|paid|cash|change|tender|auth(?:orization)?|approval|terminal|register|reference|rrn|stan|trace|batch)\b", re.I)
+STRONG_TOTAL_LABEL_RE = re.compile(r"\b(?:grand\s+total|total\s+(?:due|payable|amt|amount|rounded|round(?:ed)?|incl(?:usive)?|including)|amount\s+due|balance\s+due|final\s+total|round(?:ed|ing)?\s+\w*\s+total)\b", re.I)
+STRONG_RECEIPT_ID_LABEL_RE = re.compile(r"\b(?:receipt|invoice|order|transaction|trans(?:action)?|document|doc|bill)\b", re.I)
 
 
 def split_for(index: int) -> str:
@@ -125,8 +131,18 @@ def amount_key(raw: str) -> str | None:
     return f"{value:.2f}" if value is not None else None
 
 
+def is_rate_token(raw_line: str, raw_amount: str) -> bool:
+    start = raw_line.find(raw_amount)
+    return start >= 0 and bool(re.match(r"\s*%", raw_line[start + len(raw_amount):]))
+
+
 def date_key(raw: str) -> str | None:
     value = text(raw)
+    iso_match = re.fullmatch(r"(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})", value)
+    if iso_match:
+        year, month, day = (int(part) for part in iso_match.groups())
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return f"{year:04d}-{month:02d}-{day:02d}"
     match = re.fullmatch(r"(\d{1,2})[/. -](\d{1,2})[/. -](20\d{2}|\d{2})", value)
     if match:
         first, second = int(match.group(1)), int(match.group(2))
@@ -460,12 +476,12 @@ def expert_candidate_values(lines: list[dict[str, Any]], category: str) -> list[
         for index, line in enumerate(lines[:18]):
             value = text(line.get("text"))
             letters = sum(char.isalpha() for char in value)
-            if letters >= 3 and letters / max(1, len(value)) >= 0.35 and len(value) <= 80 and not AMOUNT_RE.search(value) and not re.search(r"^(?:store|shop)$|\b(?:receipt|invoice|subtotal|sub-total|total|tax|gst|hst|date|cashier|address|tel|phone|thank|change|tender)\b", value, re.I):
+            if letters >= 3 and letters / max(1, len(value)) >= 0.35 and len(value) <= 80 and not AMOUNT_RE.search(value) and not re.search(r"^(?:store|shop)$|\b(?:receipt|invoice|subtotal|sub-total|total|tax|gst|hst|date|cashier|thank|change|tender)\b", value, re.I):
                 result.append((index, value))
     elif category == "purchase_date":
         for index, line in enumerate(lines):
             for raw in DATE_RE.findall(text(line.get("text"))):
-                value = date_key(raw)
+                value = date_key(raw) or text(raw)
                 if value:
                     result.append((index, value))
     elif category == "receipt_id":
@@ -485,10 +501,57 @@ def expert_candidate_values(lines: list[dict[str, Any]], category: str) -> list[
             for raw in AMOUNT_RE.findall(value):
                 if amount_value(raw) is None:
                     continue
-                if category in ("subtotal", "tax") and not any(0 <= near < len(lines) and KEYWORDS[category].search(text(lines[near].get("text"))) for near in (index - 1, index, index + 1)):
+                if is_rate_token(value, raw):
+                    continue
+                if category in ("subtotal", "tax") and not any(0 <= near < len(lines) and KEYWORDS[category].search(text(lines[near].get("text"))) for near in range(index - 2, index + 3)):
                     continue
                 result.append((index, raw.replace(" ", "")))
     return result
+
+
+def nearby_text(lines: list[dict[str, Any]], index: int, radius: int = 2) -> str:
+    return " ".join(text(lines[near].get("text")) for near in range(max(0, index - radius), min(len(lines), index + radius + 1)))
+
+
+def nearby_keyword(lines: list[dict[str, Any]], index: int, category: str, radius: int = 2) -> bool:
+    return any(KEYWORDS[category].search(text(lines[near].get("text"))) for near in range(max(0, index - radius), min(len(lines), index + radius + 1)))
+
+
+def expert_candidate_hard_negative(category: str, lines: list[dict[str, Any]], index: int) -> bool:
+    value = text(lines[index].get("text"))
+    if category == "vendor":
+        return bool(VENDOR_METADATA_RE.search(value))
+    if category == "receipt_id":
+        return bool(RECEIPT_ID_HARD_NEGATIVE_RE.search(value))
+    if category == "total":
+        return not bool(STRONG_TOTAL_LABEL_RE.search(value) or any(STRONG_TOTAL_LABEL_RE.search(text(lines[near].get("text"))) for near in range(max(0, index - 2), index)))
+    if category == "subtotal":
+        return bool(re.search(r"\b(?:tax|gst|hst|vat|total|payment|paid|cash|change|tender)\b", value, re.I) and not re.search(r"\bsub[ -]?total\b", value, re.I))
+    if category == "tax":
+        return bool(re.search(r"\b(?:sub[ -]?total|before\s+tax|total|payment|paid|cash|change|tender)\b", value, re.I) and not re.search(r"\b(?:tax|gst|hst|vat|sales\s+tax)\b", value, re.I))
+    return False
+
+
+def expert_candidate_positive(category: str, lines: list[dict[str, Any]], index: int, value: str, label: dict[str, Any]) -> bool:
+    current = text(lines[index].get("text"))
+    context = nearby_text(lines, index)
+    if expert_candidate_hard_negative(category, lines, index):
+        return False
+    if category == "vendor":
+        expected = normalize(str(label.get("company", "")))
+        return bool(expected and (expected in normalize(value) or normalize(value) in expected))
+    if category == "purchase_date":
+        expected = label_date(str(label.get("date", "")))
+        return bool(expected and (date_key(value) == expected))
+    if category == "total":
+        expected_value = amount_value(str(label.get("total", "")))
+        return expected_value is not None and abs((amount_value(value) or -999999) - expected_value) < 0.011 and bool(STRONG_TOTAL_LABEL_RE.search(context))
+    if category in ("subtotal", "tax"):
+        opposing = "tax" if category == "subtotal" else "subtotal"
+        return nearby_keyword(lines, index, category, 2) and not bool(KEYWORDS[opposing].search(current)) and bool(AMOUNT_RE.search(value))
+    if category == "receipt_id":
+        return bool(STRONG_RECEIPT_ID_LABEL_RE.search(current)) and not bool(RECEIPT_ID_HARD_NEGATIVE_RE.search(current))
+    return bool(len(value) >= 3 and (AMOUNT_RE.search(value) or KEYWORDS["item"].search(value)))
 
 
 def crop_window(group: dict[str, Any], category: str, probability: float, width: float, height: float, mode: str = "adaptive") -> dict[str, float]:
@@ -513,6 +576,18 @@ def crop_window(group: dict[str, Any], category: str, probability: float, width:
     return {"top": top, "bottom": top + crop_height, "height": crop_height, "left": side, "right": max(side + 1, width - side), "mode": selected_mode}
 
 
+def crop_lines(group: dict[str, Any], crop: dict[str, float]) -> list[dict[str, Any]]:
+    result = []
+    for line in group["lines"]:
+        if not line.get("bbox"):
+            result.append(line)
+            continue
+        item = box(line, 0)
+        if crop["top"] <= item["cy"] <= crop["bottom"] and item["x1"] >= crop["left"] and item["x0"] <= crop["right"]:
+            result.append(line)
+    return result
+
+
 def expert_features(lines: list[dict[str, Any]], index: int, category: str, crop: dict[str, float], width: float, height: float, router_probability: float) -> list[float]:
     line = lines[index]
     item = box(line, index)
@@ -522,6 +597,22 @@ def expert_features(lines: list[dict[str, Any]], index: int, category: str, crop
     amounts = AMOUNT_RE.findall(value)
     dates = DATE_RE.findall(value)
     position = max(0, value.find(amounts[0])) / max(1, len(value)) if amounts else 0.0
+    context = nearby_text(lines, index)
+    opposing = (
+        bool(EXCLUDED_TOTAL_RE.search(value) and not STRONG_TOTAL_LABEL_RE.search(value)) if category == "total" else
+        bool(re.search(r"\b(?:tax|gst|hst|vat|total|payment|paid|cash|change|tender)\b", value, re.I) and not re.search(r"\bsub[ -]?total\b", value, re.I)) if category == "subtotal" else
+        bool(re.search(r"\b(?:sub[ -]?total|before\s+tax|total|payment|paid|cash|change|tender)\b", value, re.I) and not re.search(r"\b(?:tax|gst|hst|vat|sales\s+tax)\b", value, re.I)) if category == "tax" else
+        bool(RECEIPT_ID_HARD_NEGATIVE_RE.search(value)) if category == "receipt_id" else
+        bool(VENDOR_METADATA_RE.search(value)) if category == "vendor" else False
+    )
+    strong_semantic = (
+        bool(STRONG_TOTAL_LABEL_RE.search(context)) if category == "total" else
+        bool(STRONG_RECEIPT_ID_LABEL_RE.search(value)) if category == "receipt_id" else
+        bool(not VENDOR_METADATA_RE.search(value) and index < 8) if category == "vendor" else
+        bool(KEYWORDS[category].search(value))
+    )
+    distances = [abs(near - index) for near in range(max(0, index - 2), min(len(lines), index + 3)) if KEYWORDS[category].search(text(lines[near].get("text")))]
+    label_distance = 1 / (1 + min(distances)) if distances else 0
     return [
         index / max(1, len(lines) - 1), max(0, min(1, (item["y0"] - crop["top"]) / max(1, crop["height"]))), max(0, min(1, (item["y1"] - crop["top"]) / max(1, crop["height"]))),
         max(0, min(1, item["x0"] / max(1, width))), max(0, min(1, item["x1"] / max(1, width))), max(0, min(1, item["cx"] / max(1, width))),
@@ -535,6 +626,9 @@ def expert_features(lines: list[dict[str, Any]], index: int, category: str, crop
         1 if index + 1 < len(lines) and abs(box(lines[index + 1], index + 1)["cy"] - item["cy"]) > item["height"] * 2.5 else 0,
         router_probability, 1 if item["cy"] / max(1, height) < 0.25 else 0, 1 if item["cy"] / max(1, height) > 0.75 else 0,
         1 if len(value) > 32 else 0, 1 if KEYWORDS[category].search(value) else 0,
+        1 if opposing else 0, 1 if strong_semantic else 0,
+        1 if amounts and sum(char.isalpha() for char in value) / max(1, len(value)) < 0.18 else 0,
+        label_distance, min(1, len(value) / 40),
     ]
 
 
@@ -545,21 +639,10 @@ def expert_examples(row: dict[str, Any], label: dict[str, Any], router: dict[str
     examples = {category: [] for category in SPECIALISTS}
     for group, category, probability in routed_groups(groups, width, height, router):
         crop = crop_window(group, category, probability, width, height)
-        lines = group["lines"]
+        lines = crop_lines(group, crop)
         for index, value in expert_candidate_values(lines, category):
-            expected = None
-            if category == "vendor":
-                expected = normalize(str(label.get("company", "")))
-                positive = bool(expected and (expected in normalize(value) or normalize(value) in expected))
-            elif category == "purchase_date":
-                expected = label_date(str(label.get("date", "")))
-                positive = value == expected
-            elif category == "total":
-                expected_value = amount_value(str(label.get("total", "")))
-                positive = expected_value is not None and abs((amount_value(value) or -999999) - expected_value) < 0.011
-            else:
-                positive = category_label(category, [lines[index]], label)
-            examples[category].append({"features": expert_features(lines, index, category, crop, width, height, probability), "positive": positive, "receipt": row["id"], "split": split, "value": value})
+            positive = expert_candidate_positive(category, lines, index, value, label)
+            examples[category].append({"features": expert_features(lines, index, category, crop, width, height, probability), "positive": positive, "hardNegative": expert_candidate_hard_negative(category, lines, index), "receipt": row["id"], "split": split, "value": value})
     return examples
 
 
@@ -634,7 +717,12 @@ def main() -> None:
         validation = [item for item in specialist_documents[category] if item["split"] == "validation"]
         final = [item for item in specialist_documents[category] if item["split"] == "final"]
         weights = logistic_train(train)
-        validation_scores = [(logistic_probability(weights, item["features"]), bool(item["positive"])) for item in validation]
+        # Explicit hard negatives are part of fitting, but they are rejected by
+        # the runtime before the model gate. Do not let their intentionally
+        # high/low scores distort the calibrated threshold for the usable pool.
+        usable_validation = [item for item in validation if not item.get("hardNegative", False)]
+        usable_final = [item for item in final if not item.get("hardNegative", False)]
+        validation_scores = [(logistic_probability(weights, item["features"]), bool(item["positive"])) for item in usable_validation]
         # A trusted specialist prediction is safety-critical. The router may
         # over-route because a missed region costs one cheap OCR crop, but a
         # specialist gate is selected only from the highest observed
@@ -650,9 +738,9 @@ def main() -> None:
         # perfectly separable; no field can bypass the aggregation checks.
         threshold = gate["threshold"] if gate["precision"] >= 0.995 else 1.0
         expert_models[category] = {"type": "logistic", "weights": weights, "threshold": threshold, "min_margin": 0.05, "min_confidence": 0.70, "calibration": []}
-        expert_comparisons[category] = {"trainingCandidates": len(train), "trainingPositives": sum(item["positive"] for item in train), "validationGate": gate, "validation": evaluate_scores(validation_scores, gate["threshold"]), "final": evaluate_scores([(logistic_probability(weights, item["features"]), bool(item["positive"])) for item in final], gate["threshold"]), "modelBytes": len(json.dumps(weights, separators=(",", ":")))}
+        expert_comparisons[category] = {"trainingCandidates": len(train), "trainingUsableCandidates": sum(not item.get("hardNegative", False) for item in train), "trainingPositives": sum(item["positive"] for item in train), "validationGate": gate, "validation": evaluate_scores(validation_scores, gate["threshold"]), "final": evaluate_scores([(logistic_probability(weights, item["features"]), bool(item["positive"])) for item in usable_final], gate["threshold"]), "modelBytes": len(json.dumps(weights, separators=(",", ":")))}
 
-    model = {"version": 2, "engine": "paddleocr-js-ppocrv6-tiny-hierarchical", "dataset": "SROIE 500 grouped receipt split; router and specialists train on tuning only", "router_feature_names": list(ROUTER_FEATURE_NAMES), "expert_feature_names": list(EXPERT_FEATURE_NAMES), "router": selected_router, "experts": expert_models, "routing_policy": {"objective": "recall-first routing; specialist trust remains independent", "targetRecall": ROUTER_TARGET_RECALL, "topBandsPerCategory": ROUTER_TOP_BANDS, "maxCategoriesPerBand": ROUTER_FANOUT, "maxExpertInvocations": ROUTER_MAX_EXPERT_INVOCATIONS}}
+    model = {"version": 3, "engine": "paddleocr-js-ppocrv6-tiny-hierarchical", "dataset": "SROIE 500 grouped receipt split; router and specialists train on tuning only", "router_feature_names": list(ROUTER_FEATURE_NAMES), "expert_feature_names": list(EXPERT_FEATURE_NAMES), "router": selected_router, "experts": expert_models, "routing_policy": {"objective": "recall-first routing; specialist trust remains independent", "targetRecall": ROUTER_TARGET_RECALL, "topBandsPerCategory": ROUTER_TOP_BANDS, "maxCategoriesPerBand": ROUTER_FANOUT, "maxExpertInvocations": ROUTER_MAX_EXPERT_INVOCATIONS, "expertTraining": "routed adaptive crops plus routed false-positive hard negatives"}}
     comparison = {"dataset": "SROIE public PP-OCRv6 band cache", "sampleSize": len(rows), "splits": {"tuning": 301, "validation": 100, "final": 99}, "router": router_models, "experts": expert_comparisons, "routingPolicy": {"targetRecall": ROUTER_TARGET_RECALL, "topBandsPerCategory": ROUTER_TOP_BANDS, "maxCategoriesPerBand": ROUTER_FANOUT, "maxExpertInvocations": ROUTER_MAX_EXPERT_INVOCATIONS}, "notes": ["Router labels are exact for vendor/date/total where SROIE labels match OCR; subtotal/tax/id/item are weak labels and are not claimed as field accuracy.", "Specialist examples are generated from the same high-recall quota/fan-out/round-robin adaptive route distribution used by the browser, after receipt-level splitting; false-positive routed candidates remain negative examples.", "The shipped representation is logistic for tiny browser inference; forests/boosted stumps are validation comparisons only."]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(model, separators=(",", ":")) + "\n")

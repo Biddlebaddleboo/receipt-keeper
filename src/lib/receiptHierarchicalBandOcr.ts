@@ -4,7 +4,7 @@ import type {
   ReceiptFrontendFieldResult,
   ReceiptFrontendFields,
 } from "@/lib/receiptFrontendExtractor";
-import type { ReceiptOcrBox, ReceiptOcrLine } from "@/lib/receiptOcr";
+import type { ReceiptOcrBox, ReceiptOcrLine, ReceiptOcrPreprocessing } from "@/lib/receiptOcr";
 import {
   deduplicateReceiptBandLines,
   type ReceiptBandObservation,
@@ -63,7 +63,8 @@ export const HIERARCHICAL_EXPERT_FEATURE_NAMES = [
   "currency", "category_keyword", "previous_category_keyword", "next_category_keyword",
   "previous_amount", "next_amount", "previous_date", "next_date", "amount_position",
   "amount_right_half", "right_aligned", "gap_previous", "gap_next", "router_probability",
-  "top_region", "bottom_region", "long_text", "strong_label",
+  "top_region", "bottom_region", "long_text", "strong_label", "opposing_label",
+  "strong_semantic_label", "numeric_only", "label_distance", "line_length_bucket",
 ] as const;
 
 type LogisticModel = {
@@ -125,6 +126,16 @@ export interface ReceiptHierarchicalConfig {
   vendorHeaderPrior?: boolean;
   expertThresholds?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
   expertMinConfidence?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
+  /** Field/category-specific agreement minimums. */
+  minIndependentObservationsByCategory?: Partial<Record<ReceiptHierarchicalSpecialist, 1 | 2 | 3>>;
+  /** Permit a single very strong, semantically labelled observation. */
+  allowStrongSingleObservation?: Partial<Record<ReceiptHierarchicalSpecialist, boolean>>;
+  strongPredictionThreshold?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
+  strongConfidenceThreshold?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
+  /** Optional second-pass preprocessing views; views from one crop are not independent votes. */
+  expertPreprocessingVariants?: readonly ReceiptOcrPreprocessing[];
+  /** Stop requesting later category crops after that category is safely trusted. */
+  earlyStopTrustedFields?: boolean;
   minIndependentObservations: 1 | 2 | 3;
   /** Crop height multiplier around the anchor line for the adaptive mode. */
   windowPadding: number;
@@ -277,6 +288,97 @@ export const RECEIPT_HIERARCHICAL_SCREENING_CONFIGS: readonly ReceiptHierarchica
     expertThresholds: { vendor: 0.35, purchase_date: 0.35, subtotal: 0.35, tax: 0.45, total: 0.55, receipt_id: 0.25, item: 0.35 },
     expertMinConfidence: { vendor: 0.55, purchase_date: 0.55, subtotal: 0.55, tax: 0.55, total: 0.55, receipt_id: 0.55, item: 0.55 },
   },
+  {
+    name: "specialist-calibrated-top3-tight",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "tight",
+    maxCategoriesPerBand: 3,
+    maxExpertInvocations: 18,
+    minIndependentObservations: 2,
+    windowPadding: 0.9,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.30, purchase_date: 0.30, subtotal: 0.25, tax: 0.25, total: 0.52, receipt_id: 0.20, item: 0.25 },
+    expertMinConfidence: { vendor: 0.48, purchase_date: 0.48, subtotal: 0.45, tax: 0.45, total: 0.52, receipt_id: 0.45, item: 0.45 },
+    minIndependentObservationsByCategory: { vendor: 2, purchase_date: 1, subtotal: 2, tax: 2, total: 2, receipt_id: 2, item: 2 },
+    allowStrongSingleObservation: { vendor: true, purchase_date: true, receipt_id: true },
+    strongPredictionThreshold: { vendor: 0.86, purchase_date: 0.82, receipt_id: 0.90 },
+    strongConfidenceThreshold: { vendor: 0.80, purchase_date: 0.80, receipt_id: 0.86 },
+    earlyStopTrustedFields: true,
+  },
+  {
+    name: "specialist-calibrated-top3-medium",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "medium",
+    maxCategoriesPerBand: 3,
+    maxExpertInvocations: 18,
+    minIndependentObservations: 2,
+    windowPadding: 1,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.30, purchase_date: 0.30, subtotal: 0.25, tax: 0.25, total: 0.52, receipt_id: 0.20, item: 0.25 },
+    expertMinConfidence: { vendor: 0.48, purchase_date: 0.48, subtotal: 0.45, tax: 0.45, total: 0.52, receipt_id: 0.45, item: 0.45 },
+    minIndependentObservationsByCategory: { vendor: 2, purchase_date: 1, subtotal: 2, tax: 2, total: 2, receipt_id: 2, item: 2 },
+    allowStrongSingleObservation: { vendor: true, purchase_date: true, receipt_id: true },
+    strongPredictionThreshold: { vendor: 0.86, purchase_date: 0.82, receipt_id: 0.90 },
+    strongConfidenceThreshold: { vendor: 0.80, purchase_date: 0.80, receipt_id: 0.86 },
+    earlyStopTrustedFields: true,
+  },
+  {
+    name: "specialist-calibrated-top3-wide",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "wide",
+    maxCategoriesPerBand: 3,
+    maxExpertInvocations: 18,
+    minIndependentObservations: 2,
+    windowPadding: 1.15,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.30, purchase_date: 0.30, subtotal: 0.25, tax: 0.25, total: 0.52, receipt_id: 0.20, item: 0.25 },
+    expertMinConfidence: { vendor: 0.48, purchase_date: 0.48, subtotal: 0.45, tax: 0.45, total: 0.52, receipt_id: 0.45, item: 0.45 },
+    minIndependentObservationsByCategory: { vendor: 2, purchase_date: 1, subtotal: 2, tax: 2, total: 2, receipt_id: 2, item: 2 },
+    allowStrongSingleObservation: { vendor: true, purchase_date: true, receipt_id: true },
+    strongPredictionThreshold: { vendor: 0.86, purchase_date: 0.82, receipt_id: 0.90 },
+    strongConfidenceThreshold: { vendor: 0.80, purchase_date: 0.80, receipt_id: 0.86 },
+    earlyStopTrustedFields: true,
+  },
+  {
+    name: "specialist-calibrated-top3-medium-multiview",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "medium",
+    maxCategoriesPerBand: 3,
+    maxExpertInvocations: 18,
+    minIndependentObservations: 2,
+    windowPadding: 1,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.30, purchase_date: 0.30, subtotal: 0.25, tax: 0.25, total: 0.52, receipt_id: 0.20, item: 0.25 },
+    expertMinConfidence: { vendor: 0.48, purchase_date: 0.48, subtotal: 0.45, tax: 0.45, total: 0.52, receipt_id: 0.45, item: 0.45 },
+    minIndependentObservationsByCategory: { vendor: 2, purchase_date: 1, subtotal: 2, tax: 2, total: 2, receipt_id: 2, item: 2 },
+    allowStrongSingleObservation: { vendor: true, purchase_date: true, receipt_id: true },
+    strongPredictionThreshold: { vendor: 0.86, purchase_date: 0.82, receipt_id: 0.90 },
+    strongConfidenceThreshold: { vendor: 0.80, purchase_date: 0.80, receipt_id: 0.86 },
+    expertPreprocessingVariants: ["original", "contrast"],
+    earlyStopTrustedFields: true,
+  },
+  {
+    name: "specialist-calibrated-top3-medium-safe-vendor87",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "medium",
+    maxCategoriesPerBand: 3,
+    maxExpertInvocations: 18,
+    minIndependentObservations: 2,
+    windowPadding: 1,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.30, purchase_date: 0.30, subtotal: 0.25, tax: 0.25, total: 0.60, receipt_id: 0.55, item: 0.25 },
+    expertMinConfidence: { vendor: 0.48, purchase_date: 0.50, subtotal: 0.45, tax: 0.45, total: 0.60, receipt_id: 0.60, item: 0.45 },
+    minIndependentObservationsByCategory: { vendor: 2, purchase_date: 1, subtotal: 2, tax: 2, total: 1, receipt_id: 1, item: 2 },
+    allowStrongSingleObservation: { vendor: true, purchase_date: true, total: true, receipt_id: true },
+    strongPredictionThreshold: { vendor: 0.87, purchase_date: 0.82, total: 0.88, receipt_id: 0.80 },
+    strongConfidenceThreshold: { vendor: 0.84, purchase_date: 0.80, total: 0.84, receipt_id: 0.80 },
+    earlyStopTrustedFields: true,
+  },
 ];
 
 export const RECEIPT_HIERARCHICAL_EXPERIMENTAL_CONFIG: ReceiptHierarchicalConfig = RECEIPT_HIERARCHICAL_SCREENING_CONFIGS[0];
@@ -422,6 +524,13 @@ const amountKey = (raw: string): string | null => {
   return parsed === null ? null : parsed.toFixed(2);
 };
 
+const isRateToken = (text: string, raw: string): boolean => {
+  const start = text.indexOf(raw);
+  if (start < 0) return false;
+  const suffix = text.slice(start + raw.length);
+  return /^\s*%/.test(suffix);
+};
+
 const outputAmount = (raw: string): string => raw.replace(/\s+/g, "").replace(/[€£]/g, "$");
 
 const validDate = (year: number, month: number, day: number): string | null => {
@@ -441,6 +550,8 @@ const monthNumbers: Record<string, number> = {
 
 const normalizeDate = (raw: string): string | null => {
   const text = normalizeLine(raw).replace(/\s*,\s*/g, ", ");
+  const isoMatch = text.match(/^(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (isoMatch) return validDate(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
   let match = text.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](20\d{2}|\d{2})$/);
   if (match) {
     const first = Number(match[1]);
@@ -801,6 +912,27 @@ const expertFeatures = (
   const dates = dateMatches(text);
   const position = amounts.length ? Math.max(0, text.indexOf(amounts[0])) / Math.max(1, text.length) : 0;
   const conf = confidenceFraction(line.confidence);
+  const contextLines = lines.slice(Math.max(0, index - 2), Math.min(lines.length, index + 3));
+  const contextText = contextLines.map((candidate) => normalizeLine(candidate.text)).join(" ");
+  const opposingLabel = category === "total"
+    ? (excludedTotal.test(text) && !strongTotalLabel.test(text) ? 1 : 0)
+    : category === "subtotal"
+      ? (/\b(?:tax|gst|hst|vat|total|payment|paid|cash|change|tender)\b/i.test(text) ? 1 : 0)
+      : category === "tax"
+        ? (/\b(?:sub[ -]?total|before\s+tax|total|payment|paid|cash|change|tender)\b/i.test(text) ? 1 : 0)
+        : category === "receipt_id"
+          ? (receiptIdHardNegative.test(text) ? 1 : 0)
+          : category === "vendor" && vendorMetadata.test(text) ? 1 : 0;
+  const strongSemanticLabel = category === "total" ? (strongTotalLabel.test(contextText) ? 1 : 0)
+    : category === "receipt_id" ? (strongReceiptIdLabel.test(text) ? 1 : 0)
+      : category === "vendor" ? (!vendorMetadata.test(text) && index < 8 ? 1 : 0)
+        : (categoryKeyword(category, text) ? 1 : 0);
+  const labelDistance = (() => {
+    const distance = Array.from({ length: 5 }, (_, offset) => index + offset - 2)
+      .filter((near) => near >= 0 && near < lines.length && categoryKeyword(category, lines[near].text))
+      .map((near) => Math.abs(near - index));
+    return distance.length ? 1 / (1 + Math.min(...distance)) : 0;
+  })();
   return [
     index / Math.max(1, lines.length - 1),
     clamp((box.y0 - crop.top) / Math.max(1, crop.height)),
@@ -834,6 +966,11 @@ const expertFeatures = (
     box.centerY / Math.max(1, pageHeight) > 0.75 ? 1 : 0,
     text.length > 32 ? 1 : 0,
     categoryFieldLabel(category, text) ? 1 : 0,
+    opposingLabel,
+    strongSemanticLabel,
+    amounts.length > 0 && (text.match(/[A-Za-z]/g) ?? []).length / Math.max(1, text.length) < 0.18 ? 1 : 0,
+    labelDistance,
+    clamp(text.length / 40),
   ];
 };
 
@@ -856,10 +993,38 @@ const editSimilarity = (left: string, right: string): number => {
 
 const normalizedValue = (field: ReceiptFrontendField | ReceiptHierarchicalSpecialist, value: string): string => {
   if (field === "vendor") return lower(value).replace(/[^a-z0-9]/g, "");
-  if (field === "purchase_date") return normalizeDate(value) ?? value;
+  if (field === "purchase_date") return normalizeDate(value) ?? `raw:${lower(value).replace(/[^a-z0-9]/g, "")}`;
   if (field === "receipt_id" || field === "item") return lower(value).replace(/[^a-z0-9.-]/g, "");
   return amountKey(value) ?? lower(value).replace(/[^a-z0-9.-]/g, "");
 };
+
+const equivalentCanonical = (
+  field: ReceiptFrontendField | ReceiptHierarchicalSpecialist,
+  left: string,
+  right: string,
+): boolean => {
+  if (left === right) return true;
+  if (field === "vendor") {
+    const minimumLength = Math.min(left.length, right.length);
+    return minimumLength >= 6 && editSimilarity(left, right) >= 0.84;
+  }
+  if (field === "receipt_id") {
+    const minimumLength = Math.min(left.length, right.length);
+    if (minimumLength < 6 || Math.abs(left.length - right.length) > 1 || editSimilarity(left, right) < 0.84) return false;
+    const leftDigits = left.replace(/[^0-9]/g, "");
+    const rightDigits = right.replace(/[^0-9]/g, "");
+    if (!leftDigits.length || !rightDigits.length) return true;
+    const sharedDigits = [...new Set(leftDigits)].filter((digit) => rightDigits.includes(digit)).length;
+    return leftDigits === rightDigits || sharedDigits / Math.max(1, new Set(leftDigits + rightDigits).size) >= 0.6;
+  }
+  return false;
+};
+
+const equivalentGroupKey = (
+  field: ReceiptFrontendField | ReceiptHierarchicalSpecialist,
+  keys: Iterable<string>,
+  candidate: string,
+): string | undefined => [...keys].find((key) => equivalentCanonical(field, key, candidate));
 
 interface ExpertCandidate {
   field: ReceiptFrontendField | ReceiptHierarchicalSpecialist;
@@ -874,13 +1039,24 @@ interface ExpertCandidate {
   observationKey: string;
   cropId: string;
   bandIndex: number;
+  cropTop: number;
+  cropBottom: number;
   isFirstPass: boolean;
   finalTotalLabel: boolean;
+  hardNegative: boolean;
 }
 
-const blockedVendor = /^(?:store|shop)$|\b(?:receipt|invoice|subtotal|sub-total|total|tax|gst|hst|date|cashier|address|tel|phone|thank|change|tender)\b/i;
-const excludedTotal = /\b(?:qty|quantity|items?|excluding|excl\.?|before\s+tax|subtotal|sub-total|tax\s+amount|round(?:ing)?\s+adjustment|suppl(?:y|ies)|saving|discount)\b/i;
+const vendorMetadata = /\b(?:reg(?:istration)?\.?\s*(?:no|number)?|co-?reg|gstn?|sst|tax\s*id|tel(?:ephone)?|phone|mobile|whatsapp|address|jalan|street|road|postcode|postal|owned\s+by|dba|branch|cashier|terminal|register)\b/i;
+const blockedVendor = /^(?:store|shop)$|\b(?:receipt|invoice|subtotal|sub-total|total|tax|gst|hst|date|cashier|thank|change|tender)\b/i;
+const receiptIdHardNegative = /\b(?:auth(?:orization)?|approval|terminal|register|cashier|reference|ref(?:erence)?|rrn|stan|trace|batch|gst|tax|tel|phone|mobile|member|card|serial|sku)\b/i;
+const excludedTotal = /\b(?:qty|quantity|items?|excluding|excl\.?|before\s+tax|subtotal|sub-total|tax\s+amount|round(?:ing)?\s+adjustment|suppl(?:y|ies)|saving|discount|payment|paid|cash|change|tender|auth(?:orization)?|approval|terminal|register|reference|rrn|stan|trace|batch)\b/i;
 const strongTotalLabel = /\b(?:grand\s+total|total\s+(?:due|payable|amt|amount|rounded|round(?:ed)?|incl(?:usive)?|including)|amount\s+due|balance\s+due|final\s+total|round(?:ed|ing)?\s+\w*\s+total)\b/i;
+const strongReceiptIdLabel = /\b(?:receipt|invoice|order|transaction|trans(?:action)?|document|doc|bill)\b/i;
+
+const nearbyCategoryKeyword = (lines: ReceiptOcrLine[], index: number, category: ReceiptHierarchicalCategory, radius = 2): boolean => (
+  Array.from({ length: radius * 2 + 1 }, (_, offset) => index + offset - radius)
+    .some((near) => near >= 0 && near < lines.length && categoryKeyword(category, lines[near].text))
+);
 
 const candidateValues = (lines: ReceiptOcrLine[], field: ReceiptFrontendField | ReceiptHierarchicalSpecialist): Array<{ index: number; value: string }> => {
   const result: Array<{ index: number; value: string }> = [];
@@ -892,13 +1068,13 @@ const candidateValues = (lines: ReceiptOcrLine[], field: ReceiptFrontendField | 
     });
   } else if (field === "purchase_date") {
     lines.forEach((line, index) => dateMatches(line.text).forEach((raw) => {
-      const value = normalizeDate(raw);
+      const value = normalizeDate(raw) ?? normalizeLine(raw);
       if (value) result.push({ index, value });
     }));
   } else if (field === "receipt_id") {
     lines.forEach((line, index) => {
       const text = normalizeLine(line.text);
-      if (!categoryKeyword("receipt_id", text) || !/[A-Z0-9]{3,}/i.test(text)) return;
+      if (!strongReceiptIdLabel.test(text) || receiptIdHardNegative.test(text) || !/[A-Z0-9]{3,}/i.test(text)) return;
       const match = text.match(/(?:invoice|receipt|order|transaction|trans|reference|ref|id|no\.?|number)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{2,})/i);
       if (match) result.push({ index, value: match[1] });
     });
@@ -910,8 +1086,9 @@ const candidateValues = (lines: ReceiptOcrLine[], field: ReceiptFrontendField | 
   } else {
     lines.forEach((line, index) => amountMatches(line.text).forEach((raw) => {
       if (parseAmount(raw) === null) return;
+      if (isRateToken(line.text, raw)) return;
       const value = outputAmount(raw);
-      if ((field === "subtotal" || field === "tax") && ![index - 1, index, index + 1].some((near) => near >= 0 && near < lines.length && categoryKeyword(field, lines[near].text))) return;
+      if ((field === "subtotal" || field === "tax") && !nearbyCategoryKeyword(lines, index, field, 2)) return;
       result.push({ index, value });
     }));
   }
@@ -942,6 +1119,13 @@ const makeCandidate = (
     return distance >= -Math.max(currentBox.height, nearbyBox.height) * 0.35
       && distance <= Math.max(currentBox.height, nearbyBox.height) * 3.2;
   });
+  const finalTotalLabel = crop.category === "total" && (strongTotalLabel.test(currentText) || precedingTotalLabel);
+  const hardNegative = field === "vendor" ? vendorMetadata.test(currentText)
+    : field === "receipt_id" ? receiptIdHardNegative.test(currentText)
+      : field === "total" ? !finalTotalLabel
+        : field === "subtotal" ? (/\b(?:tax|gst|hst|vat|total|payment|paid|cash|change|tender)\b/i.test(currentText) && !/\bsub[ -]?total\b/i.test(currentText))
+          : field === "tax" ? (/\b(?:sub[ -]?total|before\s+tax|total|payment|paid|cash|change|tender)\b/i.test(currentText) && !/\b(?:tax|gst|hst|vat|sales\s+tax)\b/i.test(currentText))
+            : false;
   return {
     field,
     category: crop.category,
@@ -951,10 +1135,12 @@ const makeCandidate = (
     lineIndex,
     probability: raw,
     confidence: clamp(probability * (0.65 + 0.35 * confidenceFraction(line.confidence))),
-    evidence: [lines[lineIndex - 1]?.text, line.text, lines[lineIndex + 1]?.text].filter(Boolean).map(normalizeLine).join(" "),
+    evidence: lines.slice(Math.max(0, lineIndex - 2), Math.min(lines.length, lineIndex + 3)).map((nearby) => normalizeLine(nearby.text)).filter(Boolean).join(" "),
     observationKey: observation.observationKey,
     cropId: observation.cropId ?? crop.cropId,
     bandIndex: observation.bandIndex,
+    cropTop: crop.top,
+    cropBottom: crop.bottom,
     isFirstPass: observation.sourcePass === "first-pass",
     // Receipt formats normally print the total label on the same line as, or
     // immediately above, the amount. A following label must not bless the
@@ -964,7 +1150,8 @@ const makeCandidate = (
     // not let a later "Total (inclusive...)" label bless an earlier GST/tax
     // amount in the same wide crop (the Walmart/GST and adjustment layouts
     // expose exactly this failure mode).
-    finalTotalLabel: crop.category === "total" && (strongTotalLabel.test(currentText) || precedingTotalLabel),
+    finalTotalLabel,
+    hardNegative,
   };
 };
 
@@ -988,7 +1175,12 @@ const selectCandidates = (
   minIndependentObservations: number,
   expertThresholdOverride?: number,
   expertMinConfidenceOverride?: number,
+  allowStrongSingleObservation = false,
+  strongPredictionThreshold = 0.92,
+  strongConfidenceThreshold = 0.90,
 ): ReceiptHierarchicalFieldResult => {
+  if (!candidates.length) return emptyField();
+  candidates = candidates.filter((candidate) => !candidate.hardNegative);
   if (!candidates.length) return emptyField();
   // Financial specialists must select from explicitly labelled amounts when
   // one is available. This keeps a broad adaptive crop containing item prices,
@@ -1006,14 +1198,15 @@ const selectCandidates = (
   }
   const values = new Map<string, ExpertCandidate[]>();
   candidates.forEach((candidate) => {
-    const existing = [...values.keys()].find((key) => key === candidate.canonical || (field === "vendor" && editSimilarity(key, candidate.canonical) >= 0.92));
+    const existing = equivalentGroupKey(field, values.keys(), candidate.canonical);
     values.set(existing ?? candidate.canonical, [...(values.get(existing ?? candidate.canonical) ?? []), candidate]);
   });
   const ranked = [...values.entries()].map(([canonical, supports]) => {
-    const distinctObservations = new Set(supports.map((candidate) => candidate.observationKey));
-    const distinctBands = new Set(supports.map((candidate) => candidate.bandIndex));
+    const independent = independentCandidates(supports);
+    const distinctObservations = new Set(independent.map((candidate) => candidate.observationKey));
+    const distinctBands = new Set(independent.map((candidate) => candidate.bandIndex));
     const strongest = [...supports].sort((left, right) => right.probability - left.probability)[0];
-    return { canonical, supports, strongest, distinctObservations, distinctBands };
+    return { canonical, supports, independent, strongest, distinctObservations, distinctBands };
   }).sort((left, right) => {
     const leftSupport = left.distinctObservations.size;
     const rightSupport = right.distinctObservations.size;
@@ -1031,20 +1224,32 @@ const selectCandidates = (
     (field === "subtotal" || field === "tax") && categoryKeyword(field, top.strongest.evidence),
     field === "total" && strongTotalLabel.test(topContext),
   ].some(Boolean);
-  const allText = top.supports.map((candidate) => candidate.evidence).join(" ");
+  const allText = top.independent.map((candidate) => candidate.evidence).join(" ");
   // A bare "TOTAL" is routinely printed beside item/summary amounts.  It is
   // useful routing evidence, but not a conservative value label. Require a
   // semantic final-total label before trusting that specialist; otherwise the
   // field remains available to GPT/review and fails open.
-  const excluded = field === "total" && excludedTotal.test(allText) && !/\b(?:grand|due|payable|final)\b/i.test(allText);
+  const excluded = field === "total" && excludedTotal.test(top.strongest.evidence) && !strongTotalLabel.test(top.strongest.evidence);
   const distinctLabelValues = new Set(candidates.filter((candidate) => categoryKeyword(field, candidate.evidence)).map((candidate) => candidate.canonical));
-  const noAmbiguousDate = field !== "purchase_date" || values.size === 1;
+  const noAmbiguousDate = field !== "purchase_date" || normalizeDate(top.strongest.value) !== null;
   const competingWeak = ranked.slice(1).every((candidate) => candidate.strongest.probability < threshold - 0.05 && candidate.distinctObservations.size < minIndependentObservations);
+  const strongSingle = allowStrongSingleObservation
+    && top.distinctObservations.size === 1
+    && top.strongest.probability >= strongPredictionThreshold
+    && top.strongest.confidence >= strongConfidenceThreshold
+    && confidenceFraction(top.strongest.line.confidence) >= 0.90
+    && ranked.slice(1).every((candidate) => candidate.strongest.probability < strongPredictionThreshold - 0.10
+      && candidate.distinctObservations.size < minIndependentObservations);
+  // A strong candidate may be supported by a weaker equivalent observation;
+  // only the strongest score must clear the specialist threshold. This is
+  // deliberately separate from the router score and preserves independent
+  // field gates.
+  const enoughIndependentSupport = top.distinctObservations.size >= minIndependentObservations || strongSingle;
   const safe = top.strongest.probability >= threshold
     && top.strongest.confidence >= (expertMinConfidenceOverride ?? configuration?.min_confidence ?? 0.98)
     && margin >= (configuration?.min_margin ?? 0.03)
-    && top.distinctObservations.size >= minIndependentObservations
-    && top.distinctBands.size >= minIndependentObservations
+    && enoughIndependentSupport
+    && (strongSingle || top.distinctBands.size >= minIndependentObservations)
     && competingWeak
     && noAmbiguousDate
     && (field === "vendor" || field === "purchase_date" || strongLabel)
@@ -1060,7 +1265,7 @@ const selectCandidates = (
     supportBandCount: top.distinctBands.size,
     independentObservationCount: top.distinctObservations.size,
     trustedSupportCount,
-    agreement: top.distinctObservations.size >= minIndependentObservations && ranked.length === 1,
+    agreement: enoughIndependentSupport && competingWeak,
     competingValueCount: ranked.length,
     routedSupportCount: candidates.length,
   };
@@ -1070,18 +1275,49 @@ const selectSpecialist = (
   category: "receipt_id" | "item",
   candidates: ExpertCandidate[],
   minIndependentObservations: number,
+  expertThresholdOverride?: number,
+  expertMinConfidenceOverride?: number,
+  allowStrongSingleObservation = false,
+  strongPredictionThreshold = 0.92,
+  strongConfidenceThreshold = 0.90,
 ): ReceiptHierarchicalSpecialistResult => {
   if (!candidates.length) return { category, value: null, confidence: 0, status: "missing", evidence: "", supportBandCount: 0, independentObservationCount: 0, routedSupportCount: 0 };
+  candidates = candidates.filter((candidate) => !candidate.hardNegative);
+  if (!candidates.length) return { category, value: null, confidence: 0, status: "missing", evidence: "", supportBandCount: 0, independentObservationCount: 0, routedSupportCount: 0 };
   const grouped = new Map<string, ExpertCandidate[]>();
-  candidates.forEach((candidate) => grouped.set(candidate.canonical, [...(grouped.get(candidate.canonical) ?? []), candidate]));
-  const ranked = [...grouped.values()].sort((left, right) => right.length - left.length || right[0].probability - left[0].probability);
-  const supports = ranked[0];
-  const observations = new Set(supports.map((candidate) => candidate.observationKey));
-  const bands = new Set(supports.map((candidate) => candidate.bandIndex));
+  candidates.forEach((candidate) => {
+    const existing = equivalentGroupKey(category, grouped.keys(), candidate.canonical);
+    grouped.set(existing ?? candidate.canonical, [...(grouped.get(existing ?? candidate.canonical) ?? []), candidate]);
+  });
+  const ranked = [...grouped.values()].map((supports) => ({ supports, independent: independentCandidates(supports) })).sort((left, right) => right.independent.length - left.independent.length || right.independent[0].probability - left.independent[0].probability);
+  const top = ranked[0];
+  if (!top) return { category, value: null, confidence: 0, status: "missing", evidence: "", supportBandCount: 0, independentObservationCount: 0, routedSupportCount: 0 };
+  const supports = top.supports;
+  const independent = top.independent;
+  const strongest = [...supports].sort((left, right) => right.probability - left.probability)[0];
+  const observations = new Set(independent.map((candidate) => candidate.observationKey));
+  const bands = new Set(independent.map((candidate) => candidate.bandIndex));
   const configuration = model.experts?.[category];
-  const threshold = configuration?.threshold ?? 0.8;
-  const safe = supports[0].probability >= threshold && supports[0].confidence >= (configuration?.min_confidence ?? 0.98) && observations.size >= minIndependentObservations && ranked.length === 1;
-  return { category, value: supports[0].value, confidence: supports[0].confidence, status: safe ? "trusted" : "uncertain", evidence: `${supports[0].evidence} (hierarchical ${Math.round(supports[0].confidence * 100)}%)`, supportBandCount: bands.size, independentObservationCount: observations.size, routedSupportCount: candidates.length };
+  const threshold = expertThresholdOverride ?? configuration?.threshold ?? 0.8;
+  const strongSingle = allowStrongSingleObservation && observations.size === 1
+    && strongest.probability >= strongPredictionThreshold
+    && strongest.confidence >= strongConfidenceThreshold
+    && confidenceFraction(strongest.line.confidence) >= 0.90
+    && ranked.slice(1).every((candidate) => {
+      const candidateStrongest = [...candidate.supports].sort((left, right) => right.probability - left.probability)[0];
+      return candidateStrongest.probability < strongPredictionThreshold - 0.10
+        && candidate.independent.length < minIndependentObservations;
+    });
+  const competingWeak = ranked.slice(1).every((candidate) => {
+    const candidateStrongest = [...candidate.supports].sort((left, right) => right.probability - left.probability)[0];
+    return candidateStrongest.probability < threshold - 0.05 && candidate.independent.length < minIndependentObservations;
+  });
+  const safe = strongest.probability >= threshold
+    && strongest.confidence >= (expertMinConfidenceOverride ?? configuration?.min_confidence ?? 0.98)
+    && (observations.size >= minIndependentObservations || strongSingle)
+    && competingWeak
+    && (strongSingle || bands.size >= minIndependentObservations);
+  return { category, value: strongest.value, confidence: strongest.confidence, status: safe ? "trusted" : "uncertain", evidence: `${strongest.evidence} (hierarchical ${Math.round(strongest.confidence * 100)}%)`, supportBandCount: bands.size, independentObservationCount: observations.size, routedSupportCount: candidates.length };
 };
 
 const groupObservationLines = (observations: ReceiptHierarchicalObservation[]): Map<string, ReceiptHierarchicalObservation[]> => {
@@ -1102,11 +1338,55 @@ const emptySpecialist = (category: "receipt_id" | "item"): ReceiptHierarchicalSp
 
 type FunnelCategory = ReceiptHierarchicalExtraction["funnel"]["byCategory"][ReceiptHierarchicalSpecialist];
 
-const agreementCandidateCount = (candidates: ExpertCandidate[], minimum: number): number => {
+const candidateOverlapRatio = (left: ExpertCandidate, right: ExpertCandidate): number => {
+  const overlap = Math.max(0, Math.min(left.cropBottom, right.cropBottom) - Math.max(left.cropTop, right.cropTop));
+  return overlap / Math.max(1, Math.min(left.cropBottom - left.cropTop, right.cropBottom - right.cropTop));
+};
+
+/**
+ * Keep one representative from a crop/view observation. Adjacent first-pass
+ * bands can produce nearly identical adaptive windows, and multiple
+ * preprocessing views intentionally share the same crop identity. Neither
+ * should count as independent agreement. Distinct crops with materially
+ * different vertical support remain eligible evidence.
+ */
+const independentCandidates = (candidates: ExpertCandidate[]): ExpertCandidate[] => {
+  const selected: ExpertCandidate[] = [];
+  [...candidates].sort((left, right) => right.probability - left.probability).forEach((candidate) => {
+    const duplicate = selected.some((other) => other.observationKey === candidate.observationKey
+      || (candidateOverlapRatio(other, candidate) >= 0.86
+        && Math.abs((other.cropTop + other.cropBottom) / 2 - (candidate.cropTop + candidate.cropBottom) / 2)
+          <= Math.min(other.cropBottom - other.cropTop, candidate.cropBottom - candidate.cropTop) * 0.22));
+    if (!duplicate) selected.push(candidate);
+  });
+  return selected;
+};
+
+const agreementCandidateCount = (
+  candidates: ExpertCandidate[],
+  minimum: number,
+  allowStrongSingleObservation = false,
+  strongPredictionThreshold = 0.92,
+  strongConfidenceThreshold = 0.90,
+): number => {
   const grouped = new Map<string, ExpertCandidate[]>();
-  candidates.forEach((candidate) => grouped.set(candidate.canonical, [...(grouped.get(candidate.canonical) ?? []), candidate]));
-  return [...grouped.values()].filter((supports) => new Set(supports.map((candidate) => candidate.observationKey)).size >= minimum
-    && new Set(supports.map((candidate) => candidate.bandIndex)).size >= minimum).length;
+  candidates.filter((candidate) => !candidate.hardNegative).forEach((candidate) => {
+    const existing = equivalentGroupKey(candidate.field, grouped.keys(), candidate.canonical);
+    const key = existing ?? candidate.canonical;
+    grouped.set(key, [...(grouped.get(key) ?? []), candidate]);
+  });
+  return [...grouped.values()].filter((supports) => {
+    const independent = independentCandidates(supports);
+    const observations = new Set(independent.map((candidate) => candidate.observationKey));
+    const bands = new Set(independent.map((candidate) => candidate.bandIndex));
+    const strongest = [...supports].sort((left, right) => right.probability - left.probability)[0];
+    const strongSingle = allowStrongSingleObservation
+      && observations.size === 1
+      && strongest.probability >= strongPredictionThreshold
+      && strongest.confidence >= strongConfidenceThreshold
+      && confidenceFraction(strongest.line.confidence) >= 0.90;
+    return (strongSingle || observations.size >= minimum) && (strongSingle || bands.size >= minimum);
+  }).length;
 };
 
 /**
@@ -1195,7 +1475,20 @@ export const extractReceiptFieldsFromHierarchicalBands = (
     return candidates;
   };
   const fieldCandidates = Object.fromEntries(FIELDS.map((field) => [field, candidatesFor(field)])) as Record<ReceiptFrontendField, ExpertCandidate[]>;
-  const fields = Object.fromEntries(FIELDS.map((field) => [field, selectCandidates(field, fieldCandidates[field], config.minIndependentObservations, config.expertThresholds?.[FIELD_CATEGORY[field]], config.expertMinConfidence?.[FIELD_CATEGORY[field]])])) as Record<ReceiptFrontendField, ReceiptHierarchicalFieldResult>;
+  const fields = Object.fromEntries(FIELDS.map((field) => {
+    const category = FIELD_CATEGORY[field];
+    const minimum = config.minIndependentObservationsByCategory?.[category] ?? config.minIndependentObservations;
+    return [field, selectCandidates(
+      field,
+      fieldCandidates[field],
+      minimum,
+      config.expertThresholds?.[category],
+      config.expertMinConfidence?.[category],
+      config.allowStrongSingleObservation?.[category] ?? false,
+      config.strongPredictionThreshold?.[category] ?? 0.92,
+      config.strongConfidenceThreshold?.[category] ?? 0.90,
+    )];
+  })) as Record<ReceiptFrontendField, ReceiptHierarchicalFieldResult>;
   // Keep specialist candidate lists stable and evaluate each list once. This
   // also makes the routing funnel auditable without changing trust behavior.
   const specialistCandidates = (category: "receipt_id" | "item"): ExpertCandidate[] => {
@@ -1229,8 +1522,26 @@ export const extractReceiptFieldsFromHierarchicalBands = (
     item: specialistCandidates("item"),
   };
   const specialists = {
-    receipt_id: specialistCandidateLists.receipt_id.length ? selectSpecialist("receipt_id", specialistCandidateLists.receipt_id, config.minIndependentObservations) : emptySpecialist("receipt_id"),
-    item: specialistCandidateLists.item.length ? selectSpecialist("item", specialistCandidateLists.item, config.minIndependentObservations) : emptySpecialist("item"),
+    receipt_id: specialistCandidateLists.receipt_id.length ? selectSpecialist(
+      "receipt_id",
+      specialistCandidateLists.receipt_id,
+      config.minIndependentObservationsByCategory?.receipt_id ?? config.minIndependentObservations,
+      config.expertThresholds?.receipt_id,
+      config.expertMinConfidence?.receipt_id,
+      config.allowStrongSingleObservation?.receipt_id ?? false,
+      config.strongPredictionThreshold?.receipt_id ?? 0.92,
+      config.strongConfidenceThreshold?.receipt_id ?? 0.90,
+    ) : emptySpecialist("receipt_id"),
+    item: specialistCandidateLists.item.length ? selectSpecialist(
+      "item",
+      specialistCandidateLists.item,
+      config.minIndependentObservationsByCategory?.item ?? config.minIndependentObservations,
+      config.expertThresholds?.item,
+      config.expertMinConfidence?.item,
+      config.allowStrongSingleObservation?.item ?? false,
+      config.strongPredictionThreshold?.item ?? 0.92,
+      config.strongConfidenceThreshold?.item ?? 0.90,
+    ) : emptySpecialist("item"),
   };
   const merged = deduplicateReceiptBandLines(allLines);
   const routedCategoryCounts = Object.fromEntries(RECEIPT_HIERARCHICAL_CATEGORIES.filter((category): category is ReceiptHierarchicalSpecialist => category !== "other").map((category) => [category, predictions.filter((prediction) => prediction.routes.includes(category)).length])) as Record<ReceiptHierarchicalSpecialist, number>;
@@ -1246,18 +1557,25 @@ export const extractReceiptFieldsFromHierarchicalBands = (
     const categoryCrops = crops.filter((crop) => crop.category === category);
     const categoryGroups = [...groups.values()].filter((lines) => lines[0]?.expertCategory === category);
     const headerPrior = (prediction: ReceiptRouterPrediction): number => clamp(1 - ((prediction.top + prediction.bottom) / 2 / Math.max(1, dimensions.height)) / 0.42);
+    const minimumObservations = config.minIndependentObservationsByCategory?.[category] ?? config.minIndependentObservations;
+    const allowStrongSingle = config.allowStrongSingleObservation?.[category] ?? false;
+    const strongPredictionThreshold = config.strongPredictionThreshold?.[category] ?? 0.92;
+    const strongConfidenceThreshold = config.strongConfidenceThreshold?.[category] ?? 0.90;
     const routerEligibleBands = predictions.filter((prediction) => prediction.probabilities[category] >= routerThreshold(category, config.routerThresholds)
       || (category === "vendor" && config.vendorHeaderPrior && headerPrior(prediction) >= 0.35 && prediction.probabilities[category] >= Math.min(routerThreshold(category, config.routerThresholds), 0.18))).length;
-    const modelPassing = candidates.filter((candidate) => candidate.probability >= threshold && candidate.confidence >= minimumConfidence).length;
+    let eligibleCandidates = candidates.filter((candidate) => !candidate.hardNegative);
+    if (field && (field === "subtotal" || field === "tax" || field === "total")) eligibleCandidates = eligibleCandidates.filter((candidate) => categoryKeyword(field, candidate.evidence));
+    if (field === "total") eligibleCandidates = eligibleCandidates.filter((candidate) => candidate.finalTotalLabel);
+    const modelPassing = eligibleCandidates.filter((candidate) => candidate.probability >= threshold && candidate.confidence >= minimumConfidence).length;
     const funnelItem: FunnelCategory = {
       routerEligibleBands,
       routedBands: predictions.filter((prediction) => prediction.routes.includes(category)).length,
       cropsProposed: categoryCrops.length,
       ocrCrops: categoryGroups.length,
       ocrLines: categoryGroups.reduce((sum, lines) => sum + lines.length, 0),
-      candidateValues: candidates.length,
+      candidateValues: eligibleCandidates.length,
       modelPassing,
-      agreementEligible: agreementCandidateCount(candidates.filter((candidate) => candidate.probability >= threshold && candidate.confidence >= minimumConfidence), config.minIndependentObservations),
+      agreementEligible: agreementCandidateCount(eligibleCandidates.filter((candidate) => candidate.probability >= threshold && candidate.confidence >= minimumConfidence), minimumObservations, allowStrongSingle, strongPredictionThreshold, strongConfidenceThreshold),
       trusted: field ? (fields[field].status === "trusted" ? 1 : 0) : (specialists[category as "receipt_id" | "item"].status === "trusted" ? 1 : 0),
     };
     return [category, funnelItem];
