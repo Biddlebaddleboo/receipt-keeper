@@ -25,6 +25,8 @@ export interface ReceiptOcrLine {
   text: string;
   confidence?: number;
   bbox?: ReceiptOcrBox;
+  /** Optional source polygon retained by modern OCR adapters. */
+  polygon?: Array<[number, number]>;
   words?: ReceiptOcrWord[];
 }
 

@@ -25,7 +25,7 @@ export interface ReceiptFrontendExtraction {
   fields: ReceiptFrontendFields;
   unresolvedFields: ReceiptFrontendField[];
   durationMs: number;
-  engine: "tesseract.js" | "unavailable" | "rules-only";
+  engine: "tesseract.js" | "ppocrv6" | "unavailable" | "rules-only";
   ocrLines?: ReceiptOcrLine[];
 }
 

@@ -17,9 +17,11 @@
     "benchmark:receipt-frontend:ocr:score": "vitest run --config vitest.benchmark.config.ts scripts/score-receipt-frontend-ocr-benchmark.test.ts",
     "benchmark:receipt-modern-ocr": "node scripts/run-receipt-modern-ocr-benchmark.mjs",
     "benchmark:receipt-modern-ocr:score": "vitest run --config vitest.benchmark.config.ts scripts/score-receipt-modern-ocr-benchmark.test.ts",
+    "benchmark:receipt-ppocrv6-extractor": "vitest run --config vitest.benchmark.config.ts scripts/score-receipt-ppocrv6-extractor.test.ts",
     "benchmark:receipt-modern-ocr:models": "node scripts/download-receipt-modern-ocr-models.mjs",
     "benchmark:receipt-frontend:ml": "vitest run --config vitest.benchmark.config.ts scripts/receipt-frontend-ml-benchmark.test.ts",
     "train:receipt-frontend:model": "python3 scripts/train_receipt_field_model.py",
+    "train:receipt-ppocrv6:model": "python3 scripts/train_receipt_ppocrv6_field_model.py",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

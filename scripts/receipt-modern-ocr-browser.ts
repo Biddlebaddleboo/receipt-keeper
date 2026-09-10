@@ -3,6 +3,7 @@ import {
   type ReceiptFrontendFields,
   type ReceiptOcrLine,
 } from "@/lib/receiptFrontendExtractor";
+import { extractReceiptFieldsFromPpocrV6Lines } from "@/lib/receiptPpocrV6Extractor";
 import {
   RECEIPT_MODERN_OCR_ENGINES,
   receiptModernOcrPass,
@@ -26,6 +27,7 @@ const dataset = (params.get("dataset") ?? "sroie") as Dataset;
 const subset = params.get("subset") ?? "all";
 const limit = Number(params.get("limit") ?? "0");
 const variant = params.get("variant") ?? "default";
+const extractor = params.get("extractor") ?? "old-rules";
 const requestedEngines = new Set((params.get("engines") ?? "")
   .split(",")
   .map((name) => name.trim())
@@ -81,6 +83,7 @@ const serializableLines = (lines: ReceiptOcrLine[]) => lines.map((line) => ({
   text: line.text,
   confidence: line.confidence,
   bbox: line.bbox,
+  polygon: line.polygon,
   wordCount: line.words?.length ?? 0,
 }));
 
@@ -208,11 +211,12 @@ const runEngine = async (spec: EngineSpec, entries: Array<{ id: string; url: str
       ocrError = true;
     }
     const pass = receiptModernOcrPass(spec.name, lines, durationMs);
-    // The extractor call is deliberately the same rules-only call for every
-    // engine. No OCR candidate is allowed to alter field-selection policy.
-    const extraction = extractReceiptFieldsFromOcrLines(lines, "rules-only", pass.text);
+    const extraction = extractor === "ppocrv6-adapted"
+      ? extractReceiptFieldsFromPpocrV6Lines(lines, pass.text)
+      : extractReceiptFieldsFromOcrLines(lines, "rules-only", pass.text);
     const row: Record<string, unknown> = {
       id: entry.id,
+      extractor,
       durationMs,
       engineMs: engineMs ?? null,
       lineCount: lines.length,

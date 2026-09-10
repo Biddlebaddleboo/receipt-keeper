@@ -7,12 +7,13 @@ const dataset = process.env.RECEIPT_MODERN_OCR_DATASET || "sroie";
 const subset = process.env.RECEIPT_MODERN_OCR_SUBSET || "all";
 const limit = process.env.RECEIPT_MODERN_OCR_LIMIT || "0";
 const variant = process.env.RECEIPT_MODERN_OCR_VARIANT || "default";
+const extractor = process.env.RECEIPT_MODERN_OCR_EXTRACTOR || "old-rules";
 const requestedEngines = process.env.RECEIPT_MODERN_OCR_ENGINES || "";
 const outputPath = process.env.RECEIPT_MODERN_OCR_OUTPUT || `benchmarks/receipt-modern-ocr-${dataset}-${subset}.json`;
 const timeoutMs = Number(process.env.RECEIPT_MODERN_OCR_TIMEOUT_MS || "7200000");
 const debugPort = Number(process.env.RECEIPT_MODERN_OCR_DEBUG_PORT || "9224");
 const chrome = process.env.RECEIPT_CHROME || "/home/ubuntu/.cache/ms-playwright/chromium-1200/chrome-linux/chrome";
-const query = new URLSearchParams({ dataset, subset, limit, variant });
+const query = new URLSearchParams({ dataset, subset, limit, variant, extractor });
 if (requestedEngines) query.set("engines", requestedEngines);
 const url = `http://127.0.0.1:${port}/scripts/receipt-modern-ocr-browser.html?${query}`;
 

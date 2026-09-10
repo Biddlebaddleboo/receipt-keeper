@@ -134,10 +134,12 @@ export const receiptOcrLinesFromPaddleItems = (items: unknown): ReceiptModernOcr
   if (!Array.isArray(items)) return [];
   return sortLines(items.map((item): ReceiptModernOcrLine => {
     const typed = (item ?? {}) as ReceiptModernOcrItem;
+    const points = polygon(typed.poly ?? typed.box);
     return {
       text: textValue(typed.text),
       confidence: scoreAsPercent(typed.score),
-      bbox: receiptOcrBoxFromPolygon(typed.poly ?? typed.box),
+      bbox: receiptOcrBoxFromPolygon(points),
+      ...(points.length >= 4 ? { polygon: points } : {}),
     };
   }));
 };
@@ -154,10 +156,12 @@ export const receiptOcrLinesFromGutenyeLines = (items: unknown): ReceiptModernOc
       x1: (finite(frame.left) ?? 0) + (finite(frame.width) ?? 0),
       y1: (finite(frame.top) ?? 0) + (finite(frame.height) ?? 0),
     } : undefined;
+    const points = polygon(typed.box ?? typed.poly);
     return {
       text: textValue(typed.text),
       confidence: scoreAsPercent((item as { mean?: unknown } | null)?.mean ?? typed.score),
-      bbox: frameBox ?? receiptOcrBoxFromPolygon(typed.box ?? typed.poly),
+      bbox: frameBox ?? receiptOcrBoxFromPolygon(points),
+      ...(points.length >= 4 ? { polygon: points } : {}),
     };
   }));
 };
