@@ -34,10 +34,38 @@ ROUTER_FEATURE_NAMES = (
     "alpha_ratio", "digit_ratio", "amount_line_fraction", "date_line_fraction", "currency_line_fraction",
     "keyword_vendor", "keyword_date", "keyword_subtotal", "keyword_tax", "keyword_total",
     "keyword_receipt_id", "keyword_item", "top_line_fraction", "bottom_line_fraction",
+    "header_region_prior",
     "right_aligned_fraction", "wide_line_fraction", "sparse_gap_fraction", "non_empty_fraction",
     "candidate_vendor", "candidate_date", "candidate_subtotal", "candidate_tax", "candidate_total",
     "candidate_receipt_id", "candidate_item",
 )
+
+# Routing is intentionally recall-first. A false-positive route costs one
+# inexpensive specialist OCR crop; a false-negative route removes the field
+# from consideration entirely. These targets are used to select router gates
+# on the grouped validation split. Specialist trust thresholds remain separate
+# and safety-oriented.
+ROUTER_TARGET_RECALL = {
+    "vendor": 0.90,
+    "purchase_date": 0.95,
+    "subtotal": 0.90,
+    "tax": 0.98,
+    "total": 0.95,
+    "receipt_id": 0.98,
+    "item": 0.98,
+    "other": 0.80,
+}
+ROUTER_TOP_BANDS = {
+    "vendor": 2,
+    "purchase_date": 2,
+    "subtotal": 2,
+    "tax": 1,
+    "total": 2,
+    "receipt_id": 3,
+    "item": 3,
+}
+ROUTER_FANOUT = 3
+ROUTER_MAX_EXPERT_INVOCATIONS = 18
 
 EXPERT_FEATURE_NAMES = (
     "rank_fraction", "relative_top", "relative_bottom", "x0", "x1", "center_x", "width", "height",
@@ -182,13 +210,16 @@ def router_features(group: dict[str, Any], width: float, height: float) -> list[
         bool(KEYWORDS[category].search(" ".join(text(line.get("text")) for line in lines)) or s["amount_lines"] >= 3) if category == "item" else False
     )
     density = count / max(1.0, (float(group["height"]) / max(1.0, s["median_height"])))
+    header_prior = max(0.0, min(1.0, 1.0 - (((float(group["top"]) + float(group["bottom"])) / 2.0) / max(1.0, height)) / 0.42))
     return [
         float(group["top"]) / height, float(group["bottom"]) / height, (float(group["top"]) + float(group["bottom"])) / 2 / height,
         float(group["height"]) / height, min(1.0, count / 16), min(1.0, density), s["mean_confidence"], s["min_confidence"],
         min(1.0, s["median_height"] / height * 25), min(1.0, mean_width * 2), min(1.0, s["text_length"] / max(1.0, float(group["width"]) * float(group["height"])) * 1800),
         alpha, digit, s["amount_lines"] / max(1, count), s["date_lines"] / max(1, count), s["currency_lines"] / max(1, count),
         keyword("vendor"), keyword("purchase_date"), keyword("subtotal"), keyword("tax"), keyword("total"), keyword("receipt_id"), keyword("item"),
-        s["top_lines"] / max(1, count), s["bottom_lines"] / max(1, count), s["right_aligned"] / max(1, count), s["wide_lines"] / max(1, count),
+        s["top_lines"] / max(1, count), s["bottom_lines"] / max(1, count),
+        header_prior,
+        s["right_aligned"] / max(1, count), s["wide_lines"] / max(1, count),
         s["sparse_gaps"] / max(1, len(s["gaps"])), 1.0 if count else 0.0,
         float(candidate("vendor")), float(candidate("purchase_date")), float(candidate("subtotal")), float(candidate("tax")), float(candidate("total")), float(candidate("receipt_id")), float(candidate("item")),
     ]
@@ -340,9 +371,87 @@ def select_threshold(scores: list[tuple[float, bool]], precision_target: float =
     return best
 
 
+def select_router_threshold(scores: list[tuple[float, bool]], target_recall: float) -> dict[str, float]:
+    """Select the least permissive gate that still reaches the recall target.
+
+    Routing is a resource-allocation decision, not a safety decision. The
+    selected threshold therefore maximizes the threshold (and consequently
+    limits false-positive crop work) subject to the requested recall. Final
+    value trust is gated independently by the specialist and aggregator.
+    """
+    if not scores:
+        return {"threshold": 0.0, "precision": 0.0, "recall": 0.0, "coverage": 0.0, "trusted": 0.0}
+    thresholds = sorted({0.0, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99} | {round(score, 5) for score, _ in scores})
+    positives = max(1, sum(positive for _, positive in scores))
+    feasible: list[dict[str, float]] = []
+    for threshold in thresholds:
+        accepted = [(score, positive) for score, positive in scores if score >= threshold]
+        if not accepted:
+            continue
+        true_positive = sum(positive for _, positive in accepted)
+        precision = true_positive / len(accepted)
+        recall = true_positive / positives
+        feasible.append({"threshold": threshold, "precision": precision, "recall": recall, "coverage": len(accepted) / max(1, len(scores)), "trusted": float(len(accepted))})
+    eligible = [item for item in feasible if item["recall"] >= target_recall]
+    if eligible:
+        return max(eligible, key=lambda item: (item["threshold"], item["precision"]))
+    # Small/weak categories can make an exact target unattainable. Prefer the
+    # highest observed recall and then the most selective threshold.
+    return max(feasible, key=lambda item: (item["recall"], item["threshold"]))
+
+
 def evaluate_scores(scores: list[tuple[float, bool]], threshold: float) -> dict[str, float | int | None]:
     accepted = [(score, positive) for score, positive in scores if score >= threshold]
     return {"candidates": len(scores), "trusted": len(accepted), "correct": sum(positive for _, positive in accepted), "wrongTrusted": sum(not positive for _, positive in accepted), "precision": sum(positive for _, positive in accepted) / len(accepted) if accepted else None, "coverage": len(accepted) / max(1, len(scores))}
+
+
+def router_priority(category: str, probability: float, features: list[float]) -> float:
+    direct_name = "candidate_date" if category == "purchase_date" else "candidate_" + category
+    direct = features[list(ROUTER_FEATURE_NAMES).index(direct_name)]
+    direct_bonus = 0.12 if category == "vendor" else 0.22 if category == "receipt_id" else 0.12 if category == "item" else 0.28
+    header = features[list(ROUTER_FEATURE_NAMES).index("header_region_prior")] if category == "vendor" else 0.0
+    return probability + direct * direct_bonus + header * 0.2
+
+
+def routed_groups(groups: list[dict[str, Any]], width: float, height: float, router: dict[str, Any]) -> list[tuple[dict[str, Any], str, float]]:
+    """Mirror the browser's quota, fan-out, and anti-starvation route policy."""
+    records: list[dict[str, Any]] = []
+    for group_index, group in enumerate(groups):
+        features = router_features(group, width, height)
+        for category in SPECIALISTS:
+            probability = logistic_probability(router[category]["weights"], features)
+            threshold = float(router[category].get("threshold", 0.0))
+            header_prior = max(0.0, min(1.0, 1.0 - (((float(group["top"]) + float(group["bottom"])) / 2.0 / max(1.0, height)) / 0.42)))
+            broad_vendor_header = category == "vendor" and header_prior >= 0.35 and probability >= min(threshold, 0.18)
+            if probability < threshold and not broad_vendor_header:
+                continue
+            records.append({"group_index": group_index, "category": category, "probability": probability, "priority": router_priority(category, probability, features)})
+    selected: set[tuple[int, str]] = set()
+    for category in SPECIALISTS:
+        candidates = sorted((record for record in records if record["category"] == category), key=lambda record: record["priority"], reverse=True)
+        for record in candidates[:ROUTER_TOP_BANDS.get(category, 1)]:
+            selected.add((int(record["group_index"]), category))
+    per_group: dict[int, list[dict[str, Any]]] = {}
+    for record in records:
+        if (int(record["group_index"]), str(record["category"])) in selected:
+            per_group.setdefault(int(record["group_index"]), []).append(record)
+    routes = [(groups[group_index], str(record["category"]), float(record["probability"]))
+              for group_index, records_for_group in per_group.items()
+              for record in sorted(records_for_group, key=lambda item: item["priority"], reverse=True)[:ROUTER_FANOUT]]
+    # Keep at least one crop per routed category when the global budget is
+    # reached. This is the training equivalent of browser crop round-robin.
+    by_category = {category: sorted((route for route in routes if route[1] == category), key=lambda route: route[2], reverse=True) for category in SPECIALISTS}
+    result: list[tuple[dict[str, Any], str, float]] = []
+    cursor = 0
+    while len(result) < ROUTER_MAX_EXPERT_INVOCATIONS and any(len(values) > cursor for values in by_category.values()):
+        for category in SPECIALISTS:
+            if len(result) >= ROUTER_MAX_EXPERT_INVOCATIONS:
+                break
+            values = by_category[category]
+            if len(values) > cursor:
+                result.append(values[cursor])
+        cursor += 1
+    return result
 
 
 def expert_candidate_values(lines: list[dict[str, Any]], category: str) -> list[tuple[int, str]]:
@@ -434,34 +543,23 @@ def expert_examples(row: dict[str, Any], label: dict[str, Any], router: dict[str
     all_lines = [line for group in groups for line in group["lines"]]
     width, height = dimensions(all_lines, groups)
     examples = {category: [] for category in SPECIALISTS}
-    for group in groups:
-        features = router_features(group, width, height)
-        routed_categories = []
-        for category in SPECIALISTS:
-            probability = logistic_probability(router[category]["weights"], features)
-            if probability < router[category]["threshold"]:
-                continue
-            feature_name = "candidate_date" if category == "purchase_date" else "candidate_" + category
-            direct_index = list(ROUTER_FEATURE_NAMES).index(feature_name)
-            priority = probability + (0.35 if features[direct_index] >= 0.5 and category in FIELDS else 0.0)
-            routed_categories.append((priority, category, probability))
-        for _, category, probability in sorted(routed_categories, reverse=True)[:2]:
-            crop = crop_window(group, category, probability, width, height)
-            lines = group["lines"]
-            for index, value in expert_candidate_values(lines, category):
-                expected = None
-                if category == "vendor":
-                    expected = normalize(str(label.get("company", "")))
-                    positive = bool(expected and (expected in normalize(value) or normalize(value) in expected))
-                elif category == "purchase_date":
-                    expected = label_date(str(label.get("date", "")))
-                    positive = value == expected
-                elif category == "total":
-                    expected_value = amount_value(str(label.get("total", "")))
-                    positive = expected_value is not None and abs((amount_value(value) or -999999) - expected_value) < 0.011
-                else:
-                    positive = category_label(category, [lines[index]], label)
-                examples[category].append({"features": expert_features(lines, index, category, crop, width, height, probability), "positive": positive, "receipt": row["id"], "split": split, "value": value})
+    for group, category, probability in routed_groups(groups, width, height, router):
+        crop = crop_window(group, category, probability, width, height)
+        lines = group["lines"]
+        for index, value in expert_candidate_values(lines, category):
+            expected = None
+            if category == "vendor":
+                expected = normalize(str(label.get("company", "")))
+                positive = bool(expected and (expected in normalize(value) or normalize(value) in expected))
+            elif category == "purchase_date":
+                expected = label_date(str(label.get("date", "")))
+                positive = value == expected
+            elif category == "total":
+                expected_value = amount_value(str(label.get("total", "")))
+                positive = expected_value is not None and abs((amount_value(value) or -999999) - expected_value) < 0.011
+            else:
+                positive = category_label(category, [lines[index]], label)
+            examples[category].append({"features": expert_features(lines, index, category, crop, width, height, probability), "positive": positive, "receipt": row["id"], "split": split, "value": value})
     return examples
 
 
@@ -507,18 +605,17 @@ def main() -> None:
             # chance to recover a field. Trust is gated separately below, so
             # route at a recall-friendly threshold while still reporting its
             # precision/recall honestly.
-            gate = select_threshold(validation_scores, 0.65 if category not in ("other",) else 0.80)
+            gate = select_router_threshold(validation_scores, ROUTER_TARGET_RECALL[category])
             final_scores = [(category_probability("logistic" if model_type == "logistic" else "forest" if model_type == "stump-forest" else "boosted", trained_model, item["features"]), bool(item["positive"])) for item in final]
             comparisons[model_type] = {"validationGate": gate, "validation": evaluate_scores(validation_scores, gate["threshold"]), "final": evaluate_scores(final_scores, gate["threshold"]), "modelBytes": len(json.dumps(trained_model, separators=(",", ":")))}
-            if model_type == "logistic" or gate["recall"] > best_recall and gate["precision"] >= 0.90:
+            if model_type == "logistic" or gate["recall"] > best_recall:
                 best_type, best_gate, best_recall = model_type, gate, gate["recall"]
         # Browser inference intentionally ships logistic only. If a tree model
         # wins a screen it remains a benchmark result until separately encoded.
         selected_model = trained["logistic"]
         selected_gate = comparisons["logistic"]["validationGate"]
-        route_floor = 0.18 if category in ("subtotal", "tax") else selected_gate["threshold"]
-        selected_router[category] = {"type": "logistic", "weights": selected_model, "threshold": min(selected_gate["threshold"], route_floor), "min_margin": 0.0, "calibration": []}
-        router_models[category] = {"selected": "logistic", "comparisons": comparisons, "positiveTuning": sum(item["positive"] for item in train), "positiveValidation": sum(item["positive"] for item in validation), "positiveFinal": sum(item["positive"] for item in final)}
+        selected_router[category] = {"type": "logistic", "weights": selected_model, "threshold": selected_gate["threshold"], "min_margin": 0.0, "calibration": []}
+        router_models[category] = {"selected": "logistic", "targetRecall": ROUTER_TARGET_RECALL[category], "comparisons": comparisons, "positiveTuning": sum(item["positive"] for item in train), "positiveValidation": sum(item["positive"] for item in validation), "positiveFinal": sum(item["positive"] for item in final)}
 
     # Specialists are trained only from router-selected adaptive crops. The
     # router is already frozen from tuning/validation before this collection.
@@ -555,8 +652,8 @@ def main() -> None:
         expert_models[category] = {"type": "logistic", "weights": weights, "threshold": threshold, "min_margin": 0.05, "min_confidence": 0.70, "calibration": []}
         expert_comparisons[category] = {"trainingCandidates": len(train), "trainingPositives": sum(item["positive"] for item in train), "validationGate": gate, "validation": evaluate_scores(validation_scores, gate["threshold"]), "final": evaluate_scores([(logistic_probability(weights, item["features"]), bool(item["positive"])) for item in final], gate["threshold"]), "modelBytes": len(json.dumps(weights, separators=(",", ":")))}
 
-    model = {"version": 1, "engine": "paddleocr-js-ppocrv6-tiny-hierarchical", "dataset": "SROIE 500 grouped receipt split; router and specialists train on tuning only", "router_feature_names": list(ROUTER_FEATURE_NAMES), "expert_feature_names": list(EXPERT_FEATURE_NAMES), "router": selected_router, "experts": expert_models}
-    comparison = {"dataset": "SROIE public PP-OCRv6 band cache", "sampleSize": len(rows), "splits": {"tuning": 301, "validation": 100, "final": 99}, "router": router_models, "experts": expert_comparisons, "notes": ["Router labels are exact for vendor/date/total where SROIE labels match OCR; subtotal/tax/id/item are weak labels and are not claimed as field accuracy.", "Specialist examples are generated only from router-selected adaptive windows after receipt-level splitting.", "The shipped representation is logistic for tiny browser inference; forests/boosted stumps are validation comparisons only."]}
+    model = {"version": 2, "engine": "paddleocr-js-ppocrv6-tiny-hierarchical", "dataset": "SROIE 500 grouped receipt split; router and specialists train on tuning only", "router_feature_names": list(ROUTER_FEATURE_NAMES), "expert_feature_names": list(EXPERT_FEATURE_NAMES), "router": selected_router, "experts": expert_models, "routing_policy": {"objective": "recall-first routing; specialist trust remains independent", "targetRecall": ROUTER_TARGET_RECALL, "topBandsPerCategory": ROUTER_TOP_BANDS, "maxCategoriesPerBand": ROUTER_FANOUT, "maxExpertInvocations": ROUTER_MAX_EXPERT_INVOCATIONS}}
+    comparison = {"dataset": "SROIE public PP-OCRv6 band cache", "sampleSize": len(rows), "splits": {"tuning": 301, "validation": 100, "final": 99}, "router": router_models, "experts": expert_comparisons, "routingPolicy": {"targetRecall": ROUTER_TARGET_RECALL, "topBandsPerCategory": ROUTER_TOP_BANDS, "maxCategoriesPerBand": ROUTER_FANOUT, "maxExpertInvocations": ROUTER_MAX_EXPERT_INVOCATIONS}, "notes": ["Router labels are exact for vendor/date/total where SROIE labels match OCR; subtotal/tax/id/item are weak labels and are not claimed as field accuracy.", "Specialist examples are generated from the same high-recall quota/fan-out/round-robin adaptive route distribution used by the browser, after receipt-level splitting; false-positive routed candidates remain negative examples.", "The shipped representation is logistic for tiny browser inference; forests/boosted stumps are validation comparisons only."]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(model, separators=(",", ":")) + "\n")
     args.comparison.parent.mkdir(parents=True, exist_ok=True)

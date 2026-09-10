@@ -51,6 +51,7 @@ export const HIERARCHICAL_ROUTER_FEATURE_NAMES = [
   "alpha_ratio", "digit_ratio", "amount_line_fraction", "date_line_fraction", "currency_line_fraction",
   "keyword_vendor", "keyword_date", "keyword_subtotal", "keyword_tax", "keyword_total",
   "keyword_receipt_id", "keyword_item", "top_line_fraction", "bottom_line_fraction",
+  "header_region_prior",
   "right_aligned_fraction", "wide_line_fraction", "sparse_gap_fraction", "non_empty_fraction",
   "candidate_vendor", "candidate_date", "candidate_subtotal", "candidate_tax", "candidate_total",
   "candidate_receipt_id", "candidate_item",
@@ -101,6 +102,8 @@ export interface ReceiptRouterPrediction {
   top: number;
   bottom: number;
   probabilities: Record<ReceiptHierarchicalCategory, number>;
+  /** Recall-first ranking scores. These are routing priorities, never trust scores. */
+  rankingScores?: Record<ReceiptHierarchicalSpecialist, number>;
   routes: ReceiptHierarchicalSpecialist[];
   dominantCategory: ReceiptHierarchicalCategory;
   lineCount: number;
@@ -116,6 +119,10 @@ export interface ReceiptHierarchicalConfig {
   maxCategoriesPerBand: number;
   maxExpertInvocations: number;
   routerThresholds?: Partial<Record<ReceiptHierarchicalCategory, number>>;
+  /** Number of highest-ranked bands to expose to each specialist. */
+  topBandsPerCategory?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
+  /** Broaden vendor routing in the header without weakening final field gates. */
+  vendorHeaderPrior?: boolean;
   expertThresholds?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
   expertMinConfidence?: Partial<Record<ReceiptHierarchicalSpecialist, number>>;
   minIndependentObservations: 1 | 2 | 3;
@@ -231,6 +238,45 @@ export const RECEIPT_HIERARCHICAL_SCREENING_CONFIGS: readonly ReceiptHierarchica
     expertThresholds: { vendor: 0.55, purchase_date: 0.50, subtotal: 0.45, tax: 0.60, total: 0.60, receipt_id: 0.50, item: 0.50 },
     expertMinConfidence: { vendor: 0.55, purchase_date: 0.55, subtotal: 0.55, tax: 0.55, total: 0.55, receipt_id: 0.55, item: 0.55 },
   },
+  {
+    name: "high-recall-fanout-top1",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "adaptive",
+    maxCategoriesPerBand: 1,
+    maxExpertInvocations: 10,
+    minIndependentObservations: 2,
+    windowPadding: 1,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.35, purchase_date: 0.35, subtotal: 0.35, tax: 0.45, total: 0.55, receipt_id: 0.25, item: 0.35 },
+    expertMinConfidence: { vendor: 0.55, purchase_date: 0.55, subtotal: 0.55, tax: 0.55, total: 0.55, receipt_id: 0.55, item: 0.55 },
+  },
+  {
+    name: "high-recall-fanout-top2",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "adaptive",
+    maxCategoriesPerBand: 2,
+    maxExpertInvocations: 14,
+    minIndependentObservations: 2,
+    windowPadding: 1,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.35, purchase_date: 0.35, subtotal: 0.35, tax: 0.45, total: 0.55, receipt_id: 0.25, item: 0.35 },
+    expertMinConfidence: { vendor: 0.55, purchase_date: 0.55, subtotal: 0.55, tax: 0.55, total: 0.55, receipt_id: 0.55, item: 0.55 },
+  },
+  {
+    name: "high-recall-fanout-top3",
+    firstPassConfigName: "fraction40-overlap40-contrast-2200-rules-hybrid",
+    windowMode: "adaptive",
+    maxCategoriesPerBand: 3,
+    maxExpertInvocations: 18,
+    minIndependentObservations: 2,
+    windowPadding: 1,
+    vendorHeaderPrior: true,
+    topBandsPerCategory: { vendor: 2, purchase_date: 2, subtotal: 2, tax: 1, total: 2, receipt_id: 3, item: 3 },
+    expertThresholds: { vendor: 0.35, purchase_date: 0.35, subtotal: 0.35, tax: 0.45, total: 0.55, receipt_id: 0.25, item: 0.35 },
+    expertMinConfidence: { vendor: 0.55, purchase_date: 0.55, subtotal: 0.55, tax: 0.55, total: 0.55, receipt_id: 0.55, item: 0.55 },
+  },
 ];
 
 export const RECEIPT_HIERARCHICAL_EXPERIMENTAL_CONFIG: ReceiptHierarchicalConfig = RECEIPT_HIERARCHICAL_SCREENING_CONFIGS[0];
@@ -301,6 +347,19 @@ export interface ReceiptHierarchicalExtraction extends Omit<ReceiptFrontendExtra
     multiBandLineCount: number;
     meanSupportCount: number;
     expertInputLineCount: number;
+  };
+  funnel: {
+    byCategory: Record<ReceiptHierarchicalSpecialist, {
+      routerEligibleBands: number;
+      routedBands: number;
+      cropsProposed: number;
+      ocrCrops: number;
+      ocrLines: number;
+      candidateValues: number;
+      modelPassing: number;
+      agreementEligible: number;
+      trusted: number;
+    }>;
   };
 }
 
@@ -490,6 +549,11 @@ export const hierarchicalRouterFeatures = (
     stats.keywordRate("item"),
     stats.topLines / Math.max(1, count),
     stats.bottomLines / Math.max(1, count),
+    // A broad, geometry-only header prior is useful when a vendor name has
+    // no lexical cue (logos and short merchant names are common). It only
+    // affects where the specialist spends a cheap OCR pass; it never enters
+    // the final trusted-field gate.
+    clamp(1 - ((band.top + band.bottom) / 2 / safeHeight) / 0.42),
     stats.rightAligned / Math.max(1, count),
     stats.wideLines / Math.max(1, count),
     stats.sparseGaps / Math.max(1, stats.gaps.length),
@@ -523,47 +587,78 @@ const routerThreshold = (category: ReceiptHierarchicalCategory, overrides?: Part
   overrides?.[category] ?? model.router?.[category]?.threshold ?? 0.7
 );
 
+const routerPriority = (
+  category: ReceiptHierarchicalSpecialist,
+  probability: number,
+  features: number[],
+): number => {
+  const feature = (name: typeof HIERARCHICAL_ROUTER_FEATURE_NAMES[number]): number => {
+    const index = HIERARCHICAL_ROUTER_FEATURE_NAMES.indexOf(name);
+    return index >= 0 ? features[index] ?? 0 : 0;
+  };
+  const candidateName = category === "purchase_date" ? "candidate_date" : `candidate_${category}` as typeof HIERARCHICAL_ROUTER_FEATURE_NAMES[number];
+  const direct = feature(candidateName);
+  const directBonus = category === "vendor" ? 0.12
+    : category === "receipt_id" ? 0.22
+      : category === "item" ? 0.12 : 0.28;
+  const headerBonus = category === "vendor" ? feature("header_region_prior") * 0.2 : 0;
+  return probability + direct * directBonus + headerBonus;
+};
+
 const dominant = (probabilities: Record<ReceiptHierarchicalCategory, number>): ReceiptHierarchicalCategory => (
   [...RECEIPT_HIERARCHICAL_CATEGORIES].sort((left, right) => probabilities[right] - probabilities[left])[0] ?? "other"
 );
 
 export const classifyReceiptBands = (
   bands: ReceiptRouterBandInput[],
-  options: Pick<ReceiptHierarchicalConfig, "maxCategoriesPerBand" | "routerThresholds"> = RECEIPT_HIERARCHICAL_EXPERIMENTAL_CONFIG,
+  options: Pick<ReceiptHierarchicalConfig, "maxCategoriesPerBand" | "routerThresholds" | "topBandsPerCategory" | "vendorHeaderPrior"> = RECEIPT_HIERARCHICAL_EXPERIMENTAL_CONFIG,
 ): ReceiptRouterPrediction[] => {
   const dimensions = inferredPage(bands);
-  return bands.map((band) => {
+  const provisional = bands.map((band) => {
     const features = hierarchicalRouterFeatures(band, dimensions.width, dimensions.height);
     const probabilities = Object.fromEntries(RECEIPT_HIERARCHICAL_CATEGORIES.map((category) => [
       category,
       modelProbability(model.router?.[category], features),
     ])) as Record<ReceiptHierarchicalCategory, number>;
-    const directEvidence = (category: ReceiptHierarchicalCategory): number => {
-      const featureName = category === "purchase_date" ? "candidate_date" : `candidate_${category}`;
-      const index = HIERARCHICAL_ROUTER_FEATURE_NAMES.indexOf(featureName as typeof HIERARCHICAL_ROUTER_FEATURE_NAMES[number]);
-      return index >= 0 && features[index] >= 0.5 ? 1 : 0;
-    };
-    const routes = [...RECEIPT_HIERARCHICAL_CATEGORIES]
-      .filter((category): category is ReceiptHierarchicalSpecialist => category !== "other" && probabilities[category] >= routerThreshold(category, options.routerThresholds))
-      // The learned probability is primary. A small independently computed
-      // candidate-evidence bonus keeps a direct total/date/merchant signal
-      // from being crowded out by generic item/id bands when fan-out is capped.
-      .sort((left, right) => {
-        const leftScore = probabilities[left] + (directEvidence(left) && FIELDS.includes(left as ReceiptFrontendField) ? 0.35 : 0);
-        const rightScore = probabilities[right] + (directEvidence(right) && FIELDS.includes(right as ReceiptFrontendField) ? 0.35 : 0);
-        return rightScore - leftScore;
-      })
-      .slice(0, Math.max(1, Math.round(options.maxCategoriesPerBand)));
     return {
       bandIndex: band.bandIndex,
       observationKey: band.observationKey,
       top: band.top,
       bottom: band.bottom,
       probabilities,
-      routes,
+      rankingScores: Object.fromEntries(RECEIPT_HIERARCHICAL_CATEGORIES
+        .filter((category): category is ReceiptHierarchicalSpecialist => category !== "other")
+        .map((category) => [category, routerPriority(category, probabilities[category], features)])) as Record<ReceiptHierarchicalSpecialist, number>,
+      routes: [] as ReceiptHierarchicalSpecialist[],
       dominantCategory: dominant(probabilities),
       lineCount: band.lines.filter((line) => normalizeLine(line.text)).length,
     };
+  });
+  const selectedByCategory = new Map<ReceiptHierarchicalSpecialist, Set<string>>();
+  RECEIPT_HIERARCHICAL_CATEGORIES.filter((category): category is ReceiptHierarchicalSpecialist => category !== "other").forEach((category) => {
+    const headerPrior = (prediction: typeof provisional[number]): number => {
+      const index = HIERARCHICAL_ROUTER_FEATURE_NAMES.indexOf("header_region_prior");
+      // Reconstructing this from geometry keeps the prediction payload small.
+      return index >= 0 ? clamp(1 - ((prediction.top + prediction.bottom) / 2 / Math.max(1, dimensions.height)) / 0.42) : 0;
+    };
+    const threshold = routerThreshold(category, options.routerThresholds);
+    const eligible = provisional.filter((prediction) => {
+      const broadVendorHeader = category === "vendor" && options.vendorHeaderPrior
+        && headerPrior(prediction) >= 0.35
+        // Header routing has a deliberately low floor. It recovers logo-only
+        // and short merchant headers while remaining independent of trust.
+        && prediction.probabilities[category] >= Math.min(threshold, 0.18);
+      return prediction.probabilities[category] >= threshold || broadVendorHeader;
+    }).sort((left, right) => (right.rankingScores[category] ?? 0) - (left.rankingScores[category] ?? 0));
+    const quota = options.topBandsPerCategory?.[category];
+    selectedByCategory.set(category, new Set((quota == null ? eligible : eligible.slice(0, Math.max(1, Math.round(quota)))).map((prediction) => prediction.observationKey)));
+  });
+  return provisional.map((prediction) => {
+    const routes = RECEIPT_HIERARCHICAL_CATEGORIES
+      .filter((category): category is ReceiptHierarchicalSpecialist => category !== "other" && selectedByCategory.get(category)?.has(prediction.observationKey))
+      .sort((left, right) => (prediction.rankingScores?.[right] ?? prediction.probabilities[right] ?? 0) - (prediction.rankingScores?.[left] ?? prediction.probabilities[left] ?? 0))
+      .slice(0, Math.max(1, Math.round(options.maxCategoriesPerBand)));
+    return { ...prediction, routes };
   });
 };
 
@@ -615,7 +710,7 @@ export const buildAdaptiveExpertCrops = (
   predictions.forEach((prediction) => {
     const band = byKey.get(prediction.observationKey);
     if (!band || !prediction.routes.length) return;
-    const routed = prediction.routes.slice(0, 3);
+    const routed = prediction.routes;
     routed.forEach((category) => {
       const lines = band.lines.filter((line) => normalizeLine(line.text));
       const anchorLineIndex = lines.length
@@ -649,13 +744,13 @@ export const buildAdaptiveExpertCrops = (
     });
   });
   crops.sort((left, right) => right.routerProbability - left.routerProbability);
-  const selected: ReceiptExpertCrop[] = [];
+  const deduplicated: ReceiptExpertCrop[] = [];
   crops.forEach((crop) => {
     // Crops from different first-pass bands are separate OCR invocations and
     // may provide independent support. Only collapse a repeated crop from the
     // same source observation; deduplication of the returned text happens
     // later and never counts one observation key twice.
-    const duplicate = selected.find((other) => other.category === crop.category
+    const duplicate = deduplicated.find((other) => other.category === crop.category
       && other.sourceObservationKey === crop.sourceObservationKey
       && overlapRatio(other, crop) >= 0.88
       && Math.abs(other.top - crop.top) <= Math.max(other.height, crop.height) * 0.18);
@@ -663,8 +758,27 @@ export const buildAdaptiveExpertCrops = (
       duplicate.sourceBandIndices = [...new Set([...duplicate.sourceBandIndices, crop.sourceBandIndex])].sort((a, b) => a - b);
       return;
     }
-    if (selected.length < Math.max(1, Math.round(config.maxExpertInvocations))) selected.push(crop);
+    deduplicated.push(crop);
   });
+  // A global cap must not let high-scoring tax/total bands starve the weak but
+  // valuable receipt-id/item/vendor routes. Select in category round-robin
+  // order after within-category ranking, then restore stable page order for
+  // sequential/mobile-safe OCR.
+  const byCategory = new Map<ReceiptHierarchicalSpecialist, ReceiptExpertCrop[]>();
+  deduplicated.forEach((crop) => byCategory.set(crop.category, [...(byCategory.get(crop.category) ?? []), crop]));
+  byCategory.forEach((categoryCrops) => categoryCrops.sort((left, right) => right.routerProbability - left.routerProbability));
+  const selected: ReceiptExpertCrop[] = [];
+  const categoryOrder: ReceiptHierarchicalSpecialist[] = [...RECEIPT_HIERARCHICAL_CATEGORIES].filter((category): category is ReceiptHierarchicalSpecialist => category !== "other");
+  let cursor = 0;
+  const maxInvocations = Math.max(1, Math.round(config.maxExpertInvocations));
+  while (selected.length < maxInvocations && categoryOrder.some((category) => (byCategory.get(category)?.length ?? 0) > cursor)) {
+    categoryOrder.forEach((category) => {
+      if (selected.length >= maxInvocations) return;
+      const candidate = byCategory.get(category)?.[cursor];
+      if (candidate) selected.push(candidate);
+    });
+    cursor += 1;
+  }
   return selected.sort((left, right) => left.top - right.top || left.category.localeCompare(right.category));
 };
 
@@ -766,7 +880,7 @@ interface ExpertCandidate {
 
 const blockedVendor = /^(?:store|shop)$|\b(?:receipt|invoice|subtotal|sub-total|total|tax|gst|hst|date|cashier|address|tel|phone|thank|change|tender)\b/i;
 const excludedTotal = /\b(?:qty|quantity|items?|excluding|excl\.?|before\s+tax|subtotal|sub-total|tax\s+amount|round(?:ing)?\s+adjustment|suppl(?:y|ies)|saving|discount)\b/i;
-const strongTotalLabel = /\b(?:grand\s+total|total\s+(?:due|payable|amt|amount|rounded|round(?:ed)?|incl(?:usive)?|including)|amount\s+due|balance\s+due|payable|final\s+total|round(?:ed|ing)?\s+\w*\s+total)\b/i;
+const strongTotalLabel = /\b(?:grand\s+total|total\s+(?:due|payable|amt|amount|rounded|round(?:ed)?|incl(?:usive)?|including)|amount\s+due|balance\s+due|final\s+total|round(?:ed|ing)?\s+\w*\s+total)\b/i;
 
 const candidateValues = (lines: ReceiptOcrLine[], field: ReceiptFrontendField | ReceiptHierarchicalSpecialist): Array<{ index: number; value: string }> => {
   const result: Array<{ index: number; value: string }> = [];
@@ -819,8 +933,15 @@ const makeCandidate = (
   const raw = rawModelProbability(model.experts?.[crop.category], features);
   const probability = modelProbability(model.experts?.[crop.category], features);
   const confidence = clamp(probability * (0.65 + 0.35 * confidenceFraction(line.confidence)));
-  const previousText = normalizeLine(lines[lineIndex - 1]?.text ?? "");
   const currentText = normalizeLine(line.text);
+  const currentBox = geometry(line, lineIndex);
+  const precedingTotalLabel = lines.some((nearby, nearbyIndex) => {
+    if (nearbyIndex === lineIndex || !strongTotalLabel.test(normalizeLine(nearby.text))) return false;
+    const nearbyBox = geometry(nearby, nearbyIndex);
+    const distance = currentBox.centerY - nearbyBox.centerY;
+    return distance >= -Math.max(currentBox.height, nearbyBox.height) * 0.35
+      && distance <= Math.max(currentBox.height, nearbyBox.height) * 3.2;
+  });
   return {
     field,
     category: crop.category,
@@ -839,7 +960,11 @@ const makeCandidate = (
     // immediately above, the amount. A following label must not bless the
     // previous amount (e.g. "Total 0% supplies: 12.98" followed by
     // "Total Payable: -1.73").
-    finalTotalLabel: crop.category === "total" && strongTotalLabel.test(currentText + " " + previousText),
+    // A total label must be on the amount line or immediately above it. Do
+    // not let a later "Total (inclusive...)" label bless an earlier GST/tax
+    // amount in the same wide crop (the Walmart/GST and adjustment layouts
+    // expose exactly this failure mode).
+    finalTotalLabel: crop.category === "total" && (strongTotalLabel.test(currentText) || precedingTotalLabel),
   };
 };
 
@@ -904,7 +1029,7 @@ const selectCandidates = (
     field === "vendor",
     field === "purchase_date" && /\b(?:date|time|issued|invoice)\b/i.test(topContext),
     (field === "subtotal" || field === "tax") && categoryKeyword(field, top.strongest.evidence),
-    field === "total" && /\b(?:grand\s+total|total\s+due|amount\s+due|balance\s+due|payable|final\s+total|total)\b/i.test(topContext),
+    field === "total" && strongTotalLabel.test(topContext),
   ].some(Boolean);
   const allText = top.supports.map((candidate) => candidate.evidence).join(" ");
   // A bare "TOTAL" is routinely printed beside item/summary amounts.  It is
@@ -974,6 +1099,15 @@ const candidateForGroup = (
 ): ExpertCandidate[] => candidateValues(lines, field).map(({ index, value }) => makeCandidate(lines[index], index, value, field, crop, lines[index], lines, pageWidth, pageHeight));
 
 const emptySpecialist = (category: "receipt_id" | "item"): ReceiptHierarchicalSpecialistResult => ({ category, value: null, confidence: 0, status: "missing", evidence: "", supportBandCount: 0, independentObservationCount: 0, routedSupportCount: 0 });
+
+type FunnelCategory = ReceiptHierarchicalExtraction["funnel"]["byCategory"][ReceiptHierarchicalSpecialist];
+
+const agreementCandidateCount = (candidates: ExpertCandidate[], minimum: number): number => {
+  const grouped = new Map<string, ExpertCandidate[]>();
+  candidates.forEach((candidate) => grouped.set(candidate.canonical, [...(grouped.get(candidate.canonical) ?? []), candidate]));
+  return [...grouped.values()].filter((supports) => new Set(supports.map((candidate) => candidate.observationKey)).size >= minimum
+    && new Set(supports.map((candidate) => candidate.bandIndex)).size >= minimum).length;
+};
 
 /**
  * Aggregate first-pass and expert observations with independent per-field
@@ -1060,7 +1194,10 @@ export const extractReceiptFieldsFromHierarchicalBands = (
     });
     return candidates;
   };
-  const fields = Object.fromEntries(FIELDS.map((field) => [field, selectCandidates(field, candidatesFor(field), config.minIndependentObservations, config.expertThresholds?.[FIELD_CATEGORY[field]], config.expertMinConfidence?.[FIELD_CATEGORY[field]])])) as Record<ReceiptFrontendField, ReceiptHierarchicalFieldResult>;
+  const fieldCandidates = Object.fromEntries(FIELDS.map((field) => [field, candidatesFor(field)])) as Record<ReceiptFrontendField, ExpertCandidate[]>;
+  const fields = Object.fromEntries(FIELDS.map((field) => [field, selectCandidates(field, fieldCandidates[field], config.minIndependentObservations, config.expertThresholds?.[FIELD_CATEGORY[field]], config.expertMinConfidence?.[FIELD_CATEGORY[field]])])) as Record<ReceiptFrontendField, ReceiptHierarchicalFieldResult>;
+  // Keep specialist candidate lists stable and evaluate each list once. This
+  // also makes the routing funnel auditable without changing trust behavior.
   const specialistCandidates = (category: "receipt_id" | "item"): ExpertCandidate[] => {
     const candidates: ExpertCandidate[] = [];
     groups.forEach((lines, observationKey) => {
@@ -1087,14 +1224,44 @@ export const extractReceiptFieldsFromHierarchicalBands = (
     });
     return candidates;
   };
+  const specialistCandidateLists = {
+    receipt_id: specialistCandidates("receipt_id"),
+    item: specialistCandidates("item"),
+  };
   const specialists = {
-    receipt_id: specialistCandidates("receipt_id").length ? selectSpecialist("receipt_id", specialistCandidates("receipt_id"), config.minIndependentObservations) : emptySpecialist("receipt_id"),
-    item: specialistCandidates("item").length ? selectSpecialist("item", specialistCandidates("item"), config.minIndependentObservations) : emptySpecialist("item"),
+    receipt_id: specialistCandidateLists.receipt_id.length ? selectSpecialist("receipt_id", specialistCandidateLists.receipt_id, config.minIndependentObservations) : emptySpecialist("receipt_id"),
+    item: specialistCandidateLists.item.length ? selectSpecialist("item", specialistCandidateLists.item, config.minIndependentObservations) : emptySpecialist("item"),
   };
   const merged = deduplicateReceiptBandLines(allLines);
   const routedCategoryCounts = Object.fromEntries(RECEIPT_HIERARCHICAL_CATEGORIES.filter((category): category is ReceiptHierarchicalSpecialist => category !== "other").map((category) => [category, predictions.filter((prediction) => prediction.routes.includes(category)).length])) as Record<ReceiptHierarchicalSpecialist, number>;
   const trustedRoutes = predictions.filter((prediction) => prediction.routes.length).length;
   const unresolvedFields = FIELDS.filter((field) => fields[field].status !== "trusted");
+  const funnelCategories = [...RECEIPT_HIERARCHICAL_CATEGORIES].filter((category): category is ReceiptHierarchicalSpecialist => category !== "other");
+  const funnel = Object.fromEntries(funnelCategories.map((category) => {
+    const field = FIELDS.find((candidate) => FIELD_CATEGORY[candidate] === category);
+    const candidates = field ? fieldCandidates[field] : specialistCandidateLists[category as "receipt_id" | "item"];
+    const configuration = model.experts?.[category];
+    const threshold = field ? config.expertThresholds?.[category] ?? configuration?.threshold ?? 0.8 : configuration?.threshold ?? 0.8;
+    const minimumConfidence = field ? config.expertMinConfidence?.[category] ?? configuration?.min_confidence ?? 0.98 : configuration?.min_confidence ?? 0.98;
+    const categoryCrops = crops.filter((crop) => crop.category === category);
+    const categoryGroups = [...groups.values()].filter((lines) => lines[0]?.expertCategory === category);
+    const headerPrior = (prediction: ReceiptRouterPrediction): number => clamp(1 - ((prediction.top + prediction.bottom) / 2 / Math.max(1, dimensions.height)) / 0.42);
+    const routerEligibleBands = predictions.filter((prediction) => prediction.probabilities[category] >= routerThreshold(category, config.routerThresholds)
+      || (category === "vendor" && config.vendorHeaderPrior && headerPrior(prediction) >= 0.35 && prediction.probabilities[category] >= Math.min(routerThreshold(category, config.routerThresholds), 0.18))).length;
+    const modelPassing = candidates.filter((candidate) => candidate.probability >= threshold && candidate.confidence >= minimumConfidence).length;
+    const funnelItem: FunnelCategory = {
+      routerEligibleBands,
+      routedBands: predictions.filter((prediction) => prediction.routes.includes(category)).length,
+      cropsProposed: categoryCrops.length,
+      ocrCrops: categoryGroups.length,
+      ocrLines: categoryGroups.reduce((sum, lines) => sum + lines.length, 0),
+      candidateValues: candidates.length,
+      modelPassing,
+      agreementEligible: agreementCandidateCount(candidates.filter((candidate) => candidate.probability >= threshold && candidate.confidence >= minimumConfidence), config.minIndependentObservations),
+      trusted: field ? (fields[field].status === "trusted" ? 1 : 0) : (specialists[category as "receipt_id" | "item"].status === "trusted" ? 1 : 0),
+    };
+    return [category, funnelItem];
+  })) as Record<ReceiptHierarchicalSpecialist, FunnelCategory>;
   return {
     text: merged.map((line) => line.text).join("\n"),
     fields,
@@ -1121,6 +1288,7 @@ export const extractReceiptFieldsFromHierarchicalBands = (
       meanSupportCount: merged.length ? merged.reduce((sum, line) => sum + line.supportCount, 0) / merged.length : 0,
       expertInputLineCount: expertObservations.length,
     },
+    funnel: { byCategory: funnel },
   };
 };
 

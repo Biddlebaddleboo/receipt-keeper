@@ -44,6 +44,40 @@ describe("hierarchical PP-OCRv6 band routing", () => {
     expect(crops.every((crop) => crop.left >= 0 && crop.top >= 0 && crop.right <= 400 && crop.bottom <= 400)).toBe(true);
   });
 
+  it("keeps per-category top-band quotas independent from per-band fan-out", () => {
+    const bands = [
+      band(0, "ACME", 0),
+      band(1, "RECEIPT NO 12345", 200),
+      band(2, "ITEM 1.00", 400),
+      band(3, "TOTAL DUE 2.00", 600),
+    ];
+    const predictions = classifyReceiptBands(bands, {
+      maxCategoriesPerBand: 3,
+      topBandsPerCategory: { vendor: 1, receipt_id: 1, item: 1, total: 1 },
+      routerThresholds: Object.fromEntries(["vendor", "purchase_date", "subtotal", "tax", "total", "receipt_id", "item", "other"].map((category) => [category, 0])),
+      vendorHeaderPrior: true,
+    });
+    expect(predictions.filter((prediction) => prediction.routes.includes("vendor")).length).toBeLessThanOrEqual(1);
+    expect(predictions.filter((prediction) => prediction.routes.includes("receipt_id")).length).toBeLessThanOrEqual(1);
+    expect(predictions.filter((prediction) => prediction.routes.includes("item")).length).toBeLessThanOrEqual(1);
+    expect(predictions.every((prediction) => prediction.routes.length <= 3)).toBe(true);
+    expect(predictions.every((prediction) => prediction.rankingScores && Object.keys(prediction.rankingScores).length === 7)).toBe(true);
+  });
+
+  it("uses the broad header prior for routing a lexical-light vendor band", () => {
+    const predictions = classifyReceiptBands([
+      band(0, "ACME", 0),
+      band(1, "ITEM 1.00", 200),
+      band(2, "TOTAL DUE 2.00", 400),
+      band(3, "THANK YOU", 600),
+    ], {
+      maxCategoriesPerBand: 7,
+      vendorHeaderPrior: true,
+      routerThresholds: { vendor: 0.99, purchase_date: 0.99, subtotal: 0.99, tax: 0.99, total: 0.99, receipt_id: 0.99, item: 0.99, other: 0.99 },
+    });
+    expect(predictions[0]?.routes).toContain("vendor");
+  });
+
   it("routes a crop only to the predicted specialist", () => {
     const bands = [band(0, "TOTAL 21.46")];
     const predictions = [{
@@ -103,6 +137,45 @@ describe("hierarchical PP-OCRv6 band routing", () => {
       expertCrops: [
         { cropId: "crop-total-a", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
         { cropId: "crop-total-b", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+      ],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.total.status).not.toBe("trusted");
+  });
+
+  it("does not use router probability as a final specialist trust gate", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("TOTAL DUE 2.00", "crop-low-router", "total", 0),
+    ], {
+      config: {
+        name: "test",
+        windowMode: "medium",
+        maxCategoriesPerBand: 1,
+        maxExpertInvocations: 1,
+        minIndependentObservations: 1,
+        windowPadding: 1,
+        expertThresholds: { total: 0 },
+        expertMinConfidence: { total: 0 },
+      },
+      expertCrops: [{ cropId: "crop-low-router", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.01, anchorLineIndex: 0, anchorY: 85 }],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.total.status).toBe("trusted");
+  });
+
+  it("does not treat GST payable as a final-total label", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("GST payable (6%) 2.36", "crop-tax-a", "total", 0),
+      expertLine("GST payable (6%) 2.36", "crop-tax-b", "total", 1),
+    ], {
+      config: { name: "test", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 2, minIndependentObservations: 2, windowPadding: 1 },
+      expertCrops: [
+        { cropId: "crop-tax-a", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-tax-b", category: "total", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
       ],
       routerPredictions: [],
       pageWidth: 400,

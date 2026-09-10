@@ -114,7 +114,8 @@ const serializableExtraction = (extraction: ReceiptHierarchicalExtraction, inclu
   unresolvedFields: extraction.unresolvedFields,
   routing: extraction.routing,
   deduplication: extraction.deduplication,
-  routerPredictions: extraction.routerPredictions.map((prediction) => ({ bandIndex: prediction.bandIndex, top: prediction.top, bottom: prediction.bottom, probabilities: prediction.probabilities, routes: prediction.routes, dominantCategory: prediction.dominantCategory, lineCount: prediction.lineCount })),
+  funnel: extraction.funnel,
+  routerPredictions: extraction.routerPredictions.map((prediction) => ({ bandIndex: prediction.bandIndex, top: prediction.top, bottom: prediction.bottom, probabilities: prediction.probabilities, rankingScores: prediction.rankingScores, routes: prediction.routes, dominantCategory: prediction.dominantCategory, lineCount: prediction.lineCount })),
   expertCrops: extraction.expertCrops.map((crop) => ({ cropId: crop.cropId, category: crop.category, mode: crop.mode, top: crop.top, bottom: crop.bottom, height: crop.height, routerProbability: crop.routerProbability, sourceBandIndex: crop.sourceBandIndex, sourceBandIndices: crop.sourceBandIndices })),
 });
 
