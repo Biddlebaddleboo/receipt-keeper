@@ -644,7 +644,7 @@ export const extractReceiptFieldsFromPpocrV6Bands = (
   const mergedLines = deduplicateReceiptBandLines(observations);
   const mergedExtraction = bandSelector(mergedLines, selector, mergedLines.map((line) => line.text).join("\n"));
   const fields = Object.fromEntries(FIELDS.map((field) => {
-    const fieldObservations = bandResults.flatMap((band) => {
+    const fieldObservations: ReceiptBandFieldObservation[] = bandResults.flatMap((band) => {
       const result = band.fields[field];
       return result.value ? [{ bandIndex: band.bandIndex, observationKey: band.observationKey, result }] : [];
     });

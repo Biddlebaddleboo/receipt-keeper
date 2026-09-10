@@ -25,6 +25,10 @@
     "train:receipt-frontend:model": "python3 scripts/train_receipt_field_model.py",
     "train:receipt-ppocrv6:model": "python3 scripts/train_receipt_ppocrv6_field_model.py",
     "train:receipt-band:models": "python3 scripts/train_receipt_band_models.py --input benchmarks/receipt-band-ocr-sroie-all-fraction40-overlap40-contrast-2200-rules-hybrid.json",
+    "train:receipt-hierarchical:models": "python3 scripts/train_receipt_hierarchical_models.py",
+    "benchmark:receipt-hierarchical:replay": "vitest run --config vitest.benchmark.config.ts scripts/score-receipt-hierarchical-benchmark.test.ts",
+    "benchmark:receipt-hierarchical": "node scripts/run-receipt-hierarchical-benchmark.mjs",
+    "merge:receipt-hierarchical:browser": "node scripts/merge-receipt-hierarchical-browser-results.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

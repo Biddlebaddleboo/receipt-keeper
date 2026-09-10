@@ -32,6 +32,10 @@ benchmarks/receipt-frontend-production-browser-ocr.jsonl
 benchmarks/receipt-frontend-ml-results.json
 benchmarks/receipt-frontend-ml-production-summary.json
 benchmarks/receipt-frontend-ocr-*.json
+benchmarks/receipt-hierarchical-*.json
+benchmarks/receipt-hierarchical-smoke.json
+benchmarks/receipt-hierarchical-benchmark-results.json
+benchmarks/receipt-hierarchical-model-comparison.json
 *.traineddata
 
 # Editor directories and files
