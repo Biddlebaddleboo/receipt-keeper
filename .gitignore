@@ -20,6 +20,7 @@ benchmarks/real-receipt-results.json
 benchmarks/real-receipt-review-queue.json
 benchmarks/real-receipt-splits.json
 benchmarks/sroie500/
+benchmarks/receipt-finance-extra/
 benchmarks/modern-ocr-models/
 benchmarks/receipt-modern-ocr-*.json
 benchmarks/receipt-band-ocr-*.json
@@ -37,6 +38,7 @@ benchmarks/receipt-hierarchical-smoke.json
 benchmarks/receipt-hierarchical-benchmark-results.json
 benchmarks/receipt-hierarchical-model-comparison.json
 benchmarks/receipt-finance-evaluation-results.json
+benchmarks/receipt-finance-extra-hierarchical.json
 *.traineddata
 
 # Editor directories and files

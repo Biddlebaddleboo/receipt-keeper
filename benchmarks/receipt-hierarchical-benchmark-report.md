@@ -6,7 +6,7 @@ The hierarchical path is experimental and is not wired into live receipt extract
 
 SROIE public OCR cache: 500 receipts; grouped tuning/validation/final split 301/100/99. Exact duplicate groups remain together.
 Router and specialist parameters were trained on tuning receipts. Configuration selection uses validation only; final is evaluated once after selection.
-The grouped SROIE labels expose vendor/date/total ground truth. Subtotal/tax/receipt-ID/item labels used by the router/trainer remain weak OCR/layout supervision and are not field-accuracy claims. A separate 25-receipt public SROIE final subset was independently image-reviewed for subtotal/tax; its held-out results are reported in `benchmarks/receipt-finance-evaluation-report.md` and were not used for training or configuration selection.
+The grouped SROIE labels expose vendor/date/total ground truth. Subtotal/tax/receipt-ID/item labels used by the router/trainer remain weak OCR/layout supervision and are not field-accuracy claims. A separate 100-receipt public SROIE evaluation set was independently image-reviewed for subtotal/tax; its held-out results are reported in `benchmarks/receipt-finance-evaluation-report.md` and were not used for training or configuration selection.
 
 ## Router calibration diagnosis
 

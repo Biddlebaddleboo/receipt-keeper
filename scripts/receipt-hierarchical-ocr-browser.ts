@@ -21,7 +21,7 @@ import {
 import { preprocessReceiptPixels } from "@/lib/receiptOcr";
 import { RECEIPT_MODERN_OCR_ENGINES, receiptOcrLinesFromPaddleItems, type ReceiptModernOcrLine } from "@/lib/receiptModernOcr";
 
-type Dataset = "sroie" | "production";
+type Dataset = "sroie" | "production" | "finance-extra";
 const params = new URLSearchParams(window.location.search);
 const dataset = (params.get("dataset") ?? "sroie") as Dataset;
 const subset = params.get("subset") ?? "all";
@@ -45,6 +45,9 @@ const sourceEntries = async (): Promise<Array<{ id: string; url: string; categor
   if (dataset === "production") {
     const manifest = await (await fetch("/benchmarks/real-receipt-manifest.json")).json() as Array<Record<string, unknown>>;
     return manifest.map((entry) => ({ id: String(entry.filename), url: `/benchmarks/real-receipts/${encodeURIComponent(String(entry.filename))}`, category: /walmart/i.test(String(entry.vendor ?? "")) ? "walmart" : "other" }));
+  }
+  if (dataset === "finance-extra") {
+    return [{ id: "extra-0001", url: "/benchmarks/receipt-finance-extra/images/extra-0001.jpg", category: "other" }];
   }
   const ids = Array.from({ length: 500 }, (_, index) => index).filter((index) => subset === "all" || splitFor(index) === subset);
   return (limit > 0 ? ids.slice(0, limit) : ids).map((index) => ({ id: String(index).padStart(3, "0"), url: `/benchmarks/sroie500/images/${String(index).padStart(3, "0")}.jpg` }));
@@ -108,15 +111,16 @@ const heapBytes = (): number | null => {
 };
 
 const serializableLine = (line: ReceiptHierarchicalObservation) => ({ text: line.text, confidence: line.confidence, bbox: line.bbox, polygon: line.polygon, bandIndex: line.bandIndex, bandTop: line.bandTop, bandBottom: line.bandBottom, observationKey: line.observationKey, sourcePass: line.sourcePass, expertCategory: line.expertCategory, cropId: line.cropId, routerProbability: line.routerProbability });
-const serializableExtraction = (extraction: ReceiptHierarchicalExtraction, includeValues: boolean) => ({
+const serializableExtraction = (extraction: ReceiptHierarchicalExtraction, includeValues: boolean, includeDiagnostics = false) => ({
   fields: Object.fromEntries(Object.entries(extraction.fields).map(([field, value]) => [field, includeValues ? value : { confidence: value.confidence, status: value.status, source: value.source, supportBandCount: value.supportBandCount, independentObservationCount: value.independentObservationCount, routedSupportCount: value.routedSupportCount }])),
   specialists: Object.fromEntries(Object.entries(extraction.specialists).map(([field, value]) => [field, includeValues ? value : { confidence: value.confidence, status: value.status, supportBandCount: value.supportBandCount, independentObservationCount: value.independentObservationCount }])),
   unresolvedFields: extraction.unresolvedFields,
   routing: extraction.routing,
   deduplication: extraction.deduplication,
   funnel: extraction.funnel,
+  diagnostics: includeDiagnostics ? extraction.diagnostics : undefined,
   routerPredictions: extraction.routerPredictions.map((prediction) => ({ bandIndex: prediction.bandIndex, top: prediction.top, bottom: prediction.bottom, probabilities: prediction.probabilities, rankingScores: prediction.rankingScores, routes: prediction.routes, dominantCategory: prediction.dominantCategory, lineCount: prediction.lineCount })),
-  expertCrops: extraction.expertCrops.map((crop) => ({ cropId: crop.cropId, category: crop.category, mode: crop.mode, top: crop.top, bottom: crop.bottom, height: crop.height, routerProbability: crop.routerProbability, sourceBandIndex: crop.sourceBandIndex, sourceBandIndices: crop.sourceBandIndices })),
+  expertCrops: extraction.expertCrops.map((crop) => ({ cropId: crop.cropId, category: crop.category, mode: crop.mode, top: crop.top, bottom: crop.bottom, height: crop.height, routerProbability: crop.routerProbability, sourceBandIndex: crop.sourceBandIndex, sourceBandIndices: crop.sourceBandIndices, sourceObservationKey: crop.sourceObservationKey })),
 });
 
 const run = async () => {
@@ -126,7 +130,8 @@ const run = async () => {
   const ocr = await PaddleOCR.create(paddleOptions(candidate));
   const initializationMs = performance.now() - beforeInit;
   const entries = await sourceEntries();
-  const includeValues = dataset === "sroie";
+  const includeValues = dataset !== "production";
+  const includeDiagnostics = dataset === "finance-extra";
   const rows: Array<Record<string, unknown>> = [];
   const firstPassTimes: number[] = [];
   const expertTimes: number[] = [];
@@ -231,10 +236,10 @@ const run = async () => {
       firstPassTimes.push(firstPassMs);
       expertTimes.push(expertMs);
       preparationTimes.push(preparationMs);
-      const extraction = extractReceiptFieldsFromHierarchicalBands(firstPassObservations, expertObservations, { config, routerPredictions: predictions, expertCrops: crops, pageWidth: dimensions.width || undefined, pageHeight: dimensions.height || undefined });
+      const extraction = extractReceiptFieldsFromHierarchicalBands(firstPassObservations, expertObservations, { config, routerPredictions: predictions, expertCrops: crops, pageWidth: dimensions.width || undefined, pageHeight: dimensions.height || undefined, includeDiagnostics });
       const totalMs = performance.now() - started;
       totalTimes.push(totalMs);
-      const row: Record<string, unknown> = { id: entry.id, category: entry.category, config: config.name, ocrError, durationMs: totalMs, firstPassMs, expertMs, preparationMs, firstPassOcrInvocations: firstBands.length, specialistCropsProposed: crops.length, specialistInvocations: Math.max(0, crops.length - specialistCropsSkippedEarly), specialistViewInvocations, specialistCropsSkippedEarly, firstPassLineCount: firstPassObservations.length, expertLineCount: expertObservations.length, heapBefore, heapAfter: heapBytes(), extraction: serializableExtraction(extraction, includeValues) };
+      const row: Record<string, unknown> = { id: entry.id, category: entry.category, config: config.name, ocrError, durationMs: totalMs, firstPassMs, expertMs, preparationMs, firstPassOcrInvocations: firstBands.length, specialistCropsProposed: crops.length, specialistInvocations: Math.max(0, crops.length - specialistCropsSkippedEarly), specialistViewInvocations, specialistCropsSkippedEarly, firstPassLineCount: firstPassObservations.length, expertLineCount: expertObservations.length, heapBefore, heapAfter: heapBytes(), extraction: serializableExtraction(extraction, includeValues, includeDiagnostics) };
       if (includeValues) { row.firstPassObservations = firstPassObservations.map(serializableLine); row.expertObservations = expertObservations.map(serializableLine); }
       rows.push(row);
       completed += 1;
