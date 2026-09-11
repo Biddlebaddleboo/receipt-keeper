@@ -210,6 +210,99 @@ describe("hierarchical PP-OCRv6 band routing", () => {
     expect(extraction.fields.purchase_date.status).toBe("trusted");
   });
 
+  it("trusts a clearly labelled finance amount through the calibrated single-observation path", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("Sub-total 57.00", "crop-subtotal", "subtotal", 0),
+    ], {
+      config: {
+        name: "test-finance-single",
+        windowMode: "medium",
+        maxCategoriesPerBand: 1,
+        maxExpertInvocations: 1,
+        minIndependentObservations: 2,
+        windowPadding: 1,
+        expertThresholds: { subtotal: 0 },
+        expertMinConfidence: { subtotal: 0 },
+        allowStrongSingleObservation: { subtotal: true },
+        strongPredictionThreshold: { subtotal: 0 },
+        strongConfidenceThreshold: { subtotal: 0 },
+      },
+      expertCrops: [{ cropId: "crop-subtotal", category: "subtotal", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.01, anchorLineIndex: 0, anchorY: 85 }],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.subtotal.value).toBe("57.00");
+    expect(extraction.fields.subtotal.status).toBe("trusted");
+    expect(extraction.fields.tax.status).toBe("missing");
+  });
+
+  it("fails open for inclusive-tax labels instead of treating them as subtotal or tax amounts", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("SUBTOTAL INCL.GST 47.70", "crop-subtotal-inclusive", "subtotal", 0),
+      expertLine("GST Included 0.41", "crop-tax-inclusive", "tax", 1),
+    ], {
+      config: { name: "test-finance-negative", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 2, minIndependentObservations: 1, windowPadding: 1, expertThresholds: { subtotal: 0, tax: 0 }, expertMinConfidence: { subtotal: 0, tax: 0 } },
+      expertCrops: [
+        { cropId: "crop-subtotal-inclusive", category: "subtotal", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-tax-inclusive", category: "tax", mode: "medium", left: 0, top: 200, right: 400, bottom: 400, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 285 },
+      ],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.subtotal.status).not.toBe("trusted");
+    expect(extraction.fields.tax.status).not.toBe("trusted");
+  });
+
+  it("rejects an amount attached to an excluded-GST or payment label as tax", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("Amt Paid excl. GST: RM 105.57", "crop-tax-excluded", "tax", 0),
+      expertLine("Amount(RM) Tax(RM) 82.80", "crop-tax-column-header", "tax", 1),
+    ], {
+      config: { name: "test-tax-excluded", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 2, minIndependentObservations: 1, windowPadding: 1, expertThresholds: { tax: 0 }, expertMinConfidence: { tax: 0 } },
+      expertCrops: [
+        { cropId: "crop-tax-excluded", category: "tax", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-tax-column-header", category: "tax", mode: "medium", left: 0, top: 200, right: 400, bottom: 400, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 285 },
+      ],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.tax.status).not.toBe("trusted");
+    expect(extraction.fields.tax.value).toBeNull();
+
+    const directTax = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("GST AMT: RM 4.43", "crop-tax-direct", "tax", 0),
+    ], {
+      config: { name: "test-tax-direct", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 1, minIndependentObservations: 1, windowPadding: 1, expertThresholds: { tax: 0 }, expertMinConfidence: { tax: 0 } },
+      expertCrops: [{ cropId: "crop-tax-direct", category: "tax", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 }],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(directTax.fields.tax.value).toBe("RM4.43");
+    expect(directTax.fields.tax.status).toBe("trusted");
+  });
+
+  it("groups equivalent financial OCR formatting without counting the same crop twice", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], [
+      expertLine("SUBTOTAL 1,234.50", "crop-subtotal-a", "subtotal", 0),
+      expertLine("Sub-total RM1234.50", "crop-subtotal-b", "subtotal", 1),
+    ], {
+      config: { name: "test-finance-equivalence", windowMode: "medium", maxCategoriesPerBand: 1, maxExpertInvocations: 2, minIndependentObservations: 2, windowPadding: 1, expertThresholds: { subtotal: 0 }, expertMinConfidence: { subtotal: 0 } },
+      expertCrops: [
+        { cropId: "crop-subtotal-a", category: "subtotal", mode: "medium", left: 0, top: 0, right: 400, bottom: 200, width: 400, height: 200, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 85 },
+        { cropId: "crop-subtotal-b", category: "subtotal", mode: "medium", left: 0, top: 200, right: 400, bottom: 400, width: 400, height: 200, sourceBandIndex: 1, sourceObservationKey: "band-1", sourceBandIndices: [1], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 285 },
+      ],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.subtotal.competingValueCount).toBe(1);
+    expect(extraction.fields.subtotal.independentObservationCount).toBe(2);
+  });
+
   it("merges a one-character receipt-ID OCR variant without double-counting the crop", () => {
     const extraction = extractReceiptFieldsFromHierarchicalBands([], [
       expertLine("Receipt No: ABC12345", "crop-id-a", "receipt_id", 0),
