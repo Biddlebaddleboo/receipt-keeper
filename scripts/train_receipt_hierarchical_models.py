@@ -108,11 +108,17 @@ STRONG_TOTAL_LABEL_RE = re.compile(r"\b(?:grand\s+total|total\s+(?:due|payable|a
 STRONG_RECEIPT_ID_LABEL_RE = re.compile(r"\b(?:receipt|invoice|order|transaction|trans(?:action)?|document|doc|bill)\b", re.I)
 STRONG_SUBTOTAL_LABEL_RE = re.compile(r"\b(?:sub[\s-]?(?:total|t[o0]tal|futal|t[a4]l)|(?:total\s+)?sales?\s*\(?\s*(?:excluding|excl\.?|before)\b|total\s*\(?\s*(?:excluding|excl\.?|before)\b|before\s+tax|net\s+subtotal)\b", re.I)
 STRONG_TAX_LABEL_RE = re.compile(r"\b(?:tax|gst|hst|vat|sales\s+tax)(?:\s*[/ -]?\s*(?:amt|amount|total|summary))?\b", re.I)
-TAX_METADATA_LABEL_RE = re.compile(r"\b(?:tax\s*(?:id|no\.?|number|registration)|gst\s*(?:no\.?|number|id)|taxable\s+id)\b", re.I)
+TAX_METADATA_LABEL_RE = re.compile(r"\b(?:tax\s*(?:id|no\.?|number|registration)|gst\s*(?:no\.?|number|id|reg(?:istration)?)|taxable\s+id)\b", re.I)
 SUBTOTAL_INCLUSIVE_LABEL_RE = re.compile(r"\b(?:sub[\s-]?total|total\s+sales?)\b[^\n]{0,24}\b(?:incl(?:usive)?|including|inc)\.?\s*(?:gst|tax|vat|hst)\b", re.I)
-TAX_INCLUDED_LABEL_RE = re.compile(r"\b(?:tax|gst|hst|vat)\b[^\n]{0,20}\b(?:incl(?:uded|usive)?|including|inc)\b", re.I)
+TAX_INCLUSIVE_TOTAL_LABEL_RE = re.compile(r"\b(?:total|sales?|sub[\s-]?total|nett?|amount)\b[^\n]{0,32}\b(?:(?:(?:incl(?:usive)?|[il]nclusive|in[dcl]l|including|inc)\.?\s*(?:of\s*)?|with\s+)(?:gst|tax|vat|hst)\b|(?:gst|tax|vat|hst)\s*(?:incl(?:uded)?|inclusive|inc)\.?\b)", re.I)
+TAX_INCLUDED_LABEL_RE = re.compile(r"\b(?:tax|gst|hst|vat)\b[^\n]{0,28}\b(?:incl(?:uded|usive)?|including|inc)\b", re.I)
+TAX_INCLUSIVE_DESCRIPTION_RE = re.compile(r"\b(?:bill|gst|tax)\b[^\n]{0,32}\binclusive\s+of\s+\d+(?:\.\d+)?\s*%?\s*(?:gst|tax|vat|hst)\b", re.I)
 TAX_EXCLUDED_LABEL_RE = re.compile(r"\b(?:excluded|excluding|excl\.?|before)\b[^\n]{0,16}\b(?:gst|tax|vat|hst)\b", re.I)
-TAX_TABLE_HEADER_RE = re.compile(r"\b(?:amount|amt)\s*(?:\([^)]*\))?[^0-9\n]{0,16}\b(?:tax|gst|hst|vat)\s*(?:\([^)]*\))?\b", re.I)
+TAX_TABLE_HEADER_RE = re.compile(r"\b(?:amount|amt)\s*(?:\([^)]*\))?[^0-9\n]{0,16}\b(?:tax|gst|hst|vat)\s*(?:\([^)]*\))?\b|\b(?:tax|gst|hst|vat)\s*(?:\([^)]*\))?[^0-9\n]{0,16}\b(?:amount|amt)\b", re.I)
+INLINE_TAX_COLUMN_HEADER_RE = re.compile(r"\b(?:amount|amt)\s*\([^)]*\)\s+(?:tax|gst|hst|vat)\s*\([^)]*\)\s*[-:]?\s*[$€£]?\s*\d", re.I)
+GENERIC_TAX_COLUMN_HEADER_RE = re.compile(r"^(?:tax|gst|hst|vat)(?:\s*\([^)]*\))?$", re.I)
+TAX_CODE_BASE_RE = re.compile(r"\b(?:s|sr|standard|z|zr|zero)\s*[-:=]?\s*(?:(?:gst|tax)\s*)?(?:@?\s*)?[\[(]?\d+(?:\.\d+)?\s*%[\])]?(?:\s*(?:gst|tax))?\b|\b(?:s|sr|standard|z|zr|zero)\s*[-:=]?\s*(?:gst|tax)\s*@?\s*[\[(]?\d+(?:\.\d+)?\s*%[\])]?", re.I)
+TAX_ZERO_RATE_RE = re.compile(r"\b(?:z|zr|zero)\s*[-:=]?\s*(?:(?:gst|tax)\s*)?(?:@?\s*)?[\[(]?0\s*%[\])]?(?:\s*(?:gst|tax))?\b", re.I)
 DIRECT_TAX_AMOUNT_LABEL_RE = re.compile(r"\b(?:tax|gst|hst|vat)(?:\s*[/ -]?\s*(?:amt|amount|total|summary))?\s*[:=]?\s*[A-Za-z]{0,3}$", re.I)
 DIRECT_TAX_AMOUNT_VALUE_RE = re.compile(r"\b(?:tax|gst|hst|vat)(?:\s*[/ -]?\s*(?:amt|amount|total|summary))?\s*[:=]\s*(?:[A-Za-z]{0,3}\s*)?(?:[$€£]|\b(?:rm|usd|cad|gbp)\b)?\s*\(?\s*-?\d{1,6}(?:[,.]\d{3})*(?:[,.]\d{2})", re.I)
 TAX_EXCLUDED_AMOUNT_CONTEXT_RE = re.compile(r"\b(?:excluded|excluding|excl\.?|before)\b[^\n]{0,16}\b(?:gst|tax|vat|hst)\b[^0-9]{0,8}$", re.I)
@@ -232,6 +238,46 @@ def financial_association(lines: list[dict[str, Any]], index: int, category: str
     matching_index = next((candidate_index for candidate_index, candidate in enumerate(amount_values) if amount_key(candidate) == amount_key(raw)), 0)
     own_pattern = STRONG_SUBTOTAL_LABEL_RE if category == "subtotal" else STRONG_TAX_LABEL_RE
     opposing_pattern = SUBTOTAL_OPPOSING_RE if category == "subtotal" else TAX_OPPOSING_RE
+    summary_anchor_index = None
+    if category == "tax":
+        nearby_summary = [
+            candidate_index for candidate_index, candidate in enumerate(lines)
+            if abs(candidate_index - index) <= 8
+            and (
+                re.search(r"\b(?:gst|tax)\s*(?:summary|analysis)\b", text(candidate.get("text")), re.I)
+                or TAX_CODE_BASE_RE.search(text(candidate.get("text")))
+                or re.search(r"\b(?:gst|tax)\s*(?:amt|amount)\b", text(candidate.get("text")), re.I)
+                or re.search(r"\b(?:gst|tax)\s*@\s*\d+(?:\.\d+)?\s*%", text(candidate.get("text")), re.I)
+            )
+        ]
+        if nearby_summary:
+            summary_anchor_index = min(nearby_summary, key=lambda candidate_index: abs(candidate_index - index))
+    summary_entries: list[dict[str, Any]] = []
+    if summary_anchor_index is not None:
+        start_index = max(0, summary_anchor_index - 1)
+        for offset, candidate in enumerate(lines[start_index:min(len(lines), summary_anchor_index + 10)]):
+            absolute_index = start_index + offset
+            candidate_text = text(candidate.get("text"))
+            candidate_box = box(candidate, absolute_index)
+            for candidate_raw in AMOUNT_RE.findall(candidate_text):
+                candidate_start = max(0, candidate_text.find(candidate_raw))
+                summary_entries.append({
+                    "index": absolute_index,
+                    "raw": candidate_raw,
+                    "centerX": candidate_box["x0"] + candidate_box["width"] * ((candidate_start + len(candidate_raw) / 2) / max(1, len(candidate_text))),
+                })
+
+    def summary_column_match(candidate_raw: str) -> float:
+        candidate = next((entry for entry in summary_entries if entry["index"] == index and amount_key(entry["raw"]) == amount_key(candidate_raw)), None)
+        if not candidate or len(summary_entries) < 2:
+            return 0.5
+        centers = sorted({round(float(entry["centerX"]), 2) for entry in summary_entries})
+        if len(centers) < 2:
+            return 0.5
+        rank = min(range(len(centers)), key=lambda candidate_rank: abs(centers[candidate_rank] - float(candidate["centerX"])))
+        fraction = rank / max(1, len(centers) - 1)
+        return fraction if category == "tax" else 1.0 - fraction
+
     options: list[dict[str, Any]] = []
     for candidate_index, candidate in enumerate(lines):
         if abs(candidate_index - index) > 4:
@@ -240,9 +286,21 @@ def financial_association(lines: list[dict[str, Any]], index: int, category: str
         if not (KEYWORDS[category].search(label_text) or own_pattern.search(label_text)) or (category == "tax" and TAX_METADATA_LABEL_RE.search(label_text)):
             continue
         label_box = box(candidate, candidate_index)
-        ambiguous_role = bool(SUBTOTAL_INCLUSIVE_LABEL_RE.search(label_text)) if category == "subtotal" else bool(TAX_INCLUDED_LABEL_RE.search(label_text)) or (bool(TAX_TABLE_HEADER_RE.search(label_text)) and len(amount_values) < 2)
+        row_context = " ".join(text(nearby.get("text")) for nearby in lines[max(0, candidate_index - 3):min(len(lines), candidate_index + 4)])
+        inline_tax_header = category == "tax" and bool(INLINE_TAX_COLUMN_HEADER_RE.search(label_text))
+        table_header = category == "tax" and ((not AMOUNT_RE.search(label_text) and (bool(GENERIC_TAX_COLUMN_HEADER_RE.fullmatch(label_text)) or bool(TAX_TABLE_HEADER_RE.search(label_text)))) or inline_tax_header)
+        item_table_header = table_header and bool(re.search(r"\b(?:item|qty|quantity|description|s\s*/\s*price|u\.?\s*price|unit|code)\b", row_context, re.I))
+        tax_inclusive_role = category == "tax" and bool(TAX_INCLUSIVE_TOTAL_LABEL_RE.search(label_text)) and not bool(TAX_INCLUDED_LABEL_RE.search(re.sub(r"\b(?:total|sales?|sub[\s-]?total|nett?|amount)\b", "", label_text, flags=re.I)))
+        direct_included_tax = category == "tax" and (bool(TAX_INCLUDED_LABEL_RE.search(label_text)) or bool(TAX_INCLUSIVE_DESCRIPTION_RE.search(label_text))) and not tax_inclusive_role
+        tax_included_without_explicit_amount = category == "tax" and bool(TAX_INCLUDED_LABEL_RE.search(label_text)) and not re.search(r"[:=]", label_text)
+        tax_code_base = category == "tax" and bool(TAX_CODE_BASE_RE.search(label_text)) and bool(AMOUNT_RE.search(label_text)) and not bool(re.search(r"\b(?:amt|amount)\b", label_text, re.I))
+        zero_rate = category == "tax" and bool(TAX_ZERO_RATE_RE.search(label_text))
+        ambiguous_role = bool(SUBTOTAL_INCLUSIVE_LABEL_RE.search(label_text)) if category == "subtotal" else tax_inclusive_role
         excluded_tax_role = category == "tax" and bool(TAX_EXCLUDED_LABEL_RE.search(label_text)) and not has_direct_tax_amount(label_text)
-        strong_label = bool(own_pattern.search(label_text)) and not (category == "tax" and TAX_METADATA_LABEL_RE.search(label_text)) and not ambiguous_role and not excluded_tax_role
+        direct_label = category == "tax" and (direct_included_tax or bool(TAX_CODE_BASE_RE.search(label_text))
+            or bool(re.search(r"\b(?:total\s+)?(?:tax|gst|hst|vat)\s*(?:amt|amount|total|summary)?\b", label_text, re.I))
+            or bool(re.search(r"\b(?:tax|gst)\s*@\s*\d+(?:\.\d+)?\s*%", label_text, re.I)))
+        strong_label = bool(own_pattern.search(label_text)) and not (category == "tax" and TAX_METADATA_LABEL_RE.search(label_text)) and not ambiguous_role and not excluded_tax_role and not item_table_header and not tax_code_base
         same_line = candidate_index == index
         line_distance = abs(candidate_index - index)
         below = label_box["cy"] > amount_box["cy"] + max(label_box["height"], amount_box["height"]) * 0.6
@@ -254,6 +312,8 @@ def financial_association(lines: list[dict[str, Any]], index: int, category: str
         rank_fraction = matching_index / max(1, amount_count - 1) if amount_count > 1 else 0.5
         role_rank = rank_fraction if category == "tax" else 1.0 - rank_fraction
         column_match = max(0.0, min(1.0, geometric_column_match * 0.65 + role_rank * 0.35))
+        summary_match = summary_column_match(raw)
+        summary_context = summary_anchor_index is not None
         own_match = own_pattern.search(label_text) or KEYWORDS[category].search(label_text)
         label_end = own_match.end() if own_match else len(label_text)
         label_start = own_match.start() if own_match else 0
@@ -262,9 +322,9 @@ def financial_association(lines: list[dict[str, Any]], index: int, category: str
         own_before_amount = not same_line or amount_start >= label_start
         amount_context_before = line_text[max(0, amount_start - 36):amount_start] if same_line else ""
         tax_amount_opposing = category == "tax" and same_line and (bool(TAX_EXCLUDED_AMOUNT_CONTEXT_RE.search(amount_context_before)) or (bool(PAYMENT_AMOUNT_CONTEXT_RE.search(amount_context_before)) and not bool(DIRECT_TAX_AMOUNT_LABEL_RE.search(amount_context_before))))
-        opposing = ambiguous_role or excluded_tax_role or tax_amount_opposing or (not strong_label and bool(opposing_pattern.search(label_text))) or (same_line and not strong_label and bool(opposing_pattern.search(label_text)))
-        score = max(0.0, min(1.0, (0.44 if strong_label else 0.25) + (0.23 if same_line else 0.07) + line_match * 0.10 + column_match * 0.14 + text_proximity * 0.12 + (0.03 if own_before_amount else -0.12) - (0.24 if opposing else 0)))
-        options.append({"score": score, "labelText": label_text, "labelIndex": candidate_index, "strongLabel": strong_label, "sameLine": same_line, "columnMatch": column_match, "opposing": opposing, "amountRank": matching_index})
+        opposing = ambiguous_role or excluded_tax_role or tax_amount_opposing or item_table_header or inline_tax_header or tax_code_base or tax_included_without_explicit_amount or (tax_inclusive_role and not direct_included_tax) or (not strong_label and bool(opposing_pattern.search(label_text))) or (same_line and not strong_label and bool(opposing_pattern.search(label_text)))
+        score = max(0.0, min(1.0, (0.44 if strong_label else 0.25) + (0.23 if same_line else 0.07) + line_match * 0.10 + column_match * 0.14 + (summary_match * 0.12 if summary_context else 0) + (0.08 if direct_label else 0) + text_proximity * 0.12 + (0.03 if own_before_amount else -0.12) - (0.22 if item_table_header else 0) - (0.20 if tax_code_base else 0) - (0.24 if opposing else 0)))
+        options.append({"score": score, "labelText": label_text, "labelIndex": candidate_index, "strongLabel": strong_label, "sameLine": same_line, "columnMatch": column_match, "summaryColumnMatch": summary_match, "summaryContext": summary_context, "directLabel": direct_label, "tableHeader": item_table_header, "taxCodeBase": tax_code_base, "zeroRate": zero_rate, "opposing": opposing, "amountRank": matching_index})
     return max(options, key=lambda item: item["score"]) if options else None
 
 
@@ -301,13 +361,39 @@ def router_features(group: dict[str, Any], width: float, height: float) -> list[
     alpha = sum(sum(ch.isalpha() for ch in text(line.get("text"))) / max(1, len(text(line.get("text")))) for line in lines) / count if count else 0
     digit = sum(sum(ch.isdigit() for ch in text(line.get("text"))) / max(1, len(text(line.get("text")))) for line in lines) / count if count else 0
     keyword = lambda category: sum(bool(KEYWORDS[category].search(text(line.get("text")))) for line in lines) / max(1, count)
-    candidate = lambda category: (
-        any(index < 8 and sum(char.isalpha() for char in text(line.get("text"))) >= 3 and sum(char.isalpha() for char in text(line.get("text"))) / max(1, len(text(line.get("text")))) >= 0.35 and not AMOUNT_RE.search(text(line.get("text"))) for index, line in enumerate(lines)) if category == "vendor" else
-        bool(s["date_lines"]) if category == "purchase_date" else
-        (bool(KEYWORDS[category].search(" ".join(text(line.get("text")) for line in lines))) and bool(s["amount_lines"])) if category in ("subtotal", "tax", "total") else
-        any(KEYWORDS[category].search(text(line.get("text"))) and re.search(r"[A-Z0-9]{3,}", text(line.get("text")), re.I) for line in lines) if category == "receipt_id" else
-        bool(KEYWORDS[category].search(" ".join(text(line.get("text")) for line in lines)) or s["amount_lines"] >= 3) if category == "item" else False
-    )
+    joined = " ".join(text(line.get("text")) for line in lines)
+
+    def candidate(category: str) -> bool:
+        if category == "vendor":
+            return any(
+                index < 8
+                and sum(char.isalpha() for char in text(line.get("text"))) >= 3
+                and sum(char.isalpha() for char in text(line.get("text"))) / max(1, len(text(line.get("text")))) >= 0.35
+                and not AMOUNT_RE.search(text(line.get("text")))
+                for index, line in enumerate(lines)
+            )
+        if category == "purchase_date":
+            return bool(s["date_lines"])
+        if category == "subtotal":
+            return bool(STRONG_SUBTOTAL_LABEL_RE.search(joined) and s["amount_lines"])
+        if category == "tax":
+            return bool(
+                any(
+                    (KEYWORDS["tax"].search(text(line.get("text"))) and not TAX_METADATA_LABEL_RE.search(text(line.get("text"))))
+                    or TAX_INCLUDED_LABEL_RE.search(text(line.get("text")))
+                    or TAX_INCLUSIVE_DESCRIPTION_RE.search(text(line.get("text")))
+                    or re.search(r"\b(?:gst|tax)\s*@\s*\d+(?:\.\d+)?\s*%", text(line.get("text")), re.I)
+                    for line in lines
+                )
+                and s["amount_lines"]
+            )
+        if category == "total":
+            return bool(KEYWORDS[category].search(joined) and s["amount_lines"])
+        if category == "receipt_id":
+            return any(KEYWORDS[category].search(text(line.get("text"))) and re.search(r"[A-Z0-9]{3,}", text(line.get("text")), re.I) for line in lines)
+        if category == "item":
+            return bool(KEYWORDS[category].search(joined) or s["amount_lines"] >= 3)
+        return False
     density = count / max(1.0, (float(group["height"]) / max(1.0, s["median_height"])))
     header_prior = max(0.0, min(1.0, 1.0 - (((float(group["top"]) + float(group["bottom"])) / 2.0) / max(1.0, height)) / 0.42))
     return [
@@ -579,6 +665,7 @@ def expert_candidate_values(lines: list[dict[str, Any]], category: str) -> list[
             if len(value) >= 3 and (AMOUNT_RE.search(value) or KEYWORDS["item"].search(value)):
                 result.append((index, value, None))
     else:
+        financial_results: list[tuple[int, str, dict[str, Any] | None]] = []
         for index, line in enumerate(lines):
             value = text(line.get("text"))
             for raw in AMOUNT_RE.findall(value):
@@ -589,9 +676,21 @@ def expert_candidate_values(lines: list[dict[str, Any]], category: str) -> list[
                 if category in ("subtotal", "tax"):
                     if not nearby_financial_label(lines, index, category, 4):
                         continue
-                    result.append((index, raw.replace(" ", ""), financial_association(lines, index, category, raw)))
+                    financial_results.append((index, raw.replace(" ", ""), financial_association(lines, index, category, raw)))
                 else:
                     result.append((index, raw.replace(" ", ""), None))
+        if category in ("subtotal", "tax"):
+            positive_direct_tax = category == "tax" and any(
+                (amount_value(value) or 0) > 0
+                and bool(association and association.get("strongLabel"))
+                and not bool(association and association.get("opposing"))
+                and bool(association and (association.get("summaryContext") or association.get("directLabel") or association.get("sameLine")))
+                for _, value, association in financial_results
+            )
+            result.extend(
+                item for item in financial_results
+                if not (category == "tax" and positive_direct_tax and ((amount_value(item[1]) or -1) == 0 or bool(item[2] and item[2].get("zeroRate"))))
+            )
     return result
 
 
@@ -619,7 +718,7 @@ def expert_candidate_hard_negative(category: str, lines: list[dict[str, Any]], i
     if category == "subtotal":
         return not association or float(association.get("score", 0)) < 0.55 or bool(association.get("opposing"))
     if category == "tax":
-        return not association or float(association.get("score", 0)) < 0.55 or bool(association.get("opposing"))
+        return not association or float(association.get("score", 0)) < 0.55 or bool(association.get("opposing")) or bool(association.get("taxCodeBase")) or bool(association.get("tableHeader")) or bool(association.get("zeroRate"))
     return False
 
 
@@ -639,7 +738,21 @@ def expert_candidate_positive(category: str, lines: list[dict[str, Any]], index:
         expected_value = amount_value(str(label.get("total", "")))
         return expected_value is not None and abs((amount_value(value) or -999999) - expected_value) < 0.011 and bool(STRONG_TOTAL_LABEL_RE.search(context))
     if category in ("subtotal", "tax"):
-        return bool(association and association.get("score", 0) >= 0.65 and association.get("strongLabel") and not association.get("opposing") and AMOUNT_RE.search(value))
+        if not association or association.get("score", 0) < 0.65 or not association.get("strongLabel") or association.get("opposing") or not AMOUNT_RE.search(value):
+            return False
+        if category == "subtotal":
+            return True
+        # The tax model must learn the semantic role, not just the presence
+        # of the word TAX. In a GST table, the right-hand tax column is a
+        # positive and the taxable/base column is a hard negative. Outside a
+        # table, an explicitly direct tax amount or same-line tax label is a
+        # positive. Zero-rate rows remain negative when a charged-tax row is
+        # available; fail-open runtime rules still preserve them as evidence
+        # when no positive tax is found.
+        summary_role = bool(association.get("summaryContext")) and float(association.get("summaryColumnMatch", 0.5)) >= 0.65
+        direct_role = bool(association.get("directLabel")) and (not association.get("summaryContext") or float(association.get("summaryColumnMatch", 0.5)) >= 0.65)
+        same_line_role = bool(association.get("sameLine")) and not bool(association.get("taxCodeBase"))
+        return summary_role or direct_role or same_line_role
     if category == "receipt_id":
         return bool(STRONG_RECEIPT_ID_LABEL_RE.search(current)) and not bool(RECEIPT_ID_HARD_NEGATIVE_RE.search(current))
     return bool(len(value) >= 3 and (AMOUNT_RE.search(value) or KEYWORDS["item"].search(value)))
@@ -655,9 +768,14 @@ def crop_window(group: dict[str, Any], category: str, probability: float, width:
             item = box(lines[index], index)
             y = item["cy"] / max(1, height)
             bias = 1 - min(1, y * 2.4) if category == "vendor" else 1 - min(1, y * 1.8) if category == "purchase_date" else 1 - abs(y - 0.48) if category == "item" else y
-            return (4 if KEYWORDS[category].search(value) else 0) + (3 if category == "purchase_date" and DATE_RE.search(value) else 0) + (2 if category not in ("vendor", "purchase_date") and AMOUNT_RE.search(value) else 0) + bias + confidence(lines[index]) * 0.5 + (0.5 if index < max(2, len(lines) * 0.15) else 0)
+            financial_keyword = (
+                STRONG_SUBTOTAL_LABEL_RE.search(value) if category == "subtotal" else
+                ((STRONG_TAX_LABEL_RE.search(value) and not TAX_METADATA_LABEL_RE.search(value) and not TAX_INCLUSIVE_TOTAL_LABEL_RE.search(value)) or TAX_INCLUDED_LABEL_RE.search(value) or TAX_INCLUSIVE_DESCRIPTION_RE.search(value) or re.search(r"\b(?:gst|tax)\s*@\s*\d+(?:\.\d+)?\s*%", value, re.I)) if category == "tax" else
+                KEYWORDS[category].search(value)
+            )
+            return (4 if financial_keyword else 0) + (3 if category == "purchase_date" and DATE_RE.search(value) else 0) + (2 if category not in ("vendor", "purchase_date") and AMOUNT_RE.search(value) else 0) + bias + confidence(lines[index]) * 0.5 + (0.5 if index < max(2, len(lines) * 0.15) else 0)
         anchor = box(lines[max(range(len(lines)), key=score)], 0)["cy"]
-    base = 0.22 if category == "item" else 0.12 if category == "vendor" else 0.15
+    base = 0.22 if category == "item" else 0.12 if category == "vendor" else 0.18 if category in ("subtotal", "tax") else 0.15
     selected_mode = mode if mode != "adaptive" else "tight" if probability >= 0.9 else "medium" if probability >= 0.78 else "wide"
     multiplier = 0.72 if selected_mode == "tight" else 1.45 if selected_mode == "wide" else 1.0
     fraction = max(0.045, min(0.62 if category == "item" else 0.45, base * multiplier))
@@ -740,9 +858,10 @@ def expert_examples(row: dict[str, Any], label: dict[str, Any], router: dict[str
         crop = crop_window(group, category, probability, width, height, mode=TRAIN_WINDOW_MODE)
         lines = crop_lines(group, crop)
         values = expert_candidate_values(lines, category)
-        if category in ("subtotal", "tax"):
-            best_association = max((float(item[2].get("score", 0)) for item in values if item[2]), default=0.0)
-            values = [item for item in values if item[2] and float(item[2].get("score", 0)) >= best_association - 0.025]
+        # Keep every routed finance amount, including lower-scoring role
+        # candidates and explicit hard negatives. Selecting only the best
+        # association here made the classifier see an almost all-positive
+        # stream and could not teach it to reject totals, bases, or headers.
         for index, value, association in values:
             positive = expert_candidate_positive(category, lines, index, value, label)
             examples[category].append({"features": expert_features(lines, index, category, crop, width, height, probability, value), "positive": positive, "hardNegative": expert_candidate_hard_negative(category, lines, index, value, association), "receipt": row["id"], "split": split, "value": value})

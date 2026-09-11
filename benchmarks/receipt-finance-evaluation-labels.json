@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "dataset": "SROIE public receipt images",
+  "subset": "untouched grouped-final receipts, image-reviewed finance labels",
+  "receiptCount": 25,
+  "privateImagesCommitted": false,
+  "protocol": {
+    "review": "Each referenced public SROIE image was inspected visually. Labels were recorded from printed receipt text, independently of the detector's weak OCR/layout labels.",
+    "subtotal": "Use an explicit Subtotal/Sub-total label or an explicit net/pre-tax label such as Total Excl GST or Total Sales Excluding GST. Do not infer a subtotal from an inclusive total or a tax summary.",
+    "tax": "Use an explicit charged tax/GST amount, including GST @ rate, GST included in total, or the Tax/GST amount column of an unambiguous summary. Registration numbers, rates, tax headers, and inclusive wording without an amount are not labels.",
+    "absent": "The receipt has no unambiguous printed value for that field under this protocol.",
+    "ambiguous": "The image contains conflicting or semantically competing printed amounts; it is excluded from verified precision/coverage denominators and any trusted prediction is reported separately as unsupported.",
+    "evaluation": "Only verified field labels are used for precision/coverage. Absent labels test false-positive trust. Ambiguous labels are not treated as correct or incorrect ground truth. This file is not read by training or configuration selection."
+  },
+  "receipts": [
+    { "id": "400", "fields": { "subtotal": { "status": "verified", "value": "103.77", "evidence": "SUB-TOTAL" }, "tax": { "status": "ambiguous", "candidates": ["0.00", "6.23"], "evidence": "TAX line conflicts with GST Summary/TAX TOTAL" } } },
+    { "id": "401", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "0.71", "evidence": "GST @6% included in total" } } },
+    { "id": "402", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "2.90", "evidence": "Bill Inclusive of 6% GST" } } },
+    { "id": "404", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "0.17", "evidence": "GST Analysis / Tax Amount / S=6%" } } },
+    { "id": "405", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "10.03", "evidence": "GST Summary Tax" } } },
+    { "id": "408", "fields": { "subtotal": { "status": "verified", "value": "9.20", "evidence": "Total Excl GST" }, "tax": { "status": "verified", "value": "0.55", "evidence": "GST" } } },
+    { "id": "410", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "1.79", "evidence": "GST Summary Tax" } } },
+    { "id": "411", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "2.26", "evidence": "GST Summary Tax" } } },
+    { "id": "413", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "3.74", "evidence": "GST Summary Tax" } } },
+    { "id": "414", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "1.92", "evidence": "GST @ 6%" } } },
+    { "id": "416", "fields": { "subtotal": { "status": "verified", "value": "13.78", "evidence": "SUBTOTAL" }, "tax": { "status": "verified", "value": "0.78", "evidence": "GST Amt" } } },
+    { "id": "417", "fields": { "subtotal": { "status": "verified", "value": "148.00", "evidence": "subtotal" }, "tax": { "status": "verified", "value": "8.38", "evidence": "GST Summary Tax" } } },
+    { "id": "418", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "1.78", "evidence": "S-6% GST" } } },
+    { "id": "419", "fields": { "subtotal": { "status": "verified", "value": "247.55", "evidence": "Sub Total" }, "tax": { "status": "verified", "value": "14.01", "evidence": "(GST) / GST Summary Tax" } } },
+    { "id": "422", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "0.91", "evidence": "GST Summary Tax" } } },
+    { "id": "424", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "0.46", "evidence": "GST @6%" } } },
+    { "id": "433", "fields": { "subtotal": { "status": "verified", "value": "31.00", "evidence": "Sub Total" }, "tax": { "status": "verified", "value": "1.76", "evidence": "S:GST(6%)" } } },
+    { "id": "440", "fields": { "subtotal": { "status": "verified", "value": "15.60", "evidence": "Sub-Total" }, "tax": { "status": "verified", "value": "0.38", "evidence": "6% GST Included" } } },
+    { "id": "454", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "1.53", "evidence": "GST Summary GST" } } },
+    { "id": "460", "fields": { "subtotal": { "status": "verified", "value": "8.90", "evidence": "Total Sales (Excluding GST)" }, "tax": { "status": "verified", "value": "0.53", "evidence": "Total GST" } } },
+    { "id": "463", "fields": { "subtotal": { "status": "verified", "value": "24.43", "evidence": "Sub Total" }, "tax": { "status": "verified", "value": "1.61", "evidence": "GST @6%" } } },
+    { "id": "464", "fields": { "subtotal": { "status": "verified", "value": "12.99", "evidence": "SUBTOTAL" }, "tax": { "status": "verified", "value": "0.86", "evidence": "GST 6%" } } },
+    { "id": "467", "fields": { "subtotal": { "status": "verified", "value": "23.58", "evidence": "Total Sales (Excluding GST)" }, "tax": { "status": "verified", "value": "1.42", "evidence": "Total GST" } } },
+    { "id": "468", "fields": { "subtotal": { "status": "ambiguous", "candidates": ["41.20"], "evidence": "SubTotal Incl GST is explicitly inclusive and is not a pre-tax subtotal" }, "tax": { "status": "verified", "value": "2.34", "evidence": "GST Summary Tax" } } },
+    { "id": "469", "fields": { "subtotal": { "status": "absent" }, "tax": { "status": "verified", "value": "1.98", "evidence": "GST Summary Tax" } } }
+  ]
+}

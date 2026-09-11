@@ -550,6 +550,36 @@ export interface ReceiptHierarchicalExtraction extends Omit<ReceiptFrontendExtra
       trusted: number;
     }>;
   };
+  /** Optional offline-only candidate trace; omitted by the browser path. */
+  diagnostics?: {
+    candidates: Record<ReceiptFrontendField, Array<{
+      value: string;
+      canonical: string;
+      probability: number;
+      confidence: number;
+      hardNegative: boolean;
+      financialAssociation: number;
+      financialStrongLabel: boolean;
+      financialSameLine: boolean;
+      financialColumnMatch: number;
+      financialSummaryColumnMatch: number;
+      financialSummaryContext: boolean;
+      financialDirectLabel: boolean;
+      financialTableHeader: boolean;
+      financialTaxCodeBase: boolean;
+      financialZeroRate: boolean;
+      financialOpposing: boolean;
+      financialAmountRank: number;
+      ocrConfidence?: number;
+      cropTop: number;
+      cropBottom: number;
+      financialLabelText: string;
+      financialLabelDistance: number;
+      evidence: string;
+      observationKey: string;
+      bandIndex: number;
+    }>>;
+  };
 }
 
 interface Geometry {
@@ -700,7 +730,14 @@ const lineStats = (lines: ReceiptOcrLine[], pageWidth: number, pageHeight: numbe
       return index < 8 && letters >= 3 && letters / Math.max(1, value.length) >= 0.35 && !amountMatches(value).length;
     });
     if (category === "purchase_date") return dates > 0;
-    if (category === "subtotal" || category === "tax") return nonEmpty.some((line) => categoryKeyword(category, line.text)) && amounts > 0;
+    if (category === "subtotal") return nonEmpty.some((line) => strongSubtotalLabel.test(normalizeLine(line.text)) || categoryKeyword(category, line.text)) && amounts > 0;
+    if (category === "tax") return nonEmpty.some((line) => {
+      const text = normalizeLine(line.text);
+      return (categoryKeyword(category, text) && !taxMetadataLabel.test(text))
+        || taxIncludedLabel.test(text)
+        || taxInclusiveDescription.test(text)
+        || /\b(?:gst|tax)\s*@\s*\d+(?:\.\d+)?\s*%/i.test(text);
+    }) && amounts > 0;
     if (category === "total") return nonEmpty.some((line) => categoryKeyword(category, line.text)) && amounts > 0;
     if (category === "receipt_id") return nonEmpty.some((line) => categoryKeyword(category, line.text) && /[A-Z0-9]{3,}/i.test(line.text));
     if (category === "item") return nonEmpty.some((line) => categoryKeyword(category, line.text)) || amounts >= 3;
@@ -866,7 +903,14 @@ const categoryAnchorScore = (line: ReceiptOcrLine, category: ReceiptHierarchical
   const y = box.centerY / Math.max(1, pageHeight);
   const amount = amountMatches(text).length > 0;
   const date = dateMatches(text).length > 0;
-  const keyword = categoryKeyword(category, text);
+  const keyword = category === "subtotal"
+    ? strongSubtotalLabel.test(text)
+    : category === "tax"
+      ? ((strongTaxLabel.test(text) && !taxMetadataLabel.test(text) && !taxInclusiveTotalLabel.test(text))
+        || taxIncludedLabel.test(text)
+        || taxInclusiveDescription.test(text)
+        || /\b(?:gst|tax)\s*@\s*\d+(?:\.\d+)?\s*%/i.test(text))
+      : categoryKeyword(category, text);
   const categoryBias = category === "vendor" ? 1 - Math.min(1, y * 2.4)
     : category === "purchase_date" ? 1 - Math.min(1, y * 1.8)
       : category === "item" ? 1 - Math.abs(y - 0.48) : y;
@@ -881,7 +925,7 @@ const categoryWindowFraction = (category: ReceiptHierarchicalSpecialist, mode: E
   // examples). Give that specialist enough vertical context to see both the
   // label and its value; the independent-value gate below still rejects
   // competing amounts.
-  const base = category === "item" ? 0.22 : category === "vendor" ? 0.12 : 0.15;
+  const base = category === "item" ? 0.22 : category === "vendor" ? 0.12 : (category === "subtotal" || category === "tax") ? 0.18 : 0.15;
   const multiplier = mode === "tight" ? 0.72 : mode === "wide" ? 1.45 : 1;
   return clamp(base * multiplier * padding, 0.045, category === "item" ? 0.62 : 0.45);
 };
@@ -1151,6 +1195,12 @@ interface ExpertCandidate {
   financialSameLine: boolean;
   financialLabelDistance: number;
   financialColumnMatch: number;
+  financialSummaryColumnMatch: number;
+  financialSummaryContext: boolean;
+  financialDirectLabel: boolean;
+  financialTableHeader: boolean;
+  financialTaxCodeBase: boolean;
+  financialZeroRate: boolean;
   financialOpposing: boolean;
   financialAmountRank: number;
 }
@@ -1162,12 +1212,19 @@ const excludedTotal = /\b(?:qty|quantity|items?|excluding|excl\.?|before\s+tax|s
 const strongTotalLabel = /\b(?:grand\s+total|total\s+(?:due|payable|amt|amount|rounded|round(?:ed)?|incl(?:usive)?|including)|amount\s+due|balance\s+due|final\s+total|round(?:ed|ing)?\s+\w*\s+total)\b/i;
 const strongReceiptIdLabel = /\b(?:receipt|invoice|order|transaction|trans(?:action)?|document|doc|bill)\b/i;
 const strongSubtotalLabel = /\b(?:sub[\s-]?(?:total|t[o0]tal|futal|t[a4]l)|(?:total\s+)?sales?\s*\(?\s*(?:excluding|excl\.?|before)\b|total\s*\(?\s*(?:excluding|excl\.?|before)\b|before\s+tax|net\s+subtotal)\b/i;
+const explicitSubtotalLabel = /\bsub[\s-]?total\b/i;
 const strongTaxLabel = /\b(?:tax|gst|hst|vat|sales\s+tax)(?:\s*[/ -]?\s*(?:amt|amount|total|summary))?\b/i;
-const taxMetadataLabel = /\b(?:tax\s*(?:id|no\.?|number|registration)|gst\s*(?:no\.?|number|id)|taxable\s+id)\b/i;
+const taxMetadataLabel = /\b(?:tax\s*(?:id|no\.?|number|registration)|gst\s*(?:no\.?|number|id|reg(?:istration)?)|taxable\s+id)\b/i;
 const subtotalInclusiveLabel = /\b(?:sub[\s-]?total|total\s+sales?)\b[^\n]{0,24}\b(?:incl(?:usive)?|including|inc)\.?\s*(?:gst|tax|vat|hst)\b/i;
-const taxIncludedLabel = /\b(?:tax|gst|hst|vat)\b[^\n]{0,20}\b(?:incl(?:uded|usive)?|including|inc)\b/i;
+const taxInclusiveTotalLabel = /\b(?:total|sales?|sub[\s-]?total|nett?|amount)\b[^\n]{0,32}\b(?:(?:(?:incl(?:usive)?|[il]nclusive|in[dcl]l|including|inc)\.?\s*(?:of\s*)?|with\s+)(?:gst|tax|vat|hst)\b|(?:gst|tax|vat|hst)\s*(?:incl(?:uded)?|inclusive|inc)\.?\b)/i;
+const taxIncludedLabel = /\b(?:tax|gst|hst|vat)\b[^\n]{0,28}\b(?:incl(?:uded|usive)?|including|inc)\b/i;
+const taxInclusiveDescription = /\b(?:bill|gst|tax)\b[^\n]{0,32}\binclusive\s+of\s+\d+(?:\.\d+)?\s*%?\s*(?:gst|tax|vat|hst)\b/i;
 const taxExcludedLabel = /\b(?:excluded|excluding|excl\.?|before)\b[^\n]{0,16}\b(?:gst|tax|vat|hst)\b/i;
-const taxTableHeader = /\b(?:amount|amt)\s*(?:\([^)]*\))?[^0-9\n]{0,16}\b(?:tax|gst|hst|vat)\s*(?:\([^)]*\))?\b/i;
+const taxTableHeader = /\b(?:amount|amt)\s*(?:\([^)]*\))?[^0-9\n]{0,16}\b(?:tax|gst|hst|vat)\s*(?:\([^)]*\))?\b|\b(?:tax|gst|hst|vat)\s*(?:\([^)]*\))?[^0-9\n]{0,16}\b(?:amount|amt)\b/i;
+const inlineTaxColumnHeader = /\b(?:amount|amt)\s*\([^)]*\)\s+(?:tax|gst|hst|vat)\s*\([^)]*\)\s*[-:]?\s*[$€£]?\s*\d/i;
+const genericTaxColumnHeader = /^(?:tax|gst|hst|vat)(?:\s*\([^)]*\))?$/i;
+const taxCodeBaseLabel = /\b(?:s|sr|standard|z|zr|zero)\s*[-:=]?\s*(?:(?:gst|tax)\s*)?(?:@?\s*)?(?:\(|\[)?\d+(?:\.\d+)?\s*%(?:\)|\])?(?:\s*(?:gst|tax))?\b|\b(?:s|sr|standard|z|zr|zero)\s*[-:=]?\s*(?:gst|tax)\s*@?\s*(?:\(|\[)?\d+(?:\.\d+)?\s*%(?:\)|\])?/i;
+const taxZeroRateLabel = /\b(?:z|zr|zero)\s*[-:=]?\s*(?:(?:gst|tax)\s*)?(?:@?\s*)?(?:\(|\[)?0\s*%(?:\)|\])?(?:\s*(?:gst|tax))?\b/i;
 const directTaxAmountLabel = /\b(?:tax|gst|hst|vat)(?:\s*[/ -]?\s*(?:amt|amount|total|summary))?\s*[:=]?\s*[A-Za-z]{0,3}$/i;
 const directTaxAmountValue = /\b(?:tax|gst|hst|vat)(?:\s*[/ -]?\s*(?:amt|amount|total|summary))?\s*[:=]\s*(?:[A-Za-z]{0,3}\s*)?(?:[$€£]|\b(?:rm|usd|cad|gbp)\b)?\s*\(?\s*-?\d{1,6}(?:[,.]\d{3})*(?:[,.]\d{2})/gi;
 const taxExcludedAmountContext = /\b(?:excluded|excluding|excl\.?|before)\b[^\n]{0,16}\b(?:gst|tax|vat|hst)\b[^0-9]{0,8}$/i;
@@ -1182,6 +1239,12 @@ interface FinancialAssociation {
   strongLabel: boolean;
   sameLine: boolean;
   columnMatch: number;
+  summaryColumnMatch: number;
+  summaryContext: boolean;
+  directLabel: boolean;
+  tableHeader: boolean;
+  taxCodeBase: boolean;
+  zeroRate: boolean;
   opposing: boolean;
   amountRank: number;
 }
@@ -1238,17 +1301,72 @@ const financialAssociation = (
   const ownPattern = financialLabelPattern(field);
   const opposingPattern = financialOpposingPattern(field);
   const options: FinancialAssociation[] = [];
+  const summaryAnchorIndex = field === "tax"
+    ? lines.reduce<number | null>((best, candidate, candidateIndex) => {
+      const candidateText = normalizeLine(candidate.text);
+      const summaryLike = /\b(?:gst|tax)\s*(?:summary|analysis)\b/i.test(candidateText)
+        || taxCodeBaseLabel.test(candidateText)
+        || /\b(?:gst|tax)\s*(?:amt|amount)\b/i.test(candidateText)
+        || /\b(?:gst|tax)\s*@\s*\d+(?:\.\d+)?\s*%/i.test(candidateText);
+      if (!summaryLike || Math.abs(candidateIndex - index) > 8) return best;
+      return best === null || Math.abs(candidateIndex - index) < Math.abs(best - index) ? candidateIndex : best;
+    }, null)
+    : null;
+  const summaryEntries = summaryAnchorIndex === null ? [] : lines.slice(
+    Math.max(0, summaryAnchorIndex - 1),
+    Math.min(lines.length, summaryAnchorIndex + 10),
+  ).flatMap((candidate, candidateIndex) => amountMatches(candidate.text).map((candidateRaw) => {
+    const absoluteIndex = Math.max(0, summaryAnchorIndex - 1) + candidateIndex;
+    const candidateBox = geometry(candidate, absoluteIndex);
+    const candidateText = normalizeLine(candidate.text);
+    const candidateStart = Math.max(0, candidateText.indexOf(candidateRaw));
+    return {
+      index: absoluteIndex,
+      raw: candidateRaw,
+      centerX: candidateBox.x0 + candidateBox.width * ((candidateStart + candidateRaw.length / 2) / Math.max(1, candidateText.length)),
+    };
+  }));
+  const summaryColumnMatchFor = (candidateRaw: string): number => {
+    const candidate = summaryEntries.find((entry) => entry.index === index && amountKey(entry.raw) === amountKey(candidateRaw));
+    if (!candidate || summaryEntries.length < 2) return 0.5;
+    const centers = [...new Set(summaryEntries.map((entry) => Math.round(entry.centerX * 100) / 100))].sort((left, right) => left - right);
+    if (centers.length < 2) return 0.5;
+    const rank = centers.findIndex((center) => Math.abs(center - candidate.centerX) < 0.01);
+    if (rank < 0) return 0.5;
+    const fraction = rank / Math.max(1, centers.length - 1);
+    return field === "tax" ? fraction : 1 - fraction;
+  };
   lines.forEach((candidate, candidateIndex) => {
     if (Math.abs(candidateIndex - index) > 4) return;
     const labelText = normalizeLine(candidate.text);
     if (!(categoryKeyword(field, labelText) || ownPattern.test(labelText)) || (field === "tax" && taxMetadataLabel.test(labelText))) return;
     const labelBox = geometry(candidate, candidateIndex);
     const labelSpan = regexSpan(ownPattern, labelText) ?? regexSpan(keywordPatterns[field], labelText);
+    const rowContext = lines.slice(Math.max(0, candidateIndex - 3), Math.min(lines.length, candidateIndex + 4))
+      .map((nearby) => normalizeLine(nearby.text)).join(" ");
+    const inlineTaxHeader = field === "tax" && inlineTaxColumnHeader.test(labelText);
+    const tableHeader = field === "tax" && ((!amountMatches(labelText).length
+      && (genericTaxColumnHeader.test(labelText) || taxTableHeader.test(labelText))) || inlineTaxHeader);
+    const itemTableHeader = tableHeader && /\b(?:item|qty|quantity|description|s\s*\/\s*price|u\.?\s*price|unit|code)\b/i.test(rowContext);
+    const taxInclusiveRole = field === "tax" && taxInclusiveTotalLabel.test(labelText) && !taxIncludedLabel.test(labelText.replace(/\b(?:total|sales?|sub[\s-]?total|nett?|amount)\b/gi, ""));
+    const directIncludedTax = field === "tax" && (taxIncludedLabel.test(labelText) || taxInclusiveDescription.test(labelText)) && !taxInclusiveRole;
+    const taxIncludedWithoutExplicitAmount = field === "tax" && taxIncludedLabel.test(labelText) && !/[:=]/.test(labelText);
+    const taxCodeBase = field === "tax" && taxCodeBaseLabel.test(labelText) && amountMatches(labelText).length > 0
+      && !/\b(?:amt|amount)\b/i.test(labelText);
+    const zeroRate = field === "tax" && taxZeroRateLabel.test(labelText);
     const ambiguousRole = field === "subtotal"
       ? subtotalInclusiveLabel.test(labelText)
-      : taxIncludedLabel.test(labelText) || (taxTableHeader.test(labelText) && amountValues.length < 2);
+      : taxInclusiveRole;
     const excludedTaxRole = field === "tax" && taxExcludedLabel.test(labelText) && !hasDirectTaxAmount(labelText);
-    const strongLabel = ownPattern.test(labelText) && !(field === "tax" && taxMetadataLabel.test(labelText)) && !ambiguousRole && !excludedTaxRole;
+    const directLabel = field === "tax" && (directIncludedTax || taxCodeBaseLabel.test(labelText)
+      || /\b(?:total\s+)?(?:tax|gst|hst|vat)\s*(?:amt|amount|total|summary)?\b/i.test(labelText)
+      || /\b(?:tax|gst)\s*@\s*\d+(?:\.\d+)?\s*%/i.test(labelText));
+    const strongLabel = ownPattern.test(labelText)
+      && !(field === "tax" && taxMetadataLabel.test(labelText))
+      && !ambiguousRole
+      && !excludedTaxRole
+      && !itemTableHeader
+      && !taxCodeBase;
     const sameLine = candidateIndex === index;
     const lineDistance = Math.abs(candidateIndex - index);
     const below = labelBox.centerY > amountBox.centerY + Math.max(labelBox.height, amountBox.height) * 0.6;
@@ -1268,6 +1386,8 @@ const financialAssociation = (
     const rankFraction = amountCount > 1 ? amountRank / Math.max(1, amountCount - 1) : 0.5;
     const roleRank = field === "tax" ? rankFraction : 1 - rankFraction;
     const columnMatch = clamp(geometricColumnMatch * 0.65 + roleRank * 0.35);
+    const summaryColumnMatch = summaryColumnMatchFor(raw);
+    const summaryContext = summaryAnchorIndex !== null;
     const labelEnd = labelSpan?.end ?? labelText.length;
     const labelStart = labelSpan?.start ?? 0;
     const textProximity = sameLine
@@ -1281,18 +1401,24 @@ const financialAssociation = (
     const taxAmountOpposing = field === "tax" && sameLine
       && (taxExcludedAmountContext.test(amountContextBefore)
         || (paymentAmountContext.test(amountContextBefore) && !directTaxAmountLabel.test(amountContextBefore)));
-    const opposing = ambiguousRole || excludedTaxRole || taxAmountOpposing || (!strongLabel && opposingPattern.test(labelText))
+    const opposing = ambiguousRole || excludedTaxRole || taxAmountOpposing || itemTableHeader || inlineTaxHeader || taxCodeBase || taxIncludedWithoutExplicitAmount
+      || (taxInclusiveRole && !directIncludedTax)
+      || (!strongLabel && opposingPattern.test(labelText))
       || (sameLine && oppositeSpans.length > 0 && !strongLabel);
     const score = clamp(
       (strongLabel ? 0.44 : 0.25)
       + (sameLine ? 0.23 : 0.07)
       + lineMatch * 0.10
       + columnMatch * 0.14
+      + (summaryContext ? summaryColumnMatch * 0.12 : 0)
+      + (directLabel ? 0.08 : 0)
       + textProximity * 0.12
       + (ownBeforeAmount ? 0.03 : -0.12)
+      - (itemTableHeader ? 0.22 : 0)
+      - (taxCodeBase ? 0.20 : 0)
       - (opposing ? 0.24 : 0),
     );
-    options.push({ score, labelText, labelIndex: candidateIndex, strongLabel, sameLine, columnMatch, opposing, amountRank });
+    options.push({ score, labelText, labelIndex: candidateIndex, strongLabel, sameLine, columnMatch, summaryColumnMatch, summaryContext, directLabel, tableHeader: itemTableHeader, taxCodeBase, zeroRate, opposing, amountRank });
   });
   return options.sort((left, right) => right.score - left.score)[0] ?? null;
 };
@@ -1328,17 +1454,36 @@ const candidateValues = (lines: ReceiptOcrLine[], field: ReceiptFrontendField | 
       if (text.length >= 3 && (amountMatches(text).length || categoryKeyword("item", text))) result.push({ index, value: text });
     });
   } else {
+    const financialResults: CandidateValue[] = [];
     lines.forEach((line, index) => amountMatches(line.text).forEach((raw) => {
       if (parseAmount(raw) === null) return;
       if (isRateToken(line.text, raw)) return;
       const value = outputAmount(raw);
       if (field === "subtotal" || field === "tax") {
         if (!nearbyFinancialLabel(lines, index, field, 4)) return;
-        result.push({ index, value, financial: financialAssociation(lines, index, field, raw) ?? undefined });
+        financialResults.push({ index, value, financial: financialAssociation(lines, index, field, raw) ?? undefined });
       } else {
         result.push({ index, value });
       }
     }));
+    if (field === "subtotal" || field === "tax") {
+      // A GST/tax summary commonly prints a zero-rated row beside the actual
+      // charged tax. Keep a genuine zero tax when it is the only explicit tax
+      // amount, but do not let it beat a non-zero direct tax observation.
+      const positiveDirectTax = field === "tax" && financialResults.some((candidate) => {
+        const association = candidate.financial;
+        return parseAmount(candidate.value) !== null
+          && (parseAmount(candidate.value) ?? 0) > 0
+          && Boolean(association?.strongLabel)
+          && !association?.opposing
+          && (association?.summaryContext || association?.directLabel || association?.sameLine);
+      });
+      financialResults.forEach((candidate) => {
+        const association = candidate.financial;
+        const zeroRate = Boolean(association?.zeroRate) || (parseAmount(candidate.value) ?? -1) === 0;
+        if (!(field === "tax" && positiveDirectTax && zeroRate)) result.push(candidate);
+      });
+    }
   }
   return result;
 };
@@ -1350,9 +1495,50 @@ const candidateValues = (lines: ReceiptOcrLine[], field: ReceiptFrontendField | 
  * near-ties only would preserve ambiguity rather than resolve it safely. */
 const focusFinancialCandidates = (candidates: ExpertCandidate[], field: ReceiptFrontendField): ExpertCandidate[] => {
   if (field !== "subtotal" && field !== "tax") return candidates;
+  let scopedCandidates = candidates;
+  if (field === "subtotal") {
+    // Apply the explicit-row preference before per-observation score
+    // focusing. A generic “Total excluding GST” candidate can score a few
+    // hundredths higher than the real SUBTOTAL in a noisy crop; selecting the
+    // local maximum first would otherwise discard the explicit row before we
+    // get to use its stronger semantics.
+    const exactByObservation = new Set(
+      candidates
+        .filter((candidate) => explicitSubtotalLabel.test(candidate.financialLabelText) && !subtotalInclusiveLabel.test(candidate.financialLabelText))
+        .map((candidate) => candidate.observationKey),
+    );
+    if (exactByObservation.size) {
+      scopedCandidates = candidates.filter((candidate) => !exactByObservation.has(candidate.observationKey)
+        || (explicitSubtotalLabel.test(candidate.financialLabelText) && !subtotalInclusiveLabel.test(candidate.financialLabelText)));
+    }
+  }
   const bestByObservation = new Map<string, number>();
-  candidates.forEach((candidate) => bestByObservation.set(candidate.observationKey, Math.max(bestByObservation.get(candidate.observationKey) ?? 0, candidate.financialAssociation)));
-  return candidates.filter((candidate) => candidate.financialAssociation >= (bestByObservation.get(candidate.observationKey) ?? 0) - 0.025);
+  scopedCandidates.forEach((candidate) => bestByObservation.set(candidate.observationKey, Math.max(bestByObservation.get(candidate.observationKey) ?? 0, candidate.financialAssociation)));
+  let locallyFocused = scopedCandidates.filter((candidate) => candidate.financialAssociation >= (bestByObservation.get(candidate.observationKey) ?? 0) - 0.025);
+  if (field === "tax") {
+    // Zero-rated rows are legitimate only when no charged tax is present in
+    // the routed evidence. Apply this across observations as well as within
+    // each crop; otherwise a zero-only crop can defeat a positive tax row
+    // found in a second crop and make the correct value ambiguous.
+    const hasPositiveTax = locallyFocused.some((candidate) => {
+      const value = parseAmount(candidate.value);
+      return value !== null && value > 0 && candidate.financialStrongLabel && !candidate.financialOpposing
+        && (candidate.financialSummaryContext || candidate.financialDirectLabel || candidate.financialSameLine);
+    });
+    if (hasPositiveTax) locallyFocused = locallyFocused.filter((candidate) => !candidate.financialZeroRate && (parseAmount(candidate.value) ?? 0) > 0);
+  }
+  // A summary row is a semantic table, not one repeated label. Once the
+  // OCR geometry identifies the field's column, keep that role consistent
+  // across overlapping crops. Without this second pass, the taxable/base
+  // amount can win in one crop and the tax amount in another, leaving the
+  // correct value permanently ambiguous. The role score is deliberately a
+  // soft margin: if geometry is unavailable (0.5) or the columns are close,
+  // we retain all candidates and fail open through the normal agreement gate.
+  const summaryCandidates = locallyFocused.filter((candidate) => candidate.financialSummaryContext);
+  const bestSummaryRole = Math.max(...summaryCandidates.map((candidate) => candidate.financialSummaryColumnMatch), 0);
+  if (bestSummaryRole < 0.65) return locallyFocused;
+  return locallyFocused.filter((candidate) => !candidate.financialSummaryContext
+    || candidate.financialSummaryColumnMatch >= bestSummaryRole - 0.18);
 };
 
 const makeCandidate = (
@@ -1423,6 +1609,12 @@ const makeCandidate = (
     financialSameLine: association?.sameLine ?? false,
     financialLabelDistance: association ? Math.abs(lineIndex - association.labelIndex) : 99,
     financialColumnMatch: association?.columnMatch ?? 0,
+    financialSummaryColumnMatch: association?.summaryColumnMatch ?? 0.5,
+    financialSummaryContext: association?.summaryContext ?? false,
+    financialDirectLabel: association?.directLabel ?? false,
+    financialTableHeader: association?.tableHeader ?? false,
+    financialTaxCodeBase: association?.taxCodeBase ?? false,
+    financialZeroRate: association?.zeroRate ?? false,
     financialOpposing: association?.opposing ?? false,
     financialAmountRank: association?.amountRank ?? 0,
   };
@@ -1528,19 +1720,39 @@ const selectCandidates = (
   // to OCR confidence and can safely support an explicitly labelled amount.
   const calibratedFinanceSingle = (field === "subtotal" || field === "tax")
     && top.strongest.confidence >= strongPredictionThreshold;
-  const strongSingle = allowStrongSingleObservation
-    && top.distinctObservations.size === 1
-    && ((field === "subtotal" || field === "tax") ? calibratedFinanceSingle : top.strongest.probability >= strongPredictionThreshold)
-    && top.strongest.confidence >= strongConfidenceThreshold
-    && confidenceFraction(top.strongest.line.confidence) >= 0.90
-    && ranked.slice(1).every((candidate) => candidate.strongest.probability < strongPredictionThreshold - 0.10
-      && candidate.distinctObservations.size < minIndependentObservations);
   const strongFinancialSingle = (field === "subtotal" || field === "tax")
     && top.strongest.financialStrongLabel
     && top.strongest.financialAssociation >= 0.60
     && top.strongest.financialLabelDistance <= 2
     && (top.strongest.financialSameLine || top.strongest.financialColumnMatch >= 0.25)
     && !top.strongest.financialOpposing;
+  const financeSemanticSingle = (field === "subtotal" && explicitSubtotalLabel.test(top.strongest.financialLabelText)
+    && !subtotalInclusiveLabel.test(top.strongest.financialLabelText))
+    || (field === "tax" && !taxIncludedLabel.test(top.strongest.financialLabelText)
+      && !taxInclusiveDescription.test(top.strongest.financialLabelText)
+      && ((top.strongest.financialSummaryContext && top.strongest.financialSummaryColumnMatch >= 0.65)
+        || (top.strongest.financialDirectLabel
+          && top.strongest.financialAssociation >= 0.70
+          && (parseAmount(top.strongest.value) ?? 0) > 0
+          && !top.strongest.financialZeroRate
+          && !top.strongest.financialTableHeader
+          && !top.strongest.financialTaxCodeBase)));
+  const financeSingleOcrFallback = (field === "subtotal" || field === "tax")
+    && financeSemanticSingle
+    && top.strongest.financialStrongLabel
+    && top.strongest.financialLabelDistance <= 4
+    && !top.strongest.financialOpposing
+    && top.strongest.financialAssociation >= 0.64
+    && top.strongest.probability >= threshold
+    && top.strongest.confidence >= strongConfidenceThreshold
+    && confidenceFraction(top.strongest.line.confidence) >= 0.80;
+  const strongSingle = allowStrongSingleObservation
+    && top.distinctObservations.size === 1
+    && ((field === "subtotal" || field === "tax") ? calibratedFinanceSingle : top.strongest.probability >= strongPredictionThreshold)
+    && top.strongest.confidence >= strongConfidenceThreshold
+    && (confidenceFraction(top.strongest.line.confidence) >= 0.90 || financeSingleOcrFallback)
+    && ranked.slice(1).every((candidate) => candidate.strongest.probability < strongPredictionThreshold - 0.10
+      && candidate.distinctObservations.size < minIndependentObservations);
   // A strong candidate may be supported by a weaker equivalent observation;
   // only the strongest score must clear the specialist threshold. This is
   // deliberately separate from the router score and preserves independent
@@ -1554,7 +1766,7 @@ const selectCandidates = (
     && competingWeak
     && noAmbiguousDate
     && (field === "vendor" || field === "purchase_date" || strongLabel)
-    && ((field !== "subtotal" && field !== "tax") || (distinctLabelValues.size === 1 && (top.distinctObservations.size >= minIndependentObservations || (strongSingle && strongFinancialSingle))))
+    && ((field !== "subtotal" && field !== "tax") || (distinctLabelValues.size === 1 && (top.distinctObservations.size >= minIndependentObservations || (strongSingle && (strongFinancialSingle || financeSingleOcrFallback)))))
     && !excluded;
   const trustedSupportCount = top.supports.filter((candidate) => candidate.probability >= threshold).length;
   return {
@@ -1717,6 +1929,7 @@ export const extractReceiptFieldsFromHierarchicalBands = (
     expertCrops?: ReceiptExpertCrop[];
     pageWidth?: number;
     pageHeight?: number;
+    includeDiagnostics?: boolean;
   } = {},
 ): ReceiptHierarchicalExtraction => {
   const config = options.config ?? RECEIPT_HIERARCHICAL_EXPERIMENTAL_CONFIG;
@@ -1923,6 +2136,37 @@ export const extractReceiptFieldsFromHierarchicalBands = (
       expertInputLineCount: expertObservations.length,
     },
     funnel: { byCategory: funnel },
+    ...(options.includeDiagnostics ? {
+      diagnostics: {
+        candidates: Object.fromEntries(FIELDS.map((field) => [field, fieldCandidates[field].map((candidate) => ({
+          value: candidate.value,
+          canonical: candidate.canonical,
+          probability: candidate.probability,
+          confidence: candidate.confidence,
+          hardNegative: candidate.hardNegative,
+          financialAssociation: candidate.financialAssociation,
+          financialStrongLabel: candidate.financialStrongLabel,
+          financialSameLine: candidate.financialSameLine,
+          financialColumnMatch: candidate.financialColumnMatch,
+          financialSummaryColumnMatch: candidate.financialSummaryColumnMatch,
+          financialSummaryContext: candidate.financialSummaryContext,
+          financialDirectLabel: candidate.financialDirectLabel,
+          financialTableHeader: candidate.financialTableHeader,
+          financialTaxCodeBase: candidate.financialTaxCodeBase,
+          financialZeroRate: candidate.financialZeroRate,
+          financialOpposing: candidate.financialOpposing,
+          financialAmountRank: candidate.financialAmountRank,
+          ocrConfidence: candidate.line.confidence,
+          cropTop: candidate.cropTop,
+          cropBottom: candidate.cropBottom,
+          financialLabelText: candidate.financialLabelText,
+          financialLabelDistance: candidate.financialLabelDistance,
+          evidence: candidate.evidence,
+          observationKey: candidate.observationKey,
+          bandIndex: candidate.bandIndex,
+        }))])) as NonNullable<ReceiptHierarchicalExtraction["diagnostics"]>["candidates"],
+      },
+    } : {}),
   };
 };
 

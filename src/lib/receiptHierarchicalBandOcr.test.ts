@@ -31,6 +31,25 @@ const expertLine = (text: string, key: string, category: "vendor" | "purchase_da
   routerProbability: 0.99,
 });
 
+const expertLines = (
+  lines: Array<{ text: string; x0: number; y0: number; x1: number; y1: number }>,
+  key: string,
+  category: "vendor" | "purchase_date" | "subtotal" | "tax" | "total" | "receipt_id" | "item",
+  bandIndex = 0,
+): ReceiptHierarchicalObservation[] => lines.map((line) => ({
+  text: line.text,
+  bbox: { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 },
+  confidence: 99,
+  bandIndex,
+  bandTop: 0,
+  bandBottom: 400,
+  observationKey: key,
+  sourcePass: "expert" as const,
+  expertCategory: category,
+  cropId: key,
+  routerProbability: 0.99,
+}));
+
 describe("hierarchical PP-OCRv6 band routing", () => {
   it("caps category fan-out and creates bounded adaptive windows", () => {
     const bands = [band(0, "TOTAL 21.46 TAX 1.00"), band(1, "WALMART 12/12/2024")];
@@ -301,6 +320,67 @@ describe("hierarchical PP-OCRv6 band routing", () => {
     });
     expect(extraction.fields.subtotal.competingValueCount).toBe(1);
     expect(extraction.fields.subtotal.independentObservationCount).toBe(2);
+  });
+
+  it("uses the tax column instead of the taxable base in a GST summary", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], expertLines([
+      { text: "GST Summary", x0: 20, y0: 20, x1: 150, y1: 45 },
+      { text: "Amount(RM)", x0: 170, y0: 20, x1: 260, y1: 45 },
+      { text: "Tax(RM)", x0: 300, y0: 20, x1: 380, y1: 45 },
+      { text: "SR @ 6%", x0: 20, y0: 70, x1: 120, y1: 95 },
+      { text: "15.40", x0: 170, y0: 70, x1: 260, y1: 95 },
+      { text: "0.91", x0: 300, y0: 70, x1: 380, y1: 95 },
+    ], "crop-tax-summary", "tax"), {
+      config: {
+        name: "test-tax-summary-column",
+        windowMode: "medium",
+        maxCategoriesPerBand: 1,
+        maxExpertInvocations: 1,
+        minIndependentObservations: 2,
+        windowPadding: 1,
+        expertThresholds: { tax: 0 },
+        expertMinConfidence: { tax: 0 },
+        allowStrongSingleObservation: { tax: true },
+        strongPredictionThreshold: { tax: 0 },
+        strongConfidenceThreshold: { tax: 0 },
+      },
+      expertCrops: [{ cropId: "crop-tax-summary", category: "tax", mode: "medium", left: 0, top: 0, right: 400, bottom: 400, width: 400, height: 400, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 70 }],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.tax.value).toBe("0.91");
+    expect(extraction.fields.tax.status).toBe("trusted");
+  });
+
+  it("prefers an explicit subtotal row over a nearby excluding-GST summary row", () => {
+    const extraction = extractReceiptFieldsFromHierarchicalBands([], expertLines([
+      { text: "subtotal :", x0: 20, y0: 20, x1: 120, y1: 45 },
+      { text: "148.00", x0: 300, y0: 20, x1: 380, y1: 45 },
+      { text: "Total Excl. of GST", x0: 20, y0: 70, x1: 180, y1: 95 },
+      { text: "139.62", x0: 300, y0: 70, x1: 380, y1: 95 },
+    ], "crop-subtotal-roles", "subtotal"), {
+      config: {
+        name: "test-subtotal-role",
+        windowMode: "medium",
+        maxCategoriesPerBand: 1,
+        maxExpertInvocations: 1,
+        minIndependentObservations: 2,
+        windowPadding: 1,
+        expertThresholds: { subtotal: 0 },
+        expertMinConfidence: { subtotal: 0 },
+        allowStrongSingleObservation: { subtotal: true },
+        strongPredictionThreshold: { subtotal: 0 },
+        strongConfidenceThreshold: { subtotal: 0 },
+      },
+      expertCrops: [{ cropId: "crop-subtotal-roles", category: "subtotal", mode: "medium", left: 0, top: 0, right: 400, bottom: 400, width: 400, height: 400, sourceBandIndex: 0, sourceObservationKey: "band-0", sourceBandIndices: [0], routerProbability: 0.99, anchorLineIndex: 0, anchorY: 70 }],
+      routerPredictions: [],
+      pageWidth: 400,
+      pageHeight: 400,
+    });
+    expect(extraction.fields.subtotal.value).toBe("148.00");
+    expect(extraction.fields.subtotal.status).toBe("trusted");
+    expect(extraction.fields.subtotal.competingValueCount).toBe(1);
   });
 
   it("merges a one-character receipt-ID OCR variant without double-counting the crop", () => {

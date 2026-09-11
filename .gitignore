@@ -36,6 +36,7 @@ benchmarks/receipt-hierarchical-*.json
 benchmarks/receipt-hierarchical-smoke.json
 benchmarks/receipt-hierarchical-benchmark-results.json
 benchmarks/receipt-hierarchical-model-comparison.json
+benchmarks/receipt-finance-evaluation-results.json
 *.traineddata
 
 # Editor directories and files
