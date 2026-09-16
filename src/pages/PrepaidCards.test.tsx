@@ -13,12 +13,19 @@ const mocks = vi.hoisted(() => ({
   extractCardFront: vi.fn(),
   extractCardBack: vi.fn(),
   getCardDetail: vi.fn(),
+  deleteActivationReceipt: vi.fn(),
+  deleteActivationReceiptImage: vi.fn(),
+  replaceActivationReceiptImage: vi.fn(),
+  deleteCard: vi.fn(),
+  deleteCardImage: vi.fn(),
+  replaceCardImage: vi.fn(),
   fetchReceipt: vi.fn(),
   cleanupArchivedImages: vi.fn(),
   convertImageBlobToJpeg: vi.fn(),
   apiFetch: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 vi.mock("@/hooks/usePrepaidApi", () => ({
@@ -33,6 +40,12 @@ vi.mock("@/hooks/usePrepaidApi", () => ({
     extractCardBack: mocks.extractCardBack,
     updateCard: vi.fn(),
     archiveCard: vi.fn(),
+    deleteActivationReceipt: mocks.deleteActivationReceipt,
+    deleteActivationReceiptImage: mocks.deleteActivationReceiptImage,
+    replaceActivationReceiptImage: mocks.replaceActivationReceiptImage,
+    deleteCard: mocks.deleteCard,
+    deleteCardImage: mocks.deleteCardImage,
+    replaceCardImage: mocks.replaceCardImage,
     getCardDetail: mocks.getCardDetail,
     signCardImage: mocks.signCardImage,
   }),
@@ -75,6 +88,7 @@ vi.mock("sonner", () => ({
   toast: {
     success: mocks.toastSuccess,
     error: mocks.toastError,
+    warning: mocks.toastWarning,
   },
 }));
 
@@ -89,6 +103,56 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+function makeCard(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "card-1",
+    activation_barcode: "123456789012345678901234567890",
+    vanilla_serial: "12345678901",
+    denomination: 75,
+    state: "active",
+    last4: "1234",
+    details_captured: true,
+    package_image_storage_path: "receipts/u_owner/prepaid/package/card-1.webp",
+    card_front_image_storage_path: "receipts/u_owner/prepaid/card_front/card-1.webp",
+    card_back_image_storage_path: "receipts/u_owner/prepaid/card_back/card-1.webp",
+    opened_card_image_storage_path: "receipts/u_owner/prepaid/opened/card-1.webp",
+    ...overrides,
+  };
+}
+
+function makePurchase(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "purchase-1",
+    owner_email: "owner@example.com",
+    sales_receipt_id: "receipt-1",
+    activation_receipts: [{ id: "activation-1", storage_path: "activation/old.webp" }],
+    cards: [makeCard()],
+    active_card_count: 1,
+    archived_card_count: 0,
+    created_at: "2026-08-20T12:00:00Z",
+    ...overrides,
+  };
+}
+
+function useActivePurchase(purchase: Record<string, unknown>) {
+  mocks.listPurchases.mockImplementation((state: string) => state === "active" ? Promise.resolve([purchase]) : Promise.resolve([]));
+}
+
+function renderPrepaidCards() {
+  return render(
+    <MemoryRouter>
+      <PrepaidCards />
+    </MemoryRouter>,
+  );
+}
+
+const cardImageCases = [
+  { kind: "package", title: "Package image", uploadType: "package", oldPath: "receipts/u_owner/prepaid/package/card-1.webp" },
+  { kind: "card-front", title: "Card front image", uploadType: "card_front", oldPath: "receipts/u_owner/prepaid/card_front/card-1.webp" },
+  { kind: "card-back", title: "Card back image", uploadType: "card_back", oldPath: "receipts/u_owner/prepaid/card_back/card-1.webp" },
+  { kind: "opened-card", title: "Opened-card image", uploadType: "opened_card", oldPath: "receipts/u_owner/prepaid/opened/card-1.webp" },
+] as const;
 
 describe("PrepaidCards", () => {
   afterEach(() => {
@@ -162,6 +226,51 @@ describe("PrepaidCards", () => {
     mocks.uploadPrepaidImage.mockResolvedValue("receipts/u_owner/prepaid/card.webp");
     mocks.extractCardFront.mockResolvedValue({ extraction: { pan: "4111111111111111", expiry: "01/30" }, warnings: [] });
     mocks.extractCardBack.mockResolvedValue({ extraction: { cvv: "456" }, warnings: [] });
+    mocks.deleteActivationReceipt.mockResolvedValue({
+      id: "purchase-1",
+      owner_email: "owner@example.com",
+      sales_receipt_id: "receipt-1",
+      activation_receipts: [{ id: "activation-2", storage_path: "path-2" }],
+      cards: [],
+      active_card_count: 0,
+      archived_card_count: 0,
+    });
+    mocks.deleteActivationReceiptImage.mockImplementation(async (_purchaseID: string, activationReceiptID: string) => ({
+      purchase_id: "purchase-1",
+      activation_receipt_id: activationReceiptID,
+      image_type: "activation_receipt",
+      storage_path: "",
+    }));
+    mocks.replaceActivationReceiptImage.mockImplementation(async (_purchaseID: string, activationReceiptID: string, storagePath: string) => ({
+      purchase_id: "purchase-1",
+      activation_receipt_id: activationReceiptID,
+      image_type: "activation_receipt",
+      storage_path: storagePath,
+    }));
+    mocks.deleteCard.mockResolvedValue({
+      id: "purchase-1",
+      owner_email: "owner@example.com",
+      sales_receipt_id: "receipt-1",
+      activation_receipts: [
+        { id: "activation-1", storage_path: "path-1" },
+        { id: "activation-2", storage_path: "path-2" },
+      ],
+      cards: [],
+      active_card_count: 0,
+      archived_card_count: 0,
+    });
+    mocks.deleteCardImage.mockImplementation(async (_purchaseID: string, cardID: string, imageKind: string) => ({
+      purchase_id: "purchase-1",
+      card_id: cardID,
+      image_type: imageKind,
+      storage_path: "",
+    }));
+    mocks.replaceCardImage.mockImplementation(async (_purchaseID: string, cardID: string, imageKind: string, storagePath: string) => ({
+      purchase_id: "purchase-1",
+      card_id: cardID,
+      image_type: imageKind,
+      storage_path: storagePath,
+    }));
     mocks.cleanupArchivedImages.mockResolvedValue({
       package_images_deleted: 1,
       opened_card_images_deleted: 1,
@@ -327,6 +436,39 @@ describe("PrepaidCards", () => {
   });
 
   it("shows only the selected activation receipt and updates the relationship immediately", async () => {
+    mocks.listPurchases.mockImplementation((state: string) => state === "active" ? Promise.resolve([{
+      id: "purchase-1",
+      owner_email: "owner@example.com",
+      sales_receipt_id: "receipt-1",
+      activation_receipts: [
+        { id: "activation-1", storage_path: "path-1" },
+        { id: "activation-2", storage_path: "path-2" },
+        { id: "activation-3", storage_path: "path-3" },
+      ],
+      cards: [
+        {
+          id: "card-1",
+          activation_barcode: "123456789012345678901234567890",
+          vanilla_serial: "12345678901",
+          denomination: 75,
+          state: "active",
+          last4: "1234",
+          details_captured: true,
+          activation_receipt_id: "activation-1",
+        },
+        {
+          id: "card-2",
+          activation_barcode: "9999999999999999999999123456",
+          vanilla_serial: "10987654321",
+          denomination: 75,
+          state: "active",
+          details_captured: false,
+          activation_receipt_id: "activation-2",
+        },
+      ],
+      active_card_count: 2,
+      archived_card_count: 0,
+    }]) : Promise.resolve([]));
     mocks.getCardDetail.mockResolvedValueOnce({
       id: "card-1",
       activation_barcode: "123456789012345678901234567890",
@@ -359,15 +501,278 @@ describe("PrepaidCards", () => {
     expect(within(relatedReceipts).queryByRole("group", { name: "Activation receipt 2" })).not.toBeInTheDocument();
 
     const selector = screen.getByRole("combobox", { name: "Activation receipt relationship" });
-    fireEvent.change(selector, { target: { value: "activation-2" } });
-    expect(selector).toHaveValue("activation-2");
+    expect(Array.from((selector as HTMLSelectElement).options).map((option) => option.value)).toContain("activation-1");
+    expect(Array.from((selector as HTMLSelectElement).options).map((option) => option.value)).not.toContain("activation-2");
+    expect(Array.from((selector as HTMLSelectElement).options).map((option) => option.value)).toContain("activation-3");
+    fireEvent.change(selector, { target: { value: "activation-3" } });
+    expect(selector).toHaveValue("activation-3");
     const selectedReceiptActions = () => within(screen.getByRole("region", { name: "Related receipts" })).queryAllByRole("group", { name: /Activation receipt/ });
     await waitFor(() => expect(selectedReceiptActions()).toHaveLength(1));
     fireEvent.click(within(selectedReceiptActions()[0]).getByRole("button", { name: "View" }));
-    await waitFor(() => expect(mocks.signActivationReceiptImage).toHaveBeenCalledWith("purchase-1", "activation-2"));
+    await waitFor(() => expect(mocks.signActivationReceiptImage).toHaveBeenCalledWith("purchase-1", "activation-3"));
 
     fireEvent.change(selector, { target: { value: "" } });
     await waitFor(() => expect(selectedReceiptActions()).toHaveLength(0));
+  });
+
+  it("renders a no-photo activation receipt with only media actions disabled", async () => {
+    useActivePurchase(makePurchase({
+      activation_receipts: [{ id: "activation-1", storage_path: null }],
+      cards: [makeCard({ activation_receipt_id: null })],
+    }));
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    const actions = screen.getByRole("group", { name: "Activation receipt 1" });
+    expect(within(actions).getByText(/no photo/i)).toBeInTheDocument();
+    expect(within(actions).getByRole("button", { name: "View" })).toBeDisabled();
+    expect(within(actions).getByRole("button", { name: "Download" })).toBeDisabled();
+    expect(within(actions).getByRole("button", { name: "Delete photo" })).toBeDisabled();
+    expect(within(actions).getByRole("button", { name: "Replace photo" })).toBeEnabled();
+    expect(within(actions).getByRole("button", { name: "Delete receipt" })).toBeEnabled();
+    expect(within(actions).getByLabelText("Replace activation receipt 1 photo")).toBeInTheDocument();
+  });
+
+  it("cancels activation receipt deletion and removes the receipt after confirmation", async () => {
+    let currentPurchase = makePurchase({ cards: [] });
+    const deletedPurchase = makePurchase({ activation_receipts: [], cards: [], active_card_count: 0 });
+    mocks.listPurchases.mockImplementation((state: string) => state === "active" ? Promise.resolve([currentPurchase]) : Promise.resolve([]));
+    mocks.deleteActivationReceipt.mockImplementation(async () => {
+      currentPurchase = deletedPurchase;
+      return deletedPurchase;
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    const getActions = () => screen.getByRole("group", { name: "Activation receipt 1" });
+    fireEvent.click(within(getActions()).getByRole("button", { name: "Delete receipt" }));
+    expect(confirm).toHaveBeenCalledWith("Delete this activation receipt? Its card relationship and photo will be permanently removed.");
+    expect(mocks.deleteActivationReceipt).not.toHaveBeenCalled();
+    expect(getActions()).toBeInTheDocument();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(within(getActions()).getByRole("button", { name: "Delete receipt" }));
+    await waitFor(() => expect(mocks.deleteActivationReceipt).toHaveBeenCalledWith("purchase-1", "activation-1"));
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Activation receipt 1" })).not.toBeInTheDocument());
+  });
+
+  it("deletes an activation photo while preserving its card link and showing no-photo state", async () => {
+    let currentPurchase = makePurchase({
+      activation_receipts: [{ id: "activation-1", storage_path: "activation/old.webp" }],
+      cards: [makeCard({ activation_receipt_id: "activation-1" })],
+    });
+    mocks.listPurchases.mockImplementation((state: string) => state === "active" ? Promise.resolve([currentPurchase]) : Promise.resolve([]));
+    mocks.getCardDetail.mockResolvedValueOnce(makeCard({
+      activation_receipt_id: "activation-1",
+      pan: "1234567890121234",
+      expiry: "12/29",
+      cvv: "123",
+    }));
+    mocks.deleteActivationReceiptImage.mockImplementation(async () => {
+      currentPurchase = {
+        ...currentPurchase,
+        activation_receipts: [{ id: "activation-1", storage_path: null }],
+      };
+      return {
+        purchase_id: "purchase-1",
+        activation_receipt_id: "activation-1",
+        image_type: "activation_receipt",
+        storage_path: "",
+      };
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+    const related = screen.getByRole("region", { name: "Related receipts" });
+    const selector = screen.getByRole("combobox", { name: "Activation receipt relationship" });
+    expect(selector).toHaveValue("activation-1");
+    fireEvent.click(within(related).getByRole("button", { name: "Delete photo" }));
+
+    await waitFor(() => expect(mocks.deleteActivationReceiptImage).toHaveBeenCalledWith("purchase-1", "activation-1", "activation/old.webp"));
+    expect(confirm).toHaveBeenCalledWith("Delete this activation receipt photo? The activation receipt and its card relationship will be kept.");
+    await waitFor(() => expect(within(related).getByText(/no photo/i)).toBeInTheDocument());
+    expect(selector).toHaveValue("activation-1");
+    expect(within(related).getByRole("button", { name: "View" })).toBeDisabled();
+    expect(within(related).getByRole("button", { name: "Download" })).toBeDisabled();
+    expect(within(related).getByRole("button", { name: "Delete photo" })).toBeDisabled();
+  });
+
+  it("replaces an activation photo through the prepaid pipeline and warns about pending cleanup", async () => {
+    let currentPurchase = makePurchase({ cards: [] });
+    mocks.listPurchases.mockImplementation((state: string) => state === "active" ? Promise.resolve([currentPurchase]) : Promise.resolve([]));
+    const preparedFile = new File(["prepared"], "activation.webp", { type: "image/webp" });
+    mocks.prepareAndUploadPrepaidImage.mockResolvedValue({ file: preparedFile, storagePath: "activation/new.webp" });
+    mocks.replaceActivationReceiptImage.mockImplementation(async () => {
+      currentPurchase = {
+        ...currentPurchase,
+        activation_receipts: [{ id: "activation-1", storage_path: "activation/new.webp" }],
+      };
+      return {
+        purchase_id: "purchase-1",
+        activation_receipt_id: "activation-1",
+        image_type: "activation_receipt",
+        storage_path: "activation/new.webp",
+        old_storage_path: "activation/old.webp",
+        pending_image_cleanup: true,
+      };
+    });
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    const actions = screen.getByRole("group", { name: "Activation receipt 1" });
+    const file = imageFile("activation-replacement.jpg");
+    fireEvent.change(within(actions).getByLabelText("Replace activation receipt 1 photo"), { target: { files: [file] } });
+
+    await waitFor(() => expect(mocks.prepareAndUploadPrepaidImage).toHaveBeenCalledWith(file, "activation_receipt", expect.any(Object)));
+    await waitFor(() => expect(mocks.replaceActivationReceiptImage).toHaveBeenCalledWith("purchase-1", "activation-1", "activation/new.webp", "activation/old.webp"));
+    expect(mocks.toastWarning).toHaveBeenCalledWith("The new image is saved, but cleanup of the previous image is still pending.");
+    await waitFor(() => expect(within(actions).getByRole("button", { name: "View" })).not.toBeDisabled());
+    expect(within(actions).getByText(/Activation 1(?!.*no photo)/i)).toBeInTheDocument();
+  });
+
+  it("keeps the old activation image state when replacement mutation fails", async () => {
+    const purchase = makePurchase({ cards: [] });
+    useActivePurchase(purchase);
+    mocks.replaceActivationReceiptImage.mockRejectedValueOnce(new Error("activation replacement failed"));
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    const actions = screen.getByRole("group", { name: "Activation receipt 1" });
+    fireEvent.change(within(actions).getByLabelText("Replace activation receipt 1 photo"), { target: { files: [imageFile("failed-replacement.jpg")] } });
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("activation replacement failed"));
+    expect(within(actions).getByText("Activation 1")).not.toHaveTextContent("no photo");
+    expect(within(actions).getByRole("button", { name: "View" })).not.toBeDisabled();
+    expect(within(actions).getByRole("button", { name: "Delete photo" })).not.toBeDisabled();
+  });
+
+  it("cancels card deletion and closes detail after confirmed deletion while preserving receipts", async () => {
+    let currentPurchase = makePurchase();
+    const deletedPurchase = makePurchase({
+      cards: [],
+      active_card_count: 0,
+    });
+    mocks.listPurchases.mockImplementation((state: string) => state === "active" ? Promise.resolve([currentPurchase]) : Promise.resolve([]));
+    mocks.deleteCard.mockImplementation(async () => {
+      currentPurchase = deletedPurchase;
+      return deletedPurchase;
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Delete card" }));
+    expect(confirm).toHaveBeenCalledWith("Delete this prepaid card? Its activation and sales receipts will be kept, but all card photos will be removed.");
+    expect(mocks.deleteCard).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Delete card" }));
+    await waitFor(() => expect(mocks.deleteCard).toHaveBeenCalledWith("purchase-1", "card-1"));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Prepaid Card" })).not.toBeInTheDocument());
+    expect(screen.getByText("Activation receipts (1)")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Activation receipt 1" })).toBeInTheDocument();
+  });
+
+  it.each(cardImageCases)("deletes the $kind card image after confirmation", async ({ kind, title, oldPath }) => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+    const region = screen.getByRole("region", { name: title });
+    fireEvent.click(within(region).getByRole("button", { name: "Delete photo" }));
+
+    await waitFor(() => expect(mocks.deleteCardImage).toHaveBeenCalledWith("purchase-1", "card-1", kind, oldPath));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Delete the"));
+    await waitFor(() => expect(screen.queryByRole("region", { name: title })).not.toBeInTheDocument());
+  });
+
+  it.each(cardImageCases)("replaces the $kind card image through the upload pipeline", async ({ kind, title, uploadType, oldPath }) => {
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+    const region = screen.getByRole("region", { name: title });
+    const file = imageFile(`${kind}-replacement.jpg`);
+    fireEvent.change(within(region).getByLabelText(`Replace ${title} photo`), { target: { files: [file] } });
+
+    const newPath = `receipts/u_owner/prepaid/${uploadType}.webp`;
+    await waitFor(() => expect(mocks.prepareAndUploadPrepaidImage).toHaveBeenCalledWith(file, uploadType, expect.any(Object)));
+    await waitFor(() => expect(mocks.replaceCardImage).toHaveBeenCalledWith("purchase-1", "card-1", kind, newPath, oldPath));
+    if (kind === "card-front") {
+      await waitFor(() => expect(mocks.extractCardFront).toHaveBeenCalledWith(newPath));
+    }
+    if (kind === "card-back") {
+      await waitFor(() => expect(mocks.extractCardBack).toHaveBeenCalledWith(newPath));
+    }
+  });
+
+  it.each([
+    {
+      kind: "card-front" as const,
+      title: "Card front image",
+      original: "1234567890121234",
+      manual: "4000000000000001",
+      firstExtraction: { pan: "4111111111111111", expiry: "01/30" },
+      secondExtraction: { pan: "4222222222222222", expiry: "02/31" },
+      extract: "front" as const,
+      placeholder: "16-digit PAN",
+    },
+    {
+      kind: "card-back" as const,
+      title: "Card back image",
+      original: "123",
+      manual: "999",
+      firstExtraction: { cvv: "456" },
+      secondExtraction: { cvv: "789" },
+      extract: "back" as const,
+      placeholder: "CVV",
+    },
+  ])("preserves $kind OCR manual edits across stale replacement generations", async ({ kind, title, original, manual, firstExtraction, secondExtraction, extract, placeholder }) => {
+    const first = deferred<{ extraction: typeof firstExtraction; warnings: string[] }>();
+    const second = deferred<{ extraction: typeof secondExtraction; warnings: string[] }>();
+    const extractionMock = extract === "front" ? mocks.extractCardFront : mocks.extractCardBack;
+    extractionMock.mockReset().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    let replacementNumber = 0;
+    mocks.prepareAndUploadPrepaidImage.mockImplementation(async (file: File, imageType: string) => ({
+      file,
+      storagePath: `replacement-${++replacementNumber}-${imageType}.webp`,
+    }));
+    mocks.replaceCardImage.mockImplementation(async (_purchaseID: string, cardID: string, imageKind: string, storagePath: string) => ({
+      purchase_id: "purchase-1",
+      card_id: cardID,
+      image_type: imageKind,
+      storage_path: storagePath,
+    }));
+    renderPrepaidCards();
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+
+    const firstInput = within(screen.getByRole("region", { name: title })).getByLabelText(`Replace ${title} photo`);
+    fireEvent.change(firstInput, { target: { files: [imageFile(`${kind}-first.jpg`)] } });
+    await waitFor(() => expect(extractionMock).toHaveBeenCalledTimes(1));
+
+    const secondInput = within(screen.getByRole("region", { name: title })).getByLabelText(`Replace ${title} photo`);
+    fireEvent.change(secondInput, { target: { files: [imageFile(`${kind}-second.jpg`)] } });
+    await waitFor(() => expect(extractionMock).toHaveBeenCalledTimes(2));
+
+    const field = screen.getByPlaceholderText(placeholder);
+    fireEvent.change(field, { target: { value: manual } });
+    fireEvent.change(field, { target: { value: original } });
+    first.resolve({ extraction: firstExtraction, warnings: [] });
+    second.resolve({ extraction: secondExtraction, warnings: [] });
+
+    await waitFor(() => expect(field).toHaveValue(original));
   });
 
   it("forwards the opened-card camera capture into the existing image handler", async () => {
@@ -406,9 +811,8 @@ describe("PrepaidCards", () => {
     fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
     await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
 
-    const imageInputs = Array.from(container.querySelectorAll("input[type='file']")) as HTMLInputElement[];
-    fireEvent.change(imageInputs[0], { target: { files: [imageFile("front.jpg")] } });
-    fireEvent.change(imageInputs[1], { target: { files: [imageFile("back.jpg")] } });
+    fireEvent.change(screen.getByLabelText("Card front capture input"), { target: { files: [imageFile("front.jpg")] } });
+    fireEvent.change(screen.getByLabelText("Card back capture input"), { target: { files: [imageFile("back.jpg")] } });
     await waitFor(() => expect(mocks.extractCardFront).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mocks.extractCardBack).toHaveBeenCalledTimes(1));
 

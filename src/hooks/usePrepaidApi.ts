@@ -7,9 +7,19 @@ export type PrepaidCardState = "active" | "archived";
 export type PrepaidImageType = "activation_receipt" | "package" | "opened_card" | "card_front" | "card_back";
 export type PrepaidCardImageKind = "package" | "card-front" | "card-back" | "opened-card";
 
+function cardImageRoute(imageKind: PrepaidCardImageKind) {
+  return imageKind === "package"
+    ? "package-image"
+    : imageKind === "card-front"
+      ? "card-front-image"
+      : imageKind === "card-back"
+        ? "card-back-image"
+        : "opened-card-image";
+}
+
 export interface PrepaidActivationReceipt {
   id: string;
-  storage_path: string;
+  storage_path?: string | null;
   filename?: string;
   content_type?: string;
   created_at?: string;
@@ -28,10 +38,10 @@ export interface PrepaidCard {
   details_captured: boolean;
   state: PrepaidCardState;
   archived_at?: string;
-  package_image_storage_path?: string;
-  card_front_image_storage_path?: string;
-  card_back_image_storage_path?: string;
-  opened_card_image_storage_path?: string;
+  package_image_storage_path?: string | null;
+  card_front_image_storage_path?: string | null;
+  card_back_image_storage_path?: string | null;
+  opened_card_image_storage_path?: string | null;
   extraction_status?: string;
   created_at?: string;
   updated_at?: string;
@@ -72,6 +82,16 @@ export interface PrepaidCleanupSummary {
   activation_receipt_images_deleted: number;
   sales_receipts_preserved: number;
   image_deletion_failures?: number;
+}
+
+export interface PrepaidImageMutationResponse {
+  purchase_id: string;
+  card_id?: string;
+  activation_receipt_id?: string;
+  image_type: string;
+  storage_path: string;
+  old_storage_path?: string;
+  pending_image_cleanup?: string | string[] | null;
 }
 
 export interface PrepaidPackageExtraction {
@@ -305,6 +325,75 @@ export function usePrepaidApi() {
     return response.json() as Promise<PrepaidPurchase>;
   }, []);
 
+  const deleteActivationReceipt = useCallback(async (purchaseID: string, activationReceiptID: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/activation-receipts/${activationReceiptID}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidPurchase>;
+  }, []);
+
+  const deleteActivationReceiptImage = useCallback(async (purchaseID: string, activationReceiptID: string, expectedStoragePath?: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/activation-receipts/${activationReceiptID}/image`, {
+      method: "DELETE",
+      body: JSON.stringify(expectedStoragePath ? { expected_storage_path: expectedStoragePath } : {}),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidImageMutationResponse>;
+  }, []);
+
+  const replaceActivationReceiptImage = useCallback(async (
+    purchaseID: string,
+    activationReceiptID: string,
+    storagePath: string,
+    expectedStoragePath?: string,
+  ) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/activation-receipts/${activationReceiptID}/image`, {
+      method: "POST",
+      body: JSON.stringify({
+        storage_path: storagePath,
+        ...(expectedStoragePath ? { expected_storage_path: expectedStoragePath } : {}),
+      }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidImageMutationResponse>;
+  }, []);
+
+  const deleteCard = useCallback(async (purchaseID: string, cardID: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidPurchase>;
+  }, []);
+
+  const deleteCardImage = useCallback(async (purchaseID: string, cardID: string, imageKind: PrepaidCardImageKind, expectedStoragePath?: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}/${cardImageRoute(imageKind)}`, {
+      method: "DELETE",
+      body: JSON.stringify(expectedStoragePath ? { expected_storage_path: expectedStoragePath } : {}),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidImageMutationResponse>;
+  }, []);
+
+  const replaceCardImage = useCallback(async (
+    purchaseID: string,
+    cardID: string,
+    imageKind: PrepaidCardImageKind,
+    storagePath: string,
+    expectedStoragePath?: string,
+  ) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}/${cardImageRoute(imageKind)}`, {
+      method: "POST",
+      body: JSON.stringify({
+        storage_path: storagePath,
+        ...(expectedStoragePath ? { expected_storage_path: expectedStoragePath } : {}),
+      }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<PrepaidImageMutationResponse>;
+  }, []);
+
   const getCardDetail = useCallback(async (purchaseID: string, cardID: string) => {
     const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}`);
     if (!response.ok) throw new Error(await readError(response));
@@ -348,6 +437,12 @@ export function usePrepaidApi() {
     createPurchase,
     updateCard,
     archiveCard,
+    deleteActivationReceipt,
+    deleteActivationReceiptImage,
+    replaceActivationReceiptImage,
+    deleteCard,
+    deleteCardImage,
+    replaceCardImage,
     getCardDetail,
     signActivationReceiptImage,
     signCardImage,

@@ -204,7 +204,7 @@ describe("AddPrepaidPurchaseFlow", () => {
     expect(mocks.uploadPrepaidImage).toHaveBeenCalledTimes(2);
   });
 
-  it("submits stable activation IDs and permits one activation receipt to be shared", async () => {
+  it("keeps activation receipts exclusive and releases them when unlinked", async () => {
     const onSaved = vi.fn();
     mocks.uploadPrepaidImage.mockReset();
     mocks.uploadPrepaidImage.mockImplementation(async (_file: File, imageType: string) => `receipts/prepaid/${imageType}.webp`);
@@ -226,11 +226,16 @@ describe("AddPrepaidPurchaseFlow", () => {
     const firstSelector = screen.getByRole("combobox", { name: "Activation receipt for card 1" });
     const activationID = (firstSelector as HTMLSelectElement).options[1].value;
     fireEvent.change(firstSelector, { target: { value: activationID } });
+    expect(firstSelector).toHaveValue(activationID);
 
     fireEvent.click(screen.getByRole("button", { name: "Add another card" }));
     fireEvent.change(screen.getAllByPlaceholderText("30-digit package barcode")[1], { target: { value: "999999999999999999999999999999" } });
     fireEvent.change(screen.getAllByPlaceholderText("11-digit Vanilla serial")[1], { target: { value: "98765432109" } });
     fireEvent.change(screen.getAllByPlaceholderText("Denomination")[1], { target: { value: "50" } });
+    const secondSelector = screen.getByRole("combobox", { name: "Activation receipt for card 2" });
+    expect(Array.from((secondSelector as HTMLSelectElement).options).map((option) => option.value)).not.toContain(activationID);
+    fireEvent.change(firstSelector, { target: { value: "" } });
+    await waitFor(() => expect(Array.from((screen.getByRole("combobox", { name: "Activation receipt for card 2" }) as HTMLSelectElement).options).map((option) => option.value)).toContain(activationID));
     fireEvent.change(screen.getByRole("combobox", { name: "Activation receipt for card 2" }), { target: { value: activationID } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     fireEvent.click(screen.getByRole("button", { name: /save purchase/i }));
@@ -239,7 +244,7 @@ describe("AddPrepaidPurchaseFlow", () => {
     const payload = mocks.createPurchase.mock.calls[0][0];
     expect(payload.activation_receipts[0]).toMatchObject({ id: activationID, storage_path: "receipts/prepaid/activation_receipt.webp" });
     expect(payload.activation_receipts[0].id).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(payload.cards.map((card: { activation_receipt_id?: string }) => card.activation_receipt_id)).toEqual([activationID, activationID]);
+    expect(payload.cards.map((card: { activation_receipt_id?: string }) => card.activation_receipt_id)).toEqual([undefined, activationID]);
   });
 
   it("automatically extracts front PAN/expiry and back CVV without crossing fields", async () => {

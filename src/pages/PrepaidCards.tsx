@@ -11,7 +11,7 @@ import { AddPrepaidPurchaseFlow } from "@/components/prepaid/AddPrepaidPurchaseF
 import { convertImageBlobToJpeg } from "@/lib/nativeImageConverter";
 import { prepareAndUploadPrepaidImage } from "@/lib/prepaidImagePipeline";
 import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
-import { PrepaidActivationReceipt, PrepaidCard, PrepaidCleanupSummary, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
+import { PrepaidActivationReceipt, PrepaidCard, PrepaidCardImageKind, PrepaidCleanupSummary, PrepaidImageMutationResponse, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
 import { apiFetch } from "@/lib/api";
 import { formatReceiptPurchaseDate } from "@/lib/receiptDate";
@@ -26,6 +26,45 @@ interface ImageModalState {
   title: string;
   url: string;
   filename: string;
+}
+
+type CardImageField = "package_image_storage_path" | "card_front_image_storage_path" | "card_back_image_storage_path" | "opened_card_image_storage_path";
+
+function cardImageField(imageType: string): CardImageField | null {
+  const normalized = imageType.replace(/-/g, "_");
+  if (normalized === "package" || normalized === "package_image") return "package_image_storage_path";
+  if (normalized === "card_front" || normalized === "card_front_image") return "card_front_image_storage_path";
+  if (normalized === "card_back" || normalized === "card_back_image") return "card_back_image_storage_path";
+  if (normalized === "opened_card" || normalized === "opened_card_image") return "opened_card_image_storage_path";
+  return null;
+}
+
+function applyImageMutationToPurchase(purchase: PrepaidPurchase, mutation: PrepaidImageMutationResponse): PrepaidPurchase {
+  if (purchase.id !== mutation.purchase_id) return purchase;
+  const storagePath = mutation.storage_path || "";
+  if (mutation.activation_receipt_id) {
+    return {
+      ...purchase,
+      activation_receipts: purchase.activation_receipts.map((receipt) => receipt.id === mutation.activation_receipt_id ? { ...receipt, storage_path: storagePath } : receipt),
+    };
+  }
+  if (!mutation.card_id) return purchase;
+  const field = cardImageField(mutation.image_type);
+  if (!field) return purchase;
+  return {
+    ...purchase,
+    cards: purchase.cards.map((card) => card.id === mutation.card_id ? { ...card, [field]: storagePath } : card),
+  };
+}
+
+function pendingCleanupMessage(mutation: PrepaidImageMutationResponse) {
+  const pending = mutation.pending_image_cleanup;
+  if (!pending || (Array.isArray(pending) && pending.length === 0) || (typeof pending === "string" && !pending.trim())) return null;
+  return "The new image is saved, but cleanup of the previous image is still pending.";
+}
+
+function hasVisiblePrepaidContent(purchase: PrepaidPurchase) {
+  return purchase.cards.length > 0 || purchase.activation_receipts.length > 0;
 }
 
 function digitsOnly(value: string) {
@@ -133,8 +172,8 @@ const PrepaidCards = () => {
     void load();
   }, [load]);
 
-  const activeGroups = useMemo(() => activePurchases.filter((purchase) => purchase.cards.length > 0), [activePurchases]);
-  const archivedGroups = useMemo(() => archivedPurchases.filter((purchase) => purchase.cards.length > 0), [archivedPurchases]);
+  const activeGroups = useMemo(() => activePurchases.filter(hasVisiblePrepaidContent), [activePurchases]);
+  const archivedGroups = useMemo(() => archivedPurchases.filter(hasVisiblePrepaidContent), [archivedPurchases]);
 
   const openSalesReceipt = async (receiptID: string) => {
     const existing = receiptMap[receiptID];
@@ -241,6 +280,23 @@ const PrepaidCards = () => {
     }
   };
 
+  const handlePurchaseUpdated = useCallback((purchase: PrepaidPurchase) => {
+    mergePurchase(purchase, setActivePurchases, setArchivedPurchases);
+    void load();
+  }, [load]);
+
+  const handleImageMutation = useCallback((mutation: PrepaidImageMutationResponse) => {
+    setActivePurchases((prev) => prev.map((purchase) => applyImageMutationToPurchase(purchase, mutation)));
+    setArchivedPurchases((prev) => prev.map((purchase) => applyImageMutationToPurchase(purchase, mutation)));
+    setSelected((current) => {
+      if (!current || current.purchase.id !== mutation.purchase_id) return current;
+      const purchase = applyImageMutationToPurchase(current.purchase, mutation);
+      const card = mutation.card_id ? purchase.cards.find((entry) => entry.id === mutation.card_id) : current.card;
+      return card ? { purchase, card } : current;
+    });
+    void load();
+  }, [load]);
+
   if (!statusLoading && !enabled) {
     return (
       <div className="min-h-screen bg-background">
@@ -340,6 +396,8 @@ const PrepaidCards = () => {
                   onDownloadSalesReceipt={() => downloadSalesReceipt(purchase.sales_receipt_id)}
                   onViewActivationReceipt={(receipt, index) => openActivationReceipt(purchase.id, receipt, index)}
                   onDownloadActivationReceipt={(receipt, index) => downloadActivationReceipt(purchase.id, receipt, index)}
+                  onPurchaseUpdated={handlePurchaseUpdated}
+                  onImageMutation={handleImageMutation}
                 />
               ))
             )}
@@ -360,6 +418,8 @@ const PrepaidCards = () => {
                   onDownloadSalesReceipt={() => downloadSalesReceipt(purchase.sales_receipt_id)}
                   onViewActivationReceipt={(receipt, index) => openActivationReceipt(purchase.id, receipt, index)}
                   onDownloadActivationReceipt={(receipt, index) => downloadActivationReceipt(purchase.id, receipt, index)}
+                  onPurchaseUpdated={handlePurchaseUpdated}
+                  onImageMutation={handleImageMutation}
                 />
               ))
             )}
@@ -391,6 +451,8 @@ const PrepaidCards = () => {
           onDownloadSalesReceipt={() => void downloadSalesReceipt(selected.purchase.sales_receipt_id)}
           onViewActivationReceipt={(receipt, index) => void openActivationReceipt(selected.purchase.id, receipt, index)}
           onDownloadActivationReceipt={(receipt, index) => void downloadActivationReceipt(selected.purchase.id, receipt, index)}
+          onPurchaseChanged={handlePurchaseUpdated}
+          onImageMutation={handleImageMutation}
           onClose={() => setSelected(null)}
           onUpdated={(purchase) => {
             setSelected(null);
@@ -436,6 +498,145 @@ function Header({ onBack, onRefresh, refreshing }: { onBack: () => void; onRefre
   );
 }
 
+function ActivationReceiptActions({
+  purchaseID,
+  receipt,
+  index,
+  onView,
+  onDownload,
+  onPurchaseUpdated,
+  onImageMutation,
+}: {
+  purchaseID: string;
+  receipt: PrepaidActivationReceipt;
+  index: number;
+  onView: () => void;
+  onDownload: () => void;
+  onPurchaseUpdated: (purchase: PrepaidPurchase) => void;
+  onImageMutation: (mutation: PrepaidImageMutationResponse) => void;
+}) {
+  const {
+    uploadPrepaidImage,
+    deleteActivationReceipt,
+    deleteActivationReceiptImage,
+    replaceActivationReceiptImage,
+  } = usePrepaidApi();
+  const [busy, setBusy] = useState<"replace" | "delete-photo" | "delete-receipt" | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const hasImage = Boolean(receipt.storage_path?.trim());
+
+  const showCleanupWarning = (mutation: PrepaidImageMutationResponse) => {
+    const message = pendingCleanupMessage(mutation);
+    if (message) toast.warning(message);
+  };
+
+  const replacePhoto = async (file: File, colorMode: CameraColorMode = "color") => {
+    if (busy || !file.type.startsWith("image/")) {
+      if (!file.type.startsWith("image/")) toast.error("Only image files are allowed");
+      return;
+    }
+    setBusy("replace");
+    try {
+      const prepared = await prepareAndUploadPrepaidImage(file, "activation_receipt", {
+        grayscale: colorMode === "grayscale",
+        upload: uploadPrepaidImage,
+      });
+      if (!prepared.storagePath) throw new Error("Activation receipt upload did not return a storage path.");
+      const mutation = await replaceActivationReceiptImage(purchaseID, receipt.id, prepared.storagePath, receipt.storage_path?.trim() || undefined);
+      onImageMutation(mutation);
+      showCleanupWarning(mutation);
+      toast.success("Activation receipt photo replaced");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to replace activation receipt photo");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deletePhoto = async () => {
+    if (!hasImage || busy) return;
+    if (!window.confirm("Delete this activation receipt photo? The activation receipt and its card relationship will be kept.")) return;
+    setBusy("delete-photo");
+    try {
+      const mutation = await deleteActivationReceiptImage(purchaseID, receipt.id, receipt.storage_path?.trim() || undefined);
+      onImageMutation(mutation);
+      showCleanupWarning(mutation);
+      toast.success("Activation receipt photo deleted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete activation receipt photo");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const deleteReceipt = async () => {
+    if (busy) return;
+    if (!window.confirm("Delete this activation receipt? Its card relationship and photo will be permanently removed.")) return;
+    setBusy("delete-receipt");
+    try {
+      const purchase = await deleteActivationReceipt(purchaseID, receipt.id);
+      onPurchaseUpdated(purchase);
+      toast.success("Activation receipt deleted");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete activation receipt");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return <>
+    <input
+      ref={fileRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      aria-label={`Replace activation receipt ${index + 1} photo`}
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) void replacePhoto(file);
+        event.target.value = "";
+      }}
+    />
+    <div className="grid grid-cols-2 gap-2">
+      <Button variant="outline" size="sm" onClick={onView} disabled={!hasImage || !!busy}>
+        <Eye className="w-4 h-4 mr-2" />
+        View
+      </Button>
+      <Button variant="outline" size="sm" onClick={onDownload} disabled={!hasImage || !!busy}>
+        <Download className="w-4 h-4 mr-2" />
+        Download
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={!!busy}>
+        <Upload className="w-4 h-4 mr-2" />
+        Replace photo
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => setCameraOpen(true)} disabled={!!busy}>
+        <Camera className="w-4 h-4 mr-2" />
+        Replace (camera)
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => void deletePhoto()} disabled={!hasImage || !!busy}>
+        <Trash2 className="w-4 h-4 mr-2" />
+        Delete photo
+      </Button>
+      <Button variant="outline" size="sm" className="border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => void deleteReceipt()} disabled={!!busy}>
+        <Trash2 className="w-4 h-4 mr-2" />
+        Delete receipt
+      </Button>
+    </div>
+    {busy && <p className="text-xs text-muted-foreground">{busy === "replace" ? "Replacing photo…" : busy === "delete-photo" ? "Deleting photo…" : "Deleting receipt…"}</p>}
+    <BrowserCamera
+      open={cameraOpen}
+      defaultColorMode="color"
+      onCapture={(file, colorMode) => {
+        setCameraOpen(false);
+        void replacePhoto(file, colorMode);
+      }}
+      onClose={() => setCameraOpen(false)}
+    />
+  </>;
+}
+
 function PrepaidPurchaseGroup({
   purchase,
   receipt,
@@ -444,6 +645,8 @@ function PrepaidPurchaseGroup({
   onDownloadSalesReceipt,
   onViewActivationReceipt,
   onDownloadActivationReceipt,
+  onPurchaseUpdated,
+  onImageMutation,
 }: {
   purchase: PrepaidPurchase;
   receipt?: Receipt | null;
@@ -452,6 +655,8 @@ function PrepaidPurchaseGroup({
   onDownloadSalesReceipt: () => void;
   onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
   onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onPurchaseUpdated: (purchase: PrepaidPurchase) => void;
+  onImageMutation: (mutation: PrepaidImageMutationResponse) => void;
 }) {
   const vendor = receipt?.vendor?.trim() || "Retailer";
   const date = receipt?.purchase_date
@@ -487,9 +692,9 @@ function PrepaidPurchaseGroup({
             Activation receipts ({purchase.activation_receipts.length})
           </span>
         </div>
-        {unlinkedReceipts.some(({ activationReceipt }) => activationReceipt.storage_path?.trim()) && (
+        {unlinkedReceipts.length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2">
-            {unlinkedReceipts.map(({ activationReceipt, index }) => activationReceipt.storage_path?.trim() ? (
+            {unlinkedReceipts.map(({ activationReceipt, index }) => (
               <div
                 key={activationReceipt.id}
                 className="rounded-md border bg-background p-2 space-y-2"
@@ -498,20 +703,19 @@ function PrepaidPurchaseGroup({
               >
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <FileImage className="w-4 h-4" />
-                  <span className="truncate">Activation {index + 1}</span>
+                  <span className="truncate">Activation {index + 1}{activationReceipt.storage_path?.trim() ? "" : " (no photo)"}</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="outline" size="sm" onClick={() => onViewActivationReceipt(activationReceipt, index)}>
-                    <Eye className="w-4 h-4 mr-2" />
-                    View
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => onDownloadActivationReceipt(activationReceipt, index)}>
-                    <Download className="w-4 h-4 mr-2" />
-                    Download
-                  </Button>
-                </div>
+                <ActivationReceiptActions
+                  purchaseID={purchase.id}
+                  receipt={activationReceipt}
+                  index={index}
+                  onView={() => onViewActivationReceipt(activationReceipt, index)}
+                  onDownload={() => onDownloadActivationReceipt(activationReceipt, index)}
+                  onPurchaseUpdated={onPurchaseUpdated}
+                  onImageMutation={onImageMutation}
+                />
               </div>
-            ) : null)}
+            ))}
           </div>
         )}
       </div>
@@ -523,10 +727,13 @@ function PrepaidPurchaseGroup({
             card={card}
             linkedReceipts={purchase.activation_receipts
               .map((activationReceipt, index) => ({ activationReceipt, index }))
-              .filter(({ activationReceipt }) => activationReceipt.id === card.activation_receipt_id && activationReceipt.storage_path?.trim())}
+              .filter(({ activationReceipt }) => activationReceipt.id === card.activation_receipt_id)}
             onClick={() => onCardClick(card)}
             onViewActivationReceipt={onViewActivationReceipt}
             onDownloadActivationReceipt={onDownloadActivationReceipt}
+            purchaseID={purchase.id}
+            onPurchaseUpdated={onPurchaseUpdated}
+            onImageMutation={onImageMutation}
           />
         ))}
       </div>
@@ -541,12 +748,18 @@ function PrepaidCardRow({
   linkedReceipts,
   onViewActivationReceipt,
   onDownloadActivationReceipt,
+  purchaseID,
+  onPurchaseUpdated,
+  onImageMutation,
 }: {
   card: PrepaidCard;
   onClick: () => void;
   linkedReceipts: Array<{ activationReceipt: PrepaidActivationReceipt; index: number }>;
   onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
   onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  purchaseID: string;
+  onPurchaseUpdated: (purchase: PrepaidPurchase) => void;
+  onImageMutation: (mutation: PrepaidImageMutationResponse) => void;
 }) {
   return (
     <div className="rounded-md bg-secondary/45 p-3 space-y-2">
@@ -568,8 +781,16 @@ function PrepaidCardRow({
       </button>
       {linkedReceipts.length > 0 && <div className="grid gap-2 sm:grid-cols-2" aria-label="Linked activation receipts">
         {linkedReceipts.map(({ activationReceipt, index }) => <div key={activationReceipt.id} className="rounded-md border bg-background p-2 space-y-2" role="group" aria-label={`Activation receipt ${index + 1}`}>
-          <p className="text-xs text-muted-foreground">Linked activation {index + 1}</p>
-          <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={() => onViewActivationReceipt(activationReceipt, index)}><Eye className="w-4 h-4 mr-2" />View</Button><Button variant="outline" size="sm" onClick={() => onDownloadActivationReceipt(activationReceipt, index)}><Download className="w-4 h-4 mr-2" />Download</Button></div>
+          <p className="text-xs text-muted-foreground">Linked activation {index + 1}{activationReceipt.storage_path?.trim() ? "" : " (no photo)"}</p>
+          <ActivationReceiptActions
+            purchaseID={purchaseID}
+            receipt={activationReceipt}
+            index={index}
+            onView={() => onViewActivationReceipt(activationReceipt, index)}
+            onDownload={() => onDownloadActivationReceipt(activationReceipt, index)}
+            onPurchaseUpdated={onPurchaseUpdated}
+            onImageMutation={onImageMutation}
+          />
         </div>)}
       </div>}
     </div>
@@ -613,16 +834,24 @@ function PrepaidSearchResultRow({
 
 function RelatedReceiptActions({
   purchase,
+  purchaseID,
+  activationReceiptIndex,
   onViewSalesReceipt,
   onDownloadSalesReceipt,
   onViewActivationReceipt,
   onDownloadActivationReceipt,
+  onPurchaseUpdated,
+  onImageMutation,
 }: {
   purchase: PrepaidPurchase;
+  purchaseID: string;
+  activationReceiptIndex?: number;
   onViewSalesReceipt: () => void;
   onDownloadSalesReceipt: () => void;
   onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
   onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onPurchaseUpdated: (purchase: PrepaidPurchase) => void;
+  onImageMutation: (mutation: PrepaidImageMutationResponse) => void;
 }) {
   return (
     <section className="rounded-lg border bg-card p-4 space-y-3" aria-label="Related receipts">
@@ -637,23 +866,25 @@ function RelatedReceiptActions({
           Download sales
         </Button>
       </div>
-      {purchase.activation_receipts.some((entry) => entry.storage_path?.trim()) && (
+      {purchase.activation_receipts.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2">
-          {purchase.activation_receipts.map((receipt, index) => receipt.storage_path?.trim() ? (
+          {purchase.activation_receipts.map((receipt, localIndex) => {
+            const index = activationReceiptIndex ?? localIndex;
+            return (
             <div key={receipt.id} className="rounded-md border bg-background p-2 space-y-2" role="group" aria-label={`Activation receipt ${index + 1}`}>
-              <p className="text-xs text-muted-foreground">Activation {index + 1}</p>
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" size="sm" onClick={() => onViewActivationReceipt(receipt, index)}>
-                  <Eye className="w-4 h-4 mr-2" />
-                  View
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => onDownloadActivationReceipt(receipt, index)}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Download
-                </Button>
-              </div>
+              <p className="text-xs text-muted-foreground">Activation {index + 1}{receipt.storage_path?.trim() ? "" : " (no photo)"}</p>
+              <ActivationReceiptActions
+                purchaseID={purchaseID}
+                receipt={receipt}
+                index={index}
+                onView={() => onViewActivationReceipt(receipt, index)}
+                onDownload={() => onDownloadActivationReceipt(receipt, index)}
+                onPurchaseUpdated={onPurchaseUpdated}
+                onImageMutation={onImageMutation}
+              />
             </div>
-          ) : null)}
+            );
+          })}
         </div>
       )}
     </section>
@@ -672,8 +903,20 @@ function mergePurchase(
 ) {
   const activeCards = purchase.cards.filter((card) => card.state !== "archived");
   const archivedCards = purchase.cards.filter((card) => card.state === "archived");
-  setActive((prev) => upsertPurchase(prev, { ...purchase, cards: activeCards }).filter((entry) => entry.cards.length > 0));
-  setArchived((prev) => upsertPurchase(prev, { ...purchase, cards: archivedCards }).filter((entry) => entry.cards.length > 0));
+  setActive((prev) => {
+    const existing = prev.some((entry) => entry.id === purchase.id);
+    if (activeCards.length === 0 && !(existing && purchase.activation_receipts.length > 0)) {
+      return prev.filter((entry) => entry.id !== purchase.id);
+    }
+    return upsertPurchase(prev, { ...purchase, cards: activeCards }).filter(hasVisiblePrepaidContent);
+  });
+  setArchived((prev) => {
+    const existing = prev.some((entry) => entry.id === purchase.id);
+    if (archivedCards.length === 0 && !(existing && purchase.activation_receipts.length > 0)) {
+      return prev.filter((entry) => entry.id !== purchase.id);
+    }
+    return upsertPurchase(prev, { ...purchase, cards: archivedCards }).filter(hasVisiblePrepaidContent);
+  });
 }
 
 function upsertPurchase(purchases: PrepaidPurchase[], purchase: PrepaidPurchase) {
@@ -709,6 +952,8 @@ function PrepaidCardDetailV2({
   onDownloadSalesReceipt,
   onViewActivationReceipt,
   onDownloadActivationReceipt,
+  onPurchaseChanged,
+  onImageMutation,
   onClose,
   onUpdated,
 }: {
@@ -718,6 +963,8 @@ function PrepaidCardDetailV2({
   onDownloadSalesReceipt: () => void;
   onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
   onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onPurchaseChanged: (purchase: PrepaidPurchase) => void;
+  onImageMutation: (mutation: PrepaidImageMutationResponse) => void;
   onClose: () => void;
   onUpdated: (purchase: PrepaidPurchase) => void;
 }) {
@@ -727,9 +974,13 @@ function PrepaidCardDetailV2({
     extractCardBack,
     updateCard,
     archiveCard,
+    deleteCard,
+    deleteCardImage,
+    replaceCardImage,
     getCardDetail,
     signCardImage,
   } = usePrepaidApi();
+  const [purchase, setPurchase] = useState(entry.purchase);
   const [detailCard, setDetailCard] = useState(entry.card);
   const [activationBarcode, setActivationBarcode] = useState(entry.card.activation_barcode);
   const [vanillaSerial, setVanillaSerial] = useState(entry.card.vanilla_serial);
@@ -758,6 +1009,7 @@ function PrepaidCardDetailV2({
   const [frontCameraOpen, setFrontCameraOpen] = useState(false);
   const [backCameraOpen, setBackCameraOpen] = useState(false);
   const [cardImageModal, setCardImageModal] = useState<ImageModalState | null>(null);
+  const [imageBusy, setImageBusy] = useState<PrepaidCardImageKind | null>(null);
   const generationsRef = useRef({ front: 0, back: 0 });
   const editVersionsRef = useRef({ pan: 0, expiry: 0, cvv: 0 });
   const frontFileRef = useRef<HTMLInputElement>(null);
@@ -826,17 +1078,102 @@ function PrepaidCardDetailV2({
     else setBackWarnings(warnings);
   };
 
-  const processSide = async (side: "front" | "back", file: File, grayscale: boolean, generation: number) => {
+  const showCleanupWarning = (mutation: PrepaidImageMutationResponse) => {
+    const message = pendingCleanupMessage(mutation);
+    if (message) toast.warning(message);
+  };
+
+  const persistedImagePath = (kind: PrepaidCardImageKind) => {
+    if (kind === "package") return detailCard.package_image_storage_path || "";
+    if (kind === "card-front") return frontStoragePath;
+    if (kind === "card-back") return backStoragePath;
+    return detailCard.opened_card_image_storage_path || "";
+  };
+
+  const setSavedImageUrl = (kind: PrepaidCardImageKind, url: string | null) => {
+    if (kind === "package") setPackageImageUrl(url);
+    if (kind === "card-front") setFrontSavedImageUrl(url);
+    if (kind === "card-back") setBackSavedImageUrl(url);
+    if (kind === "opened-card") setLegacyImageUrl(url);
+  };
+
+  const handleLocalImageMutation = (mutation: PrepaidImageMutationResponse) => {
+    const nextPurchase = applyImageMutationToPurchase(purchase, mutation);
+    setPurchase(nextPurchase);
+    if (mutation.card_id === entry.card.id) {
+      const field = cardImageField(mutation.image_type);
+      if (field) {
+        const nextPath = mutation.storage_path || "";
+        setDetailCard((current) => ({ ...current, [field]: nextPath }));
+        const kind = field === "package_image_storage_path"
+          ? "package"
+          : field === "card_front_image_storage_path"
+            ? "card-front"
+            : field === "card_back_image_storage_path"
+              ? "card-back"
+              : "opened-card";
+        setSavedImageUrl(kind, null);
+        if (nextPath) {
+          void signCardImage(entry.purchase.id, entry.card.id, kind)
+            .then((url) => setSavedImageUrl(kind, url))
+            .catch(() => undefined);
+        }
+        if (kind === "card-front") {
+          setFrontStoragePath(nextPath);
+        }
+        if (kind === "card-back") {
+          setBackStoragePath(nextPath);
+        }
+      }
+    }
+    onImageMutation(mutation);
+  };
+
+  const handlePurchaseChanged = (nextPurchase: PrepaidPurchase) => {
+    setPurchase(nextPurchase);
+    setActivationReceiptID(nextPurchase.cards.find((card) => card.id === entry.card.id)?.activation_receipt_id || "");
+    onPurchaseChanged(nextPurchase);
+  };
+
+  const clearSideMedia = (side: "front" | "back") => {
+    generationsRef.current[side] += 1;
+    if (side === "front") {
+      setFrontFile(null);
+      setFrontNeedsUpload(false);
+      setFrontPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return null; });
+      setFrontStoragePath("");
+      setFrontWarnings([]);
+      setFrontStatus("idle");
+    } else {
+      setBackFile(null);
+      setBackNeedsUpload(false);
+      setBackPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return null; });
+      setBackStoragePath("");
+      setBackWarnings([]);
+      setBackStatus("idle");
+    }
+  };
+
+  const processSide = async (side: "front" | "back", file: File, grayscale: boolean, generation: number, expectedStoragePath = "") => {
     const panEditVersionAtStart = editVersionsRef.current.pan;
     const expiryEditVersionAtStart = editVersionsRef.current.expiry;
     const cvvEditVersionAtStart = editVersionsRef.current.cvv;
     const imageType = side === "front" ? "card_front" as const : "card_back" as const;
+    const imageKind: PrepaidCardImageKind = side === "front" ? "card-front" : "card-back";
     try {
       setSideStatus(side, "preparing");
       const result = await prepareAndUploadPrepaidImage(file, imageType, { grayscale, upload: uploadPrepaidImage });
       const storagePath = result.storagePath;
       if (!storagePath) throw new Error("Image upload did not return a storage path.");
       if (generation !== currentGeneration(side)) return;
+      if (expectedStoragePath) {
+        setImageBusy(imageKind);
+        const mutation = await replaceCardImage(entry.purchase.id, entry.card.id, imageKind, storagePath, expectedStoragePath);
+        if (generation !== currentGeneration(side)) return;
+        handleLocalImageMutation(mutation);
+        showCleanupWarning(mutation);
+        toast.success(`${side === "front" ? "Card front" : "Card back"} photo replaced`);
+      }
       const preparedPreview = URL.createObjectURL(result.file);
       if (side === "front") {
         setFrontPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return preparedPreview; });
@@ -864,8 +1201,10 @@ function PrepaidCardDetailV2({
         const backExtraction = extraction as Awaited<ReturnType<typeof extractCardBack>>;
         setCvv((current) => backExtraction.extraction.cvv || current);
       }
+      if (expectedStoragePath && generation === currentGeneration(side)) setImageBusy(null);
     } catch (error) {
       if (generation !== currentGeneration(side)) return;
+      if (expectedStoragePath) setImageBusy(null);
       const message = error instanceof Error ? error.message : "Extraction failed";
       setSideWarnings(side, [message]);
       setSideStatus(side, "error");
@@ -877,18 +1216,19 @@ function PrepaidCardDetailV2({
     if (!file.type.startsWith("image/")) return;
     generationsRef.current[side] += 1;
     const generation = generationsRef.current[side];
+    const expectedStoragePath = side === "front" ? frontStoragePath : backStoragePath;
     setSideWarnings(side, []);
     setSideStatus(side, "preparing");
     if (side === "front") {
       setFrontFile(file);
       setFrontNeedsUpload(true);
-      setFrontPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
+      if (!expectedStoragePath) setFrontPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
     } else {
       setBackFile(file);
       setBackNeedsUpload(true);
-      setBackPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
+      if (!expectedStoragePath) setBackPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
     }
-    void processSide(side, file, colorMode === "grayscale", generation);
+    void processSide(side, file, colorMode === "grayscale", generation, expectedStoragePath);
   };
 
   const retrySide = (side: "front" | "back") => {
@@ -935,6 +1275,62 @@ function PrepaidCardDetailV2({
         toast.error(message);
       }
     })();
+  };
+
+  const replaceCardImageSlot = async (kind: PrepaidCardImageKind, file: File, colorMode: CameraColorMode = "color") => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Only image files are allowed");
+      return;
+    }
+    if (kind === "card-front") {
+      setSideImage("front", file, colorMode);
+      return;
+    }
+    if (kind === "card-back") {
+      setSideImage("back", file, colorMode);
+      return;
+    }
+    if (imageBusy) return;
+    const expectedStoragePath = persistedImagePath(kind).trim();
+    if (!expectedStoragePath) return;
+    setImageBusy(kind);
+    try {
+      const imageType = kind === "package" ? "package" as const : "opened_card" as const;
+      const prepared = await prepareAndUploadPrepaidImage(file, imageType, {
+        grayscale: colorMode === "grayscale",
+        upload: uploadPrepaidImage,
+      });
+      if (!prepared.storagePath) throw new Error("Image upload did not return a storage path.");
+      const mutation = await replaceCardImage(entry.purchase.id, entry.card.id, kind, prepared.storagePath, expectedStoragePath);
+      handleLocalImageMutation(mutation);
+      showCleanupWarning(mutation);
+      toast.success(`${kind === "package" ? "Package" : "Legacy opened-card"} photo replaced`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to replace card photo");
+    } finally {
+      setImageBusy(null);
+    }
+  };
+
+  const deleteCardImageSlot = async (kind: PrepaidCardImageKind) => {
+    if (imageBusy) return;
+    const expectedStoragePath = persistedImagePath(kind).trim();
+    if (!expectedStoragePath) return;
+    const label = kind === "package" ? "package" : kind === "card-front" ? "card front" : kind === "card-back" ? "card back" : "legacy opened-card";
+    if (!window.confirm(`Delete the ${label} photo? The card and extracted details will be kept.`)) return;
+    setImageBusy(kind);
+    try {
+      const mutation = await deleteCardImage(entry.purchase.id, entry.card.id, kind, expectedStoragePath);
+      handleLocalImageMutation(mutation);
+      if (kind === "card-front") clearSideMedia("front");
+      if (kind === "card-back") clearSideMedia("back");
+      showCleanupWarning(mutation);
+      toast.success(`${label[0].toUpperCase()}${label.slice(1)} photo deleted`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `Failed to delete ${label} photo`);
+    } finally {
+      setImageBusy(null);
+    }
   };
 
   const updateCredential = (field: "pan" | "expiry" | "cvv", value: string) => {
@@ -991,6 +1387,21 @@ function PrepaidCardDetailV2({
     }
   };
 
+  const removeCard = async () => {
+    if (busy || detailLoading) return;
+    if (!window.confirm("Delete this prepaid card? Its activation and sales receipts will be kept, but all card photos will be removed.")) return;
+    setBusy(true);
+    try {
+      const purchase = await deleteCard(entry.purchase.id, entry.card.id);
+      toast.success("Card deleted");
+      onUpdated(purchase);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete card");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadCardImage = async (kind: "package" | "card-front" | "card-back" | "opened-card") => {
     try {
       await downloadFromSignedURL(() => signCardImage(entry.purchase.id, entry.card.id, kind), cardImageFilename(kind, detailCard));
@@ -1014,49 +1425,80 @@ function PrepaidCardDetailV2({
   };
 
   const linkedReceipts = activationReceiptID
-    ? entry.purchase.activation_receipts.filter((activationReceipt) => activationReceipt.id === activationReceiptID)
+    ? purchase.activation_receipts.filter((activationReceipt) => activationReceipt.id === activationReceiptID)
     : [];
+  const receiptsAssignedToOtherCards = new Set(
+    purchase.cards
+      .filter((card) => card.id !== entry.card.id)
+      .map((card) => card.activation_receipt_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const selectableReceipts = purchase.activation_receipts.filter((activationReceipt) =>
+    activationReceipt.id === activationReceiptID || !receiptsAssignedToOtherCards.has(activationReceipt.id),
+  );
 
   return <div className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in">
     <header className="flex items-center justify-between border-b px-4 py-3"><button onClick={onClose} className="p-2 -ml-2 rounded-md hover:bg-secondary"><X className="w-5 h-5" /></button><h2 className="text-sm font-semibold">Prepaid Card</h2><Button size="sm" onClick={save} disabled={busy || detailLoading || frontStatus === "preparing" || frontStatus === "extracting" || backStatus === "preparing" || backStatus === "extracting"}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}</Button></header>
     <main className="flex-1 overflow-y-auto"><div className="max-w-2xl mx-auto p-4 space-y-4">
       <div className="rounded-lg border bg-card p-4 space-y-3"><p className="text-sm font-semibold">${(detailCard.denomination ?? 0).toFixed(2)} Vanilla</p><div className="space-y-2"><Input aria-label="Package barcode" inputMode="numeric" value={activationBarcode} maxLength={30} onChange={(event) => setActivationBarcode(digitsOnly(event.target.value).slice(0, 30))} placeholder="30-digit package barcode" /><Input aria-label="Vanilla serial" inputMode="numeric" value={vanillaSerial} maxLength={11} onChange={(event) => setVanillaSerial(digitsOnly(event.target.value).slice(0, 11))} placeholder="11-digit Vanilla serial" /></div><p className="text-xs text-muted-foreground">State: {detailCard.state === "archived" ? "Archived" : "Active"}</p>{receipt?.vendor && <p className="text-xs text-muted-foreground">Retailer: {receipt.vendor}</p>}</div>
-      <RelatedReceiptActions purchase={{ ...entry.purchase, activation_receipts: linkedReceipts }} onViewSalesReceipt={onViewSalesReceipt} onDownloadSalesReceipt={onDownloadSalesReceipt} onViewActivationReceipt={onViewActivationReceipt} onDownloadActivationReceipt={onDownloadActivationReceipt} />
-      <label className="block rounded-lg border bg-card p-4 space-y-2 text-sm"><span className="font-medium">Activation receipt relationship</span><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="Activation receipt relationship" value={activationReceiptID} onChange={(event) => setActivationReceiptID(event.target.value)}><option value="">No linked activation receipt</option>{entry.purchase.activation_receipts.map((activationReceipt, index) => <option key={activationReceipt.id} value={activationReceipt.id}>Activation receipt {index + 1}</option>)}</select></label>
+      <RelatedReceiptActions purchase={{ ...purchase, activation_receipts: linkedReceipts }} activationReceiptIndex={activationReceiptID ? purchase.activation_receipts.findIndex((activationReceipt) => activationReceipt.id === activationReceiptID) : undefined} purchaseID={entry.purchase.id} onViewSalesReceipt={onViewSalesReceipt} onDownloadSalesReceipt={onDownloadSalesReceipt} onViewActivationReceipt={onViewActivationReceipt} onDownloadActivationReceipt={onDownloadActivationReceipt} onPurchaseUpdated={handlePurchaseChanged} onImageMutation={handleLocalImageMutation} />
+      <label className="block rounded-lg border bg-card p-4 space-y-2 text-sm"><span className="font-medium">Activation receipt relationship</span><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="Activation receipt relationship" value={activationReceiptID} onChange={(event) => setActivationReceiptID(event.target.value)}><option value="">No linked activation receipt</option>{selectableReceipts.map((activationReceipt) => { const index = purchase.activation_receipts.findIndex((entry) => entry.id === activationReceipt.id); return <option key={activationReceipt.id} value={activationReceipt.id}>Activation receipt {index + 1}</option>; })}</select></label>
       {(detailCard.package_image_storage_path || detailCard.card_front_image_storage_path || detailCard.card_back_image_storage_path || detailCard.opened_card_image_storage_path) && <div className="grid gap-3 sm:grid-cols-2">
-        {detailCard.package_image_storage_path && <SavedCardImage title="Package image" imageUrl={packageImageUrl} onView={() => void viewCardImage("package")} onDownload={() => void downloadCardImage("package")} />}
-        {detailCard.card_front_image_storage_path && <SavedCardImage title="Card front image" imageUrl={frontSavedImageUrl} onView={() => void viewCardImage("card-front")} onDownload={() => void downloadCardImage("card-front")} />}
-        {detailCard.card_back_image_storage_path && <SavedCardImage title="Card back image" imageUrl={backSavedImageUrl} onView={() => void viewCardImage("card-back")} onDownload={() => void downloadCardImage("card-back")} />}
-        {detailCard.opened_card_image_storage_path && <SavedCardImage title="Opened-card image" displayTitle="Legacy opened-card image" imageUrl={legacyImageUrl} onView={() => void viewCardImage("opened-card")} onDownload={() => void downloadCardImage("opened-card")} />}
+        {detailCard.package_image_storage_path && <SavedCardImage title="Package image" imageUrl={packageImageUrl} busy={imageBusy === "package"} onView={() => void viewCardImage("package")} onDownload={() => void downloadCardImage("package")} onReplace={(file, mode) => void replaceCardImageSlot("package", file, mode)} onDelete={() => void deleteCardImageSlot("package")} />}
+        {detailCard.card_front_image_storage_path && <SavedCardImage title="Card front image" imageUrl={frontSavedImageUrl} busy={imageBusy === "card-front" || frontStatus === "preparing" || frontStatus === "extracting"} onView={() => void viewCardImage("card-front")} onDownload={() => void downloadCardImage("card-front")} onReplace={(file, mode) => void replaceCardImageSlot("card-front", file, mode)} onDelete={() => void deleteCardImageSlot("card-front")} />}
+        {detailCard.card_back_image_storage_path && <SavedCardImage title="Card back image" imageUrl={backSavedImageUrl} busy={imageBusy === "card-back" || backStatus === "preparing" || backStatus === "extracting"} onView={() => void viewCardImage("card-back")} onDownload={() => void downloadCardImage("card-back")} onReplace={(file, mode) => void replaceCardImageSlot("card-back", file, mode)} onDelete={() => void deleteCardImageSlot("card-back")} />}
+        {detailCard.opened_card_image_storage_path && <SavedCardImage title="Opened-card image" displayTitle="Legacy opened-card image" imageUrl={legacyImageUrl} busy={imageBusy === "opened-card"} onView={() => void viewCardImage("opened-card")} onDownload={() => void downloadCardImage("opened-card")} onReplace={(file, mode) => void replaceCardImageSlot("opened-card", file, mode)} onDelete={() => void deleteCardImageSlot("opened-card")} />}
       </div>}
       <CardSideCaptureV2 title="Card front" preview={frontPreview} savedPath={frontStoragePath} status={frontStatus} warnings={frontWarnings} cameraLabel="Camera" fileRef={frontFileRef} onCamera={() => setFrontCameraOpen(true)} onGallery={() => frontFileRef.current?.click()} onCapture={(file, mode) => setSideImage("front", file, mode)} onRetry={() => retrySide("front")} cameraOpen={frontCameraOpen} onCloseCamera={() => setFrontCameraOpen(false)} />
       <CardSideCaptureV2 title="Card back" preview={backPreview} savedPath={backStoragePath} status={backStatus} warnings={backWarnings} cameraLabel="Back camera" fileRef={backFileRef} onCamera={() => setBackCameraOpen(true)} onGallery={() => backFileRef.current?.click()} onCapture={(file, mode) => setSideImage("back", file, mode)} onRetry={() => retrySide("back")} cameraOpen={backCameraOpen} onCloseCamera={() => setBackCameraOpen(false)} />
       <div className="space-y-2"><Input inputMode="numeric" value={pan} maxLength={16} onChange={(event) => updateCredential("pan", event.target.value)} placeholder="16-digit PAN" /><Input value={expiry} onChange={(event) => updateCredential("expiry", event.target.value)} placeholder="Expiry MM/YY" /><Input inputMode="numeric" value={cvv} maxLength={4} onChange={(event) => updateCredential("cvv", event.target.value)} placeholder="CVV" /></div>
       {detailCard.state !== "archived" && <Button variant="outline" className="w-full border-destructive/40 text-destructive hover:bg-destructive/10" onClick={markArchived} disabled={busy || detailLoading}><Archive className="w-4 h-4 mr-2" />Mark fully used</Button>}
+      <Button variant="outline" className="w-full border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => void removeCard()} disabled={busy || detailLoading}><Trash2 className="w-4 h-4 mr-2" />Delete card</Button>
     </div></main>
     {cardImageModal && <ImageViewer title={cardImageModal.title} imageUrl={cardImageModal.url} filename={cardImageModal.filename} onClose={() => setCardImageModal(null)} />}
   </div>;
 }
 
 function CardSideCaptureV2({ title, preview, savedPath, status, warnings, cameraLabel, fileRef, onCamera, onGallery, onCapture, onRetry, cameraOpen, onCloseCamera }: { title: string; preview: string | null; savedPath: string; status: "idle" | "preparing" | "extracting" | "ready" | "warning" | "error"; warnings: string[]; cameraLabel: string; fileRef: React.RefObject<HTMLInputElement>; onCamera: () => void; onGallery: () => void; onCapture: (file: File, mode?: CameraColorMode) => void; onRetry: () => void; cameraOpen: boolean; onCloseCamera: () => void }) {
-  return <section className="rounded-lg border bg-card p-4 space-y-3" aria-label={`${title} capture`}><div className="flex items-center justify-between"><span className="text-sm font-medium">{title}</span>{(status === "preparing" || status === "extracting") && <Loader2 className="w-4 h-4 animate-spin" />}</div><input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) onCapture(file); event.target.value = ""; }} />{preview ? <div className="aspect-[4/3] overflow-hidden rounded-lg bg-muted"><img src={preview} alt={`${title} preview`} className="h-full w-full object-cover" /></div> : <div className="grid grid-cols-2 gap-3"><Button variant="outline" className="h-24 flex-col gap-2" onClick={onCamera}><Camera className="w-5 h-5" />{cameraLabel}</Button><Button variant="outline" className="h-24 flex-col gap-2" onClick={onGallery}><Upload className="w-5 h-5" />Gallery</Button></div>}<BrowserCamera open={cameraOpen} defaultColorMode="color" onCapture={onCapture} onClose={onCloseCamera} />{savedPath && <p className="text-xs text-muted-foreground">Saved image ready</p>}{warnings.length > 0 && <><Alert><AlertDescription>{warnings.join(". ")}</AlertDescription></Alert><Button variant="outline" size="sm" onClick={onRetry} disabled={!savedPath && !preview}>Retry extraction</Button></>}</section>;
+  return <section className="rounded-lg border bg-card p-4 space-y-3" aria-label={`${title} capture`}><div className="flex items-center justify-between"><span className="text-sm font-medium">{title}</span>{(status === "preparing" || status === "extracting") && <Loader2 className="w-4 h-4 animate-spin" />}</div><input ref={fileRef} type="file" accept="image/*" className="hidden" aria-label={`${title} capture input`} onChange={(event) => { const file = event.target.files?.[0]; if (file) onCapture(file); event.target.value = ""; }} />{preview ? <div className="aspect-[4/3] overflow-hidden rounded-lg bg-muted"><img src={preview} alt={`${title} preview`} className="h-full w-full object-cover" /></div> : <div className="grid grid-cols-2 gap-3"><Button variant="outline" className="h-24 flex-col gap-2" onClick={onCamera}><Camera className="w-5 h-5" />{cameraLabel}</Button><Button variant="outline" className="h-24 flex-col gap-2" onClick={onGallery}><Upload className="w-5 h-5" />Gallery</Button></div>}<BrowserCamera open={cameraOpen} defaultColorMode="color" onCapture={onCapture} onClose={onCloseCamera} />{savedPath && <p className="text-xs text-muted-foreground">Saved image ready</p>}{warnings.length > 0 && <><Alert><AlertDescription>{warnings.join(". ")}</AlertDescription></Alert><Button variant="outline" size="sm" onClick={onRetry} disabled={!savedPath && !preview}>Retry extraction</Button></>}</section>;
 }
 
 function SavedCardImage({
   title,
   displayTitle,
   imageUrl,
+  busy,
   onView,
   onDownload,
+  onReplace,
+  onDelete,
 }: {
   title: string;
   displayTitle?: string;
   imageUrl: string | null;
+  busy: boolean;
   onView: () => void;
   onDownload: () => void;
+  onReplace: (file: File, colorMode?: CameraColorMode) => void;
+  onDelete: () => void;
 }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+
   return (
     <section className="rounded-lg border bg-card p-3 space-y-3" aria-label={title}>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        aria-label={`Replace ${title} photo`}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onReplace(file);
+          event.target.value = "";
+        }}
+      />
       <div className="aspect-[4/3] overflow-hidden rounded-md bg-muted">
         {imageUrl ? (
           <img src={imageUrl} alt={title} className="h-full w-full object-cover" />
@@ -1069,16 +1511,38 @@ function SavedCardImage({
       <div className="space-y-2">
         <p className="text-sm font-medium">{displayTitle || title}</p>
         <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" size="sm" onClick={onView}>
+          <Button variant="outline" size="sm" onClick={onView} disabled={busy}>
             <Eye className="w-4 h-4 mr-2" />
             View
           </Button>
-          <Button variant="outline" size="sm" onClick={onDownload}>
+          <Button variant="outline" size="sm" onClick={onDownload} disabled={busy}>
             <Download className="w-4 h-4 mr-2" />
             Download
           </Button>
+          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={busy}>
+            <Upload className="w-4 h-4 mr-2" />
+            Replace photo
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setCameraOpen(true)} disabled={busy}>
+            <Camera className="w-4 h-4 mr-2" />
+            Replace (camera)
+          </Button>
+          <Button variant="outline" size="sm" className="col-span-2 border-destructive/40 text-destructive hover:bg-destructive/10" onClick={onDelete} disabled={busy}>
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete photo
+          </Button>
         </div>
       </div>
+      {busy && <p className="text-xs text-muted-foreground">Updating photo…</p>}
+      <BrowserCamera
+        open={cameraOpen}
+        defaultColorMode="color"
+        onCapture={(file, colorMode) => {
+          setCameraOpen(false);
+          onReplace(file, colorMode);
+        }}
+        onClose={() => setCameraOpen(false)}
+      />
     </section>
   );
 }
