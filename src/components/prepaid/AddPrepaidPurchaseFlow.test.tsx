@@ -298,4 +298,32 @@ describe("AddPrepaidPurchaseFlow", () => {
     await waitFor(() => expect(screen.getByPlaceholderText("16-digit PAN")).toHaveValue("4000000000000001"));
     expect(screen.getByPlaceholderText("Expiry MM/YY")).toHaveValue("02/30");
   });
+
+  it("keeps a new-purchase manual edit after OCR starts even when it returns to the original value", async () => {
+    const extraction = deferred<{ extraction: { pan: string; expiry: string }; warnings: string[]; requires_confirmation: boolean }>();
+    mocks.extractCardFront.mockReset().mockReturnValueOnce(extraction.promise);
+    mocks.uploadPrepaidImage.mockReset();
+    mocks.uploadPrepaidImage.mockImplementation(async (_file: File, imageType: string) => `receipts/prepaid/${imageType}.webp`);
+
+    const { container } = render(<AddPrepaidPurchaseFlow onClose={vi.fn()} onSaved={vi.fn()} />);
+    await addFileToFirstInput(container, imageFile("sales.jpg"));
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await screen.findByText(/sales receipt saved/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.change(screen.getByPlaceholderText("30-digit package barcode"), { target: { value: "123456789012345678901234567890" } });
+    fireEvent.change(screen.getByPlaceholderText("11-digit Vanilla serial"), { target: { value: "12345678901" } });
+    fireEvent.change(screen.getByPlaceholderText("Denomination"), { target: { value: "75" } });
+
+    const frontInput = Array.from(container.querySelectorAll("input[type='file']"))[1] as HTMLInputElement;
+    fireEvent.change(frontInput, { target: { files: [imageFile("front.jpg")] } });
+    await waitFor(() => expect(mocks.extractCardFront).toHaveBeenCalledWith("receipts/prepaid/card_front.webp"));
+
+    const pan = screen.getByPlaceholderText("16-digit PAN");
+    fireEvent.change(pan, { target: { value: "4000000000000001" } });
+    fireEvent.change(pan, { target: { value: "" } });
+    extraction.resolve({ extraction: { pan: "4111111111111111", expiry: "01/30" }, warnings: [], requires_confirmation: true });
+
+    await waitFor(() => expect(screen.getByText("PAN and expiry extracted")).toBeInTheDocument());
+    expect(pan).toHaveValue("");
+  });
 });

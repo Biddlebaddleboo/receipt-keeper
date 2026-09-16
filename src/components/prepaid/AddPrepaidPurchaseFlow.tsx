@@ -54,8 +54,9 @@ interface CardDraft {
   expiry: string;
   cvv: string;
   packageManualVersion: number;
-  frontManualVersion: number;
-  backManualVersion: number;
+  panManualVersion: number;
+  expiryManualVersion: number;
+  cvvManualVersion: number;
 }
 
 const steps = ["Sales", "Activations", "Cards", "Review"];
@@ -84,8 +85,9 @@ function newCardDraft(): CardDraft {
     expiry: "",
     cvv: "",
     packageManualVersion: 0,
-    frontManualVersion: 0,
-    backManualVersion: 0,
+    panManualVersion: 0,
+    expiryManualVersion: 0,
+    cvvManualVersion: 0,
   };
 }
 
@@ -281,9 +283,9 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
   ): Promise<string | undefined> => {
     const imageType: PrepaidImageType = side === "front" ? "card_front" : "card_back";
     const cardAtStart = cards.find((card) => card.id === cardID);
-    const valuesAtStart = side === "front"
-      ? { pan: cardAtStart?.pan ?? "", expiry: cardAtStart?.expiry ?? "" }
-      : { cvv: cardAtStart?.cvv ?? "" };
+    const panEditVersionAtStart = cardAtStart?.panManualVersion ?? 0;
+    const expiryEditVersionAtStart = cardAtStart?.expiryManualVersion ?? 0;
+    const cvvEditVersionAtStart = cardAtStart?.cvvManualVersion ?? 0;
     let uploadedStoragePath: string | undefined;
     try {
       const result = await prepareAndUploadPrepaidImage(file, imageType, { grayscale, upload: uploadPrepaidImage });
@@ -312,11 +314,17 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         } as CardDraft;
         if (side === "front") {
           const frontExtraction = extraction as Awaited<ReturnType<typeof extractCardFront>>;
-          if (card.pan === valuesAtStart.pan) next.pan = frontExtraction.extraction.pan || next.pan;
-          if (card.expiry === valuesAtStart.expiry) next.expiry = frontExtraction.extraction.expiry || next.expiry;
+          if (card.panManualVersion === panEditVersionAtStart) {
+            next.pan = frontExtraction.extraction.pan || next.pan;
+          }
+          if (card.expiryManualVersion === expiryEditVersionAtStart) {
+            next.expiry = frontExtraction.extraction.expiry || next.expiry;
+          }
         } else {
           const backExtraction = extraction as Awaited<ReturnType<typeof extractCardBack>>;
-          if (card.cvv === valuesAtStart.cvv) next.cvv = backExtraction.extraction.cvv || next.cvv;
+          if (card.cvvManualVersion === cvvEditVersionAtStart) {
+            next.cvv = backExtraction.extraction.cvv || next.cvv;
+          }
         }
         return next;
       }));
@@ -372,9 +380,9 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
     }
     const key = `${cardID}:${side}`;
     const generation = sideGenerationsRef.current[key] ?? 0;
-    const valuesAtStart = side === "front"
-      ? { pan: card?.pan ?? "", expiry: card?.expiry ?? "" }
-      : { cvv: card?.cvv ?? "" };
+    const panEditVersionAtStart = card?.panManualVersion ?? 0;
+    const expiryEditVersionAtStart = card?.expiryManualVersion ?? 0;
+    const cvvEditVersionAtStart = card?.cvvManualVersion ?? 0;
     setSideState(cardID, side, (entry) => ({ ...entry, status: "extracting", warnings: [], isExtracting: true }));
     const extractionPromise = (async () => {
       try {
@@ -385,11 +393,17 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
           const next = { ...entry, [side]: { ...entry[side], status: result.warnings?.length ? "warning" : "ready", warnings: result.warnings || [], isExtracting: false } } as CardDraft;
           if (side === "front") {
             const frontResult = result as Awaited<ReturnType<typeof extractCardFront>>;
-            if (entry.pan === valuesAtStart.pan) next.pan = frontResult.extraction.pan || next.pan;
-            if (entry.expiry === valuesAtStart.expiry) next.expiry = frontResult.extraction.expiry || next.expiry;
+            if (entry.panManualVersion === panEditVersionAtStart) {
+              next.pan = frontResult.extraction.pan || next.pan;
+            }
+            if (entry.expiryManualVersion === expiryEditVersionAtStart) {
+              next.expiry = frontResult.extraction.expiry || next.expiry;
+            }
           } else {
             const backResult = result as Awaited<ReturnType<typeof extractCardBack>>;
-            if (entry.cvv === valuesAtStart.cvv) next.cvv = backResult.extraction.cvv || next.cvv;
+            if (entry.cvvManualVersion === cvvEditVersionAtStart) {
+              next.cvv = backResult.extraction.cvv || next.cvv;
+            }
           }
           return next;
         }));
@@ -526,7 +540,7 @@ export function AddPrepaidPurchaseFlow({ onClose, onSaved }: AddPrepaidPurchaseF
         {submitError && <Alert variant="destructive"><AlertDescription>{submitError}</AlertDescription></Alert>}
         {step === 0 && <section className="space-y-4"><input ref={salesFileRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) setSalesImage(file); event.target.value = ""; }} />{salesPreview ? <ImagePreview preview={salesPreview} onClear={() => { if (salesReceiptID) return; setSalesFile(null); setSalesPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; }); }} locked={!!salesReceiptID} /> : <CaptureChoices onCamera={() => setSalesCameraOpen(true)} onGallery={() => salesFileRef.current?.click()} />}{salesReceiptID && <Alert><AlertDescription>Sales receipt saved in Receipt Keeper. Retries will reuse this receipt.</AlertDescription></Alert>}<div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">The sales receipt is uploaded through normal Receipt Keeper and will appear in your regular receipt list.</div></section>}
         {step === 1 && <section className="space-y-3"><div className="rounded-lg border bg-card p-4"><p className="text-sm font-medium">Activation receipts <span className="text-muted-foreground">(optional)</span></p><p className="mt-1 text-xs text-muted-foreground">Add one or more activation receipt images if available, or continue without them. A receipt can be shared by multiple cards.</p></div>{activationReceipts.map((item, index) => <ImageSlot key={item.id} title={`Activation receipt ${index + 1}`} draft={item} onFile={(file, colorMode) => updateActivationFile(item.id, file, colorMode)} onClear={() => clearActivationFile(item.id)} onRemove={() => removeActivation(item.id)} />)}<Button variant="outline" className="w-full" onClick={() => setActivationReceipts((prev) => [...prev, newImageDraft()])}><Plus className="w-4 h-4 mr-2" />{activationReceipts.length > 0 ? "Add another activation receipt" : "Add activation receipt"}</Button></section>}
-        {step === 2 && <section className="space-y-4">{cards.map((card, index) => <CardCapture key={card.id} index={index} card={card} activationReceipts={activationReceipts} onPackageFile={(file, colorMode) => updatePackageFile(card.id, file, colorMode)} onClearPackage={() => clearPackage(card.id)} onSideFile={(side, file, colorMode) => updateCardSideFile(card.id, side, file, colorMode)} onClearSide={(side) => { setSideState(card.id, side, (draft) => { revokeDraft(draft); return newSideDraft(); }); sideGenerationsRef.current[`${card.id}:${side}`] = (sideGenerationsRef.current[`${card.id}:${side}`] ?? 0) + 1; }} onChange={(updates) => setCards((prev) => prev.map((entry) => { if (entry.id !== card.id) return entry; return { ...entry, ...updates, packageManualVersion: entry.packageManualVersion + (["activationBarcode", "vanillaSerial", "denomination"].some((field) => field in updates) ? 1 : 0), frontManualVersion: entry.frontManualVersion + (["pan", "expiry"].some((field) => field in updates) ? 1 : 0), backManualVersion: entry.backManualVersion + ("cvv" in updates ? 1 : 0) }; }))} onExtractPackage={() => void extractPackageDetails(card.id)} onRetrySide={(side) => retryCardSide(card.id, side)} onRemove={() => { setCards((prev) => { const target = prev.find((entry) => entry.id === card.id); if (target) revokeCardDraft(target); const next = prev.filter((entry) => entry.id !== card.id); return next.length > 0 ? next : [newCardDraft()]; }); }} />)}<Button variant="outline" className="w-full" onClick={() => setCards((prev) => [...prev, newCardDraft()])}><Plus className="w-4 h-4 mr-2" />Add another card</Button></section>}
+        {step === 2 && <section className="space-y-4">{cards.map((card, index) => <CardCapture key={card.id} index={index} card={card} activationReceipts={activationReceipts} onPackageFile={(file, colorMode) => updatePackageFile(card.id, file, colorMode)} onClearPackage={() => clearPackage(card.id)} onSideFile={(side, file, colorMode) => updateCardSideFile(card.id, side, file, colorMode)} onClearSide={(side) => { setSideState(card.id, side, (draft) => { revokeDraft(draft); return newSideDraft(); }); sideGenerationsRef.current[`${card.id}:${side}`] = (sideGenerationsRef.current[`${card.id}:${side}`] ?? 0) + 1; }} onChange={(updates) => setCards((prev) => prev.map((entry) => { if (entry.id !== card.id) return entry; return { ...entry, ...updates, packageManualVersion: entry.packageManualVersion + (["activationBarcode", "vanillaSerial", "denomination"].some((field) => field in updates) ? 1 : 0), panManualVersion: entry.panManualVersion + ("pan" in updates ? 1 : 0), expiryManualVersion: entry.expiryManualVersion + ("expiry" in updates ? 1 : 0), cvvManualVersion: entry.cvvManualVersion + ("cvv" in updates ? 1 : 0) }; }))} onExtractPackage={() => void extractPackageDetails(card.id)} onRetrySide={(side) => retryCardSide(card.id, side)} onRemove={() => { setCards((prev) => { const target = prev.find((entry) => entry.id === card.id); if (target) revokeCardDraft(target); const next = prev.filter((entry) => entry.id !== card.id); return next.length > 0 ? next : [newCardDraft()]; }); }} />)}<Button variant="outline" className="w-full" onClick={() => setCards((prev) => [...prev, newCardDraft()])}><Plus className="w-4 h-4 mr-2" />Add another card</Button></section>}
         {step === 3 && <section className="space-y-3"><ReviewRow icon={<ReceiptText className="w-4 h-4" />} label="Sales receipt" value={salesReceiptID ? "Saved in Receipt Keeper" : salesFile?.name || "Missing"} /><ReviewRow icon={<ScanLine className="w-4 h-4" />} label="Activation receipts" value={String(activationReceipts.filter(hasDraftImage).length)} />{cards.filter(hasCardContent).map((card, index) => <div key={card.id} className="rounded-lg border bg-card p-4 space-y-1"><div className="flex items-center justify-between gap-3"><span className="text-sm font-medium">Card {index + 1}</span><span className="text-sm tabular-nums">${moneyOrUndefined(card.denomination)?.toFixed(2) || "0.00"}</span></div><p className="text-xs text-muted-foreground break-all">Package barcode: {digitsOnly(card.activationBarcode)}</p><p className="text-xs text-muted-foreground">Vanilla serial: {digitsOnly(card.vanillaSerial)}</p><p className="text-xs text-muted-foreground">Activation receipt: {card.activationReceiptId ? "Linked" : "Not linked"}</p><p className="text-xs text-muted-foreground">Card front: {hasDraftImage(card.front) ? "Added" : "Not added"} · Card back: {hasDraftImage(card.back) ? "Added" : "Not added"}</p></div>)}</section>}
       </div></main>
       <footer className="border-t px-4 py-3"><div className="max-w-2xl mx-auto flex items-center justify-between gap-3"><Button variant="outline" onClick={() => setStep(Math.max(0, step - 1) as Step)} disabled={step === 0 || isSaving}><ArrowLeft className="w-4 h-4 mr-2" />Back</Button><Button onClick={step === 3 ? savePurchase : continueFlow} disabled={!canContinue || isSaving || salesReceiptUploading}>{isSaving || salesReceiptUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : step === 3 ? <Check className="w-4 h-4 mr-2" /> : null}{step === 3 ? "Save purchase" : "Continue"}</Button></div></footer>

@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
   searchCards: vi.fn(),
   signActivationReceiptImage: vi.fn(),
   signCardImage: vi.fn(),
+  prepareAndUploadPrepaidImage: vi.fn(),
+  uploadPrepaidImage: vi.fn(),
+  extractCardFront: vi.fn(),
+  extractCardBack: vi.fn(),
   getCardDetail: vi.fn(),
   fetchReceipt: vi.fn(),
   cleanupArchivedImages: vi.fn(),
@@ -24,8 +28,9 @@ vi.mock("@/hooks/usePrepaidApi", () => ({
     listPurchases: mocks.listPurchases,
     searchCards: mocks.searchCards,
     signActivationReceiptImage: mocks.signActivationReceiptImage,
-    uploadPrepaidImage: vi.fn(),
-    extractOpenedCard: vi.fn(),
+    uploadPrepaidImage: mocks.uploadPrepaidImage,
+    extractCardFront: mocks.extractCardFront,
+    extractCardBack: mocks.extractCardBack,
     updateCard: vi.fn(),
     archiveCard: vi.fn(),
     getCardDetail: mocks.getCardDetail,
@@ -45,6 +50,10 @@ vi.mock("@/lib/ffmpegImageConverter", () => ({
 
 vi.mock("@/lib/nativeImageConverter", () => ({
   convertImageBlobToJpeg: mocks.convertImageBlobToJpeg,
+}));
+
+vi.mock("@/lib/prepaidImagePipeline", () => ({
+  prepareAndUploadPrepaidImage: mocks.prepareAndUploadPrepaidImage,
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -68,6 +77,18 @@ vi.mock("sonner", () => ({
     error: mocks.toastError,
   },
 }));
+
+function imageFile(name: string) {
+  return new File(["image"], name, { type: "image/jpeg" });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
 
 describe("PrepaidCards", () => {
   afterEach(() => {
@@ -134,6 +155,13 @@ describe("PrepaidCards", () => {
       status: "success",
     });
     mocks.searchCards.mockResolvedValue([]);
+    mocks.prepareAndUploadPrepaidImage.mockImplementation(async (file: File, imageType: string) => ({
+      file,
+      storagePath: `receipts/u_owner/prepaid/${imageType}.webp`,
+    }));
+    mocks.uploadPrepaidImage.mockResolvedValue("receipts/u_owner/prepaid/card.webp");
+    mocks.extractCardFront.mockResolvedValue({ extraction: { pan: "4111111111111111", expiry: "01/30" }, warnings: [] });
+    mocks.extractCardBack.mockResolvedValue({ extraction: { cvv: "456" }, warnings: [] });
     mocks.cleanupArchivedImages.mockResolvedValue({
       package_images_deleted: 1,
       opened_card_images_deleted: 1,
@@ -221,6 +249,8 @@ describe("PrepaidCards", () => {
     const openedCardImage = screen.getByRole("region", { name: "Opened-card image" });
     expect(within(openedCardImage).getByRole("button", { name: "View" })).toBeInTheDocument();
     expect(within(openedCardImage).getByRole("button", { name: "Download" })).toBeInTheDocument();
+    fireEvent.click(within(openedCardImage).getByRole("button", { name: "View" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Legacy opened-card image" })).toBeInTheDocument());
     expect(within(screen.getByRole("region", { name: "Card front image" })).getByRole("button", { name: "Download" })).toBeInTheDocument();
     expect(within(screen.getByRole("region", { name: "Card back image" })).getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
@@ -290,10 +320,54 @@ describe("PrepaidCards", () => {
     expect(screen.getAllByDisplayValue("10987654321")).toHaveLength(1);
     const relatedReceipts = screen.getByRole("region", { name: "Related receipts" });
     expect(relatedReceipts).toBeInTheDocument();
-    expect(within(relatedReceipts).getByRole("group", { name: "Activation receipt 1" })).toBeInTheDocument();
-    expect(within(relatedReceipts).getByRole("group", { name: "Activation receipt 2" })).toBeInTheDocument();
+    expect(within(relatedReceipts).queryByRole("group", { name: "Activation receipt 1" })).not.toBeInTheDocument();
+    expect(within(relatedReceipts).queryByRole("group", { name: "Activation receipt 2" })).not.toBeInTheDocument();
     expect(screen.getByAltText("Package image")).toBeInTheDocument();
     expect(screen.getByAltText("Opened-card image")).toBeInTheDocument();
+  });
+
+  it("shows only the selected activation receipt and updates the relationship immediately", async () => {
+    mocks.getCardDetail.mockResolvedValueOnce({
+      id: "card-1",
+      activation_barcode: "123456789012345678901234567890",
+      vanilla_serial: "12345678901",
+      denomination: 75,
+      state: "active",
+      last4: "1234",
+      details_captured: true,
+      pan: "1234567890121234",
+      expiry: "12/29",
+      cvv: "123",
+      activation_receipt_id: "activation-1",
+      package_image_storage_path: "receipts/u_owner/prepaid/package/card-1.webp",
+      opened_card_image_storage_path: "receipts/u_owner/prepaid/opened/card-1.webp",
+    });
+
+    render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+    expect(mocks.getCardDetail).toHaveBeenCalledTimes(1);
+
+    const relatedReceipts = screen.getByRole("region", { name: "Related receipts" });
+    expect(within(relatedReceipts).getByRole("group", { name: "Activation receipt 1" })).toBeInTheDocument();
+    expect(within(relatedReceipts).queryByRole("group", { name: "Activation receipt 2" })).not.toBeInTheDocument();
+
+    const selector = screen.getByRole("combobox", { name: "Activation receipt relationship" });
+    fireEvent.change(selector, { target: { value: "activation-2" } });
+    expect(selector).toHaveValue("activation-2");
+    const selectedReceiptActions = () => within(screen.getByRole("region", { name: "Related receipts" })).queryAllByRole("group", { name: /Activation receipt/ });
+    await waitFor(() => expect(selectedReceiptActions()).toHaveLength(1));
+    fireEvent.click(within(selectedReceiptActions()[0]).getByRole("button", { name: "View" }));
+    await waitFor(() => expect(mocks.signActivationReceiptImage).toHaveBeenCalledWith("purchase-1", "activation-2"));
+
+    fireEvent.change(selector, { target: { value: "" } });
+    await waitFor(() => expect(selectedReceiptActions()).toHaveLength(0));
   });
 
   it("forwards the opened-card camera capture into the existing image handler", async () => {
@@ -313,6 +387,44 @@ describe("PrepaidCards", () => {
     fireEvent.click(screen.getByRole("button", { name: "Shared camera capture" }));
 
     await waitFor(() => expect(createObjectURL).toHaveBeenCalledWith(expect.objectContaining({ name: "camera.jpg" })));
+  });
+
+  it("keeps card-detail manual front and back edits after OCR starts even when values return to their originals", async () => {
+    const front = deferred<{ extraction: { pan: string; expiry: string }; warnings: string[] }>();
+    const back = deferred<{ extraction: { cvv: string }; warnings: string[] }>();
+    mocks.extractCardFront.mockReset().mockReturnValueOnce(front.promise);
+    mocks.extractCardBack.mockReset().mockReturnValueOnce(back.promise);
+    const createObjectURL = vi.fn().mockReturnValue("blob:card-side");
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
+    const { container } = render(
+      <MemoryRouter>
+        <PrepaidCards />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Circle K")).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("$75.00 Vanilla")[0].closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByDisplayValue("1234567890121234")).toBeInTheDocument());
+
+    const imageInputs = Array.from(container.querySelectorAll("input[type='file']")) as HTMLInputElement[];
+    fireEvent.change(imageInputs[0], { target: { files: [imageFile("front.jpg")] } });
+    fireEvent.change(imageInputs[1], { target: { files: [imageFile("back.jpg")] } });
+    await waitFor(() => expect(mocks.extractCardFront).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.extractCardBack).toHaveBeenCalledTimes(1));
+
+    const pan = screen.getByPlaceholderText("16-digit PAN");
+    const cvv = screen.getByPlaceholderText("CVV");
+    fireEvent.change(pan, { target: { value: "4000000000000001" } });
+    fireEvent.change(pan, { target: { value: "1234567890121234" } });
+    fireEvent.change(cvv, { target: { value: "999" } });
+    fireEvent.change(cvv, { target: { value: "123" } });
+
+    front.resolve({ extraction: { pan: "4111111111111111", expiry: "01/30" }, warnings: [] });
+    back.resolve({ extraction: { cvv: "456" }, warnings: [] });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled());
+    expect(pan).toHaveValue("1234567890121234");
+    expect(cvv).toHaveValue("123");
   });
 
   it("validates search length before submitting", async () => {
