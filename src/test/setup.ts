@@ -15,8 +15,9 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 if (!window.crypto.randomUUID) {
+  let testUUIDCounter = 0;
   Object.defineProperty(window.crypto, "randomUUID", {
-    value: () => "00000000-0000-4000-8000-000000000000",
+    value: () => `00000000-0000-4000-8000-${String(++testUUIDCounter).padStart(12, "0")}`,
   });
 }
 

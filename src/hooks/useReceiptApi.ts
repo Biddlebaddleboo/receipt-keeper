@@ -74,6 +74,31 @@ export interface Receipt {
   shard_doc_id?: string;
 }
 
+/**
+ * Receipt items have existed in both object and tuple form in persisted data.
+ * Keep the application-facing shape canonical while tolerating either wire
+ * representation and ignoring only malformed individual entries.
+ */
+export const toItems = (value: unknown): ReceiptItem[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (Array.isArray(entry)) {
+      if (entry.length < 3 || typeof entry[0] !== "string") return [];
+      const quantity = canonicalNumber(entry[1]);
+      const price = canonicalNumber(entry[2]);
+      if (quantity === null || price === null) return [];
+      return [{ name: entry[0], quantity, price }];
+    }
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.name !== "string") return [];
+    const quantity = canonicalNumber(record.quantity);
+    const price = canonicalNumber(record.price);
+    if (quantity === null || price === null) return [];
+    return [{ name: record.name, quantity, price }];
+  });
+};
+
 interface UseReceiptApiOptions {
   pollingPaused?: boolean;
 }
@@ -275,18 +300,6 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
     return "";
   };
 
-  const toItems = (value: unknown): ReceiptItem[] => {
-    if (!Array.isArray(value)) return [];
-    return value.flatMap((entry) => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-      const record = entry as Record<string, unknown>;
-      const name = typeof record.name === "string" ? record.name : "";
-      const quantity = canonicalNumber(record.quantity) ?? 0;
-      const price = canonicalNumber(record.price) ?? 0;
-      return [{ name, quantity, price }];
-    });
-  };
-
   const toExtractedFields = (value: unknown): ExtractedField[] => {
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry) => {
@@ -308,8 +321,8 @@ export function useReceiptApi(options?: UseReceiptApiOptions) {
       purchase_date: canonicalEditableText(raw.purchase_date, undefined),
       invoice_id: canonicalEditableText(raw.invoice_id, undefined),
       extracted_text: typeof raw.extracted_text === "string" ? raw.extracted_text : "",
-      extracted_fields: Array.isArray(raw.extracted_fields) ? (raw.extracted_fields as ExtractedField[]) : [],
-      items: Array.isArray(raw.items) ? (raw.items as ReceiptItem[]) : [],
+      extracted_fields: toExtractedFields(raw.extracted_fields),
+      items: toItems(raw.items),
       created_at: toISOString(raw.created_at),
       image_url: typeof raw.image_url === "string" ? raw.image_url : undefined,
       image_grayscale: raw.image_grayscale === true,

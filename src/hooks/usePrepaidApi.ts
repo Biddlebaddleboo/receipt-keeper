@@ -4,8 +4,8 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 export type PrepaidCardState = "active" | "archived";
-export type PrepaidImageType = "activation_receipt" | "package" | "opened_card";
-export type PrepaidCardImageKind = "package" | "opened-card";
+export type PrepaidImageType = "activation_receipt" | "package" | "opened_card" | "card_front" | "card_back";
+export type PrepaidCardImageKind = "package" | "card-front" | "card-back" | "opened-card";
 
 export interface PrepaidActivationReceipt {
   id: string;
@@ -24,10 +24,13 @@ export interface PrepaidCard {
   expiry?: string;
   cvv?: string;
   last4?: string;
+  activation_receipt_id?: string | null;
   details_captured: boolean;
   state: PrepaidCardState;
   archived_at?: string;
   package_image_storage_path?: string;
+  card_front_image_storage_path?: string;
+  card_back_image_storage_path?: string;
   opened_card_image_storage_path?: string;
   extraction_status?: string;
   created_at?: string;
@@ -63,6 +66,8 @@ export interface PrepaidSearchResult {
 
 export interface PrepaidCleanupSummary {
   package_images_deleted: number;
+  card_front_images_deleted?: number;
+  card_back_images_deleted?: number;
   opened_card_images_deleted: number;
   activation_receipt_images_deleted: number;
   sales_receipts_preserved: number;
@@ -81,6 +86,15 @@ export interface PrepaidOpenedCardExtraction {
   cvv: string;
 }
 
+export interface PrepaidCardFrontExtraction {
+  pan: string;
+  expiry: string;
+}
+
+export interface PrepaidCardBackExtraction {
+  cvv: string;
+}
+
 export interface PrepaidCardInput {
   activation_barcode?: string;
   vanilla_serial?: string;
@@ -90,6 +104,9 @@ export interface PrepaidCardInput {
   expiry?: string;
   cvv?: string;
   package_image_storage_path?: string;
+  activation_receipt_id?: string | null;
+  card_front_image_storage_path?: string;
+  card_back_image_storage_path?: string;
   opened_card_image_storage_path?: string;
   confirmed: boolean;
 }
@@ -97,6 +114,7 @@ export interface PrepaidCardInput {
 export interface PrepaidCreatePurchaseInput {
   sales_receipt_id: string;
   activation_receipts: Array<{
+    id: string;
     storage_path: string;
     filename?: string;
     content_type?: string;
@@ -235,6 +253,32 @@ export function usePrepaidApi() {
     }>;
   }, []);
 
+  const extractCardFront = useCallback(async (storagePath: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/card-front-extract`, {
+      method: "POST",
+      body: JSON.stringify({ storage_path: storagePath }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<{
+      extraction: PrepaidCardFrontExtraction;
+      warnings: string[];
+      requires_confirmation: boolean;
+    }>;
+  }, []);
+
+  const extractCardBack = useCallback(async (storagePath: string) => {
+    const response = await apiFetch(`${API_BASE_URL}/prepaid/card-back-extract`, {
+      method: "POST",
+      body: JSON.stringify({ storage_path: storagePath }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    return response.json() as Promise<{
+      extraction: PrepaidCardBackExtraction;
+      warnings: string[];
+      requires_confirmation: boolean;
+    }>;
+  }, []);
+
   const createPurchase = useCallback(async (input: PrepaidCreatePurchaseInput) => {
     const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases`, {
       method: "POST",
@@ -278,7 +322,13 @@ export function usePrepaidApi() {
   }, []);
 
   const signCardImage = useCallback(async (purchaseID: string, cardID: string, imageKind: PrepaidCardImageKind) => {
-    const path = imageKind === "package" ? "package-image" : "opened-card-image";
+    const path = imageKind === "package"
+      ? "package-image"
+      : imageKind === "card-front"
+        ? "card-front-image"
+        : imageKind === "card-back"
+          ? "card-back-image"
+          : "opened-card-image";
     const response = await apiFetch(`${API_BASE_URL}/prepaid/purchases/${purchaseID}/cards/${cardID}/${path}`);
     if (!response.ok) throw new Error(await readError(response));
     const payload = (await response.json()) as { image_url?: string };
@@ -293,6 +343,8 @@ export function usePrepaidApi() {
     uploadPrepaidImage,
     extractPackage,
     extractOpenedCard,
+    extractCardFront,
+    extractCardBack,
     createPurchase,
     updateCard,
     archiveCard,

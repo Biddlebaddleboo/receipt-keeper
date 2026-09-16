@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useReceiptApi } from "@/hooks/useReceiptApi";
+import { toItems, useReceiptApi } from "@/hooks/useReceiptApi";
 import { filterReceiptsForExport, receiptExportFilename } from "@/lib/receiptExport";
 
 const mocks = vi.hoisted(() => ({
@@ -144,6 +144,40 @@ describe("useReceiptApi canonical export fields", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("normalizes object and tuple items while ignoring malformed neighbors", () => {
+    expect(toItems([
+      { name: "VISA $75 VMS", quantity: 1, price: 75 },
+      ["VANILLA VISA ACTIVATIO", 1, 5.5],
+      null,
+      ["bad quantity", "unknown", 4],
+      { name: "missing price", quantity: 1 },
+      ["also valid", "2", "3.50"],
+    ])).toEqual([
+      { name: "VISA $75 VMS", quantity: 1, price: 75 },
+      { name: "VANILLA VISA ACTIVATIO", quantity: 1, price: 5.5 },
+      { name: "also valid", quantity: 2, price: 3.5 },
+    ]);
+  });
+
+  it("keeps all six Circle K tuple line items in order", () => {
+    const items = [
+      ["VISA $75 VMS", 1, 75],
+      ["VISA $75 VMS", 1, 75],
+      ["VISA $75 VMS", 1, 75],
+      ["VANILLA VISA ACTIVATIO", 1, 5.5],
+      ["VANILLA VISA ACTIVATIO", 1, 5.5],
+      ["VANILLA VISA ACTIVATIO", 1, 5.5],
+    ];
+    expect(toItems(items)).toEqual([
+      { name: "VISA $75 VMS", quantity: 1, price: 75 },
+      { name: "VISA $75 VMS", quantity: 1, price: 75 },
+      { name: "VISA $75 VMS", quantity: 1, price: 75 },
+      { name: "VANILLA VISA ACTIVATIO", quantity: 1, price: 5.5 },
+      { name: "VANILLA VISA ACTIVATIO", quantity: 1, price: 5.5 },
+      { name: "VANILLA VISA ACTIVATIO", quantity: 1, price: 5.5 },
+    ]);
   });
 
   it("prefers corrected metadata and only falls back to canonical detail fields", async () => {

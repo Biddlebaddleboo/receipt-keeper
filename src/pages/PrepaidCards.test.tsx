@@ -98,6 +98,8 @@ describe("PrepaidCards", () => {
                 last4: "1234",
                 details_captured: true,
                 package_image_storage_path: "receipts/u_owner/prepaid/package/card-1.webp",
+                card_front_image_storage_path: "receipts/u_owner/prepaid/card_front/card-1.webp",
+                card_back_image_storage_path: "receipts/u_owner/prepaid/card_back/card-1.webp",
                 opened_card_image_storage_path: "receipts/u_owner/prepaid/opened/card-1.webp",
               },
               {
@@ -151,10 +153,15 @@ describe("PrepaidCards", () => {
       expiry: "12/29",
       cvv: "123",
       package_image_storage_path: "receipts/u_owner/prepaid/package/card-1.webp",
+      card_front_image_storage_path: "receipts/u_owner/prepaid/card_front/card-1.webp",
+      card_back_image_storage_path: "receipts/u_owner/prepaid/card_back/card-1.webp",
       opened_card_image_storage_path: "receipts/u_owner/prepaid/opened/card-1.webp",
     });
     mocks.signCardImage.mockImplementation((_purchaseID: string, _cardID: string, kind: string) => {
-      return Promise.resolve(kind === "package" ? "https://signed.example/package.webp" : "https://signed.example/opened.webp");
+      if (kind === "package") return Promise.resolve("https://signed.example/package.webp");
+      if (kind === "card-front") return Promise.resolve("https://signed.example/front.webp");
+      if (kind === "card-back") return Promise.resolve("https://signed.example/back.webp");
+      return Promise.resolve("https://signed.example/opened.webp");
     });
     mocks.signActivationReceiptImage.mockResolvedValue("https://signed.example/activation.webp");
     mocks.convertImageBlobToJpeg.mockImplementation(() => Promise.resolve(new Blob(["jpeg-bytes"], { type: "image/jpeg" })));
@@ -205,6 +212,8 @@ describe("PrepaidCards", () => {
     await waitFor(() => expect(screen.getByAltText("Package image")).toBeInTheDocument());
     expect(screen.getByAltText("Opened-card image")).toBeInTheDocument();
     expect(screen.getByAltText("Package image")).toHaveAttribute("src", "https://signed.example/package.webp");
+    expect(screen.getByAltText("Card front image")).toHaveAttribute("src", "https://signed.example/front.webp");
+    expect(screen.getByAltText("Card back image")).toHaveAttribute("src", "https://signed.example/back.webp");
     expect(screen.getByAltText("Opened-card image")).toHaveAttribute("src", "https://signed.example/opened.webp");
     const packageImage = screen.getByRole("region", { name: "Package image" });
     expect(within(packageImage).getByRole("button", { name: "View" })).toBeInTheDocument();
@@ -212,6 +221,8 @@ describe("PrepaidCards", () => {
     const openedCardImage = screen.getByRole("region", { name: "Opened-card image" });
     expect(within(openedCardImage).getByRole("button", { name: "View" })).toBeInTheDocument();
     expect(within(openedCardImage).getByRole("button", { name: "Download" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Card front image" })).getByRole("button", { name: "Download" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Card back image" })).getByRole("button", { name: "Download" })).toBeInTheDocument();
   });
 
   it("renders multiple last4 matches and opens the existing card detail", async () => {
@@ -275,8 +286,8 @@ describe("PrepaidCards", () => {
     await waitFor(() => expect(screen.getByDisplayValue("9999999999993456")).toBeInTheDocument());
     expect(screen.getByDisplayValue("12/29")).toBeInTheDocument();
     expect(screen.getByDisplayValue("123")).toBeInTheDocument();
-    expect(screen.getByText("Package barcode: 9999999999999999999999123456")).toBeInTheDocument();
-    expect(screen.getByText("Vanilla serial: 10987654321")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("9999999999999999999999123456")).toBeInTheDocument();
+    expect(screen.getAllByDisplayValue("10987654321")).toHaveLength(1);
     const relatedReceipts = screen.getByRole("region", { name: "Related receipts" });
     expect(relatedReceipts).toBeInTheDocument();
     expect(within(relatedReceipts).getByRole("group", { name: "Activation receipt 1" })).toBeInTheDocument();
@@ -385,8 +396,8 @@ describe("PrepaidCards", () => {
     fireEvent.click(screen.getByRole("button", { name: /archived card ending 7777/i }));
 
     await waitFor(() => expect(screen.getByDisplayValue("4000000000007777")).toBeInTheDocument());
-    expect(screen.getByText("Vanilla serial: 22222222222")).toBeInTheDocument();
-    expect(screen.getByText("Package barcode: 222222222222222222222222222222")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("22222222222")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("222222222222222222222222222222")).toBeInTheDocument();
     expect(mocks.listPurchases).not.toHaveBeenCalledWith("all");
   });
 
@@ -464,7 +475,7 @@ describe("PrepaidCards", () => {
     const initialListCalls = mocks.listPurchases.mock.calls.length;
     fireEvent.click(cleanupButton);
     expect(confirm).toHaveBeenCalledWith(
-      "Package and opened-card photos for archived cards will be permanently deleted. Activation receipt photos will also be deleted for purchases where every card is archived. Original sales receipts and all extracted card information will be kept.",
+      "Package, card-front, card-back, and legacy opened-card photos for archived cards will be permanently deleted. Activation receipt photos will also be deleted for purchases where every card is archived. Original sales receipts and all extracted card information will be kept.",
     );
     expect(mocks.cleanupArchivedImages).not.toHaveBeenCalled();
 

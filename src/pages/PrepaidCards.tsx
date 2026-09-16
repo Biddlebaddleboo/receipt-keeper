@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AddPrepaidPurchaseFlow } from "@/components/prepaid/AddPrepaidPurchaseFlow";
 import { convertReceiptImageFile } from "@/lib/ffmpegImageConverter";
 import { convertImageBlobToJpeg, convertImageFileToGrayscale } from "@/lib/nativeImageConverter";
+import { prepareAndUploadPrepaidImage } from "@/lib/prepaidImagePipeline";
 import { Receipt, useReceiptApi } from "@/hooks/useReceiptApi";
 import { PrepaidActivationReceipt, PrepaidCard, PrepaidCleanupSummary, PrepaidPurchase, PrepaidSearchResult, usePrepaidApi, usePrepaidStatus } from "@/hooks/usePrepaidApi";
 import { API_BASE_URL } from "@/config";
@@ -71,8 +72,8 @@ function safeCardIdentifier(card: PrepaidCard) {
   return (card.id || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) || "card";
 }
 
-function cardImageFilename(kind: "package" | "opened-card", card: PrepaidCard) {
-  const prefix = kind === "package" ? "package-card" : "opened-card";
+function cardImageFilename(kind: "package" | "card-front" | "card-back" | "opened-card", card: PrepaidCard) {
+  const prefix = kind === "package" ? "package-card" : kind === "card-front" ? "card-front" : kind === "card-back" ? "card-back" : "opened-card";
   return `${prefix}-${safeCardIdentifier(card)}.jpg`;
 }
 
@@ -225,7 +226,7 @@ const PrepaidCards = () => {
 
   const handleCleanupArchivedImages = async () => {
     const confirmed = window.confirm(
-      "Package and opened-card photos for archived cards will be permanently deleted. Activation receipt photos will also be deleted for purchases where every card is archived. Original sales receipts and all extracted card information will be kept.",
+      "Package, card-front, card-back, and legacy opened-card photos for archived cards will be permanently deleted. Activation receipt photos will also be deleted for purchases where every card is archived. Original sales receipts and all extracted card information will be kept.",
     );
     if (!confirmed) return;
 
@@ -384,7 +385,7 @@ const PrepaidCards = () => {
       )}
 
       {selected && (
-        <PrepaidCardDetail
+        <PrepaidCardDetailV2
           entry={selected}
           receipt={receiptMap[selected.purchase.sales_receipt_id]}
           onViewSalesReceipt={() => void openSalesReceipt(selected.purchase.sales_receipt_id)}
@@ -409,7 +410,9 @@ const PrepaidCards = () => {
 function formatCleanupSummary(summary: PrepaidCleanupSummary) {
   const failures = summary.image_deletion_failures ?? 0;
   const failureText = failures > 0 ? ` ${failures} image${failures === 1 ? "" : "s"} could not be deleted.` : "";
-  return `Archived photo cleanup complete: ${summary.package_images_deleted} package, ${summary.opened_card_images_deleted} opened-card, and ${summary.activation_receipt_images_deleted} activation receipt image${summary.activation_receipt_images_deleted === 1 ? "" : "s"} deleted. ${summary.sales_receipts_preserved} sales receipt${summary.sales_receipts_preserved === 1 ? "" : "s"} preserved.${failureText}`;
+  const front = summary.card_front_images_deleted ?? 0;
+  const back = summary.card_back_images_deleted ?? 0;
+  return `Archived photo cleanup complete: ${summary.package_images_deleted} package, ${summary.opened_card_images_deleted} opened-card, and ${summary.activation_receipt_images_deleted} activation receipt image${summary.activation_receipt_images_deleted === 1 ? "" : "s"} deleted. ${front} card-front and ${back} card-back images deleted. ${summary.sales_receipts_preserved} sales receipt${summary.sales_receipts_preserved === 1 ? "" : "s"} preserved.${failureText}`;
 }
 
 function Header({ onBack, onRefresh, refreshing }: { onBack: () => void; onRefresh: () => void; refreshing: boolean }) {
@@ -457,6 +460,10 @@ function PrepaidPurchaseGroup({
     : purchase.created_at
       ? formatReceiptPurchaseDate(purchase.created_at, { month: "short", day: "numeric", year: "numeric" })
       : "";
+  const linkedReceiptIDs = new Set(purchase.cards.map((card) => card.activation_receipt_id).filter((id): id is string => Boolean(id)));
+  const unlinkedReceipts = purchase.activation_receipts
+    .map((activationReceipt, index) => ({ activationReceipt, index }))
+    .filter(({ activationReceipt }) => !linkedReceiptIDs.has(activationReceipt.id));
 
   return (
     <section className="rounded-lg border bg-card p-4 receipt-shadow space-y-4">
@@ -481,9 +488,9 @@ function PrepaidPurchaseGroup({
             Activation receipts ({purchase.activation_receipts.length})
           </span>
         </div>
-        {purchase.activation_receipts.some((entry) => entry.storage_path?.trim()) && (
+        {unlinkedReceipts.some(({ activationReceipt }) => activationReceipt.storage_path?.trim()) && (
           <div className="grid gap-2 sm:grid-cols-2">
-            {purchase.activation_receipts.map((activationReceipt, index) => activationReceipt.storage_path?.trim() ? (
+            {unlinkedReceipts.map(({ activationReceipt, index }) => activationReceipt.storage_path?.trim() ? (
               <div
                 key={activationReceipt.id}
                 className="rounded-md border bg-background p-2 space-y-2"
@@ -512,30 +519,61 @@ function PrepaidPurchaseGroup({
 
       <div className="space-y-2">
         {purchase.cards.map((card) => (
-          <PrepaidCardRow key={card.id} card={card} onClick={() => onCardClick(card)} />
+          <PrepaidCardRow
+            key={card.id}
+            card={card}
+            linkedReceipts={purchase.activation_receipts
+              .map((activationReceipt, index) => ({ activationReceipt, index }))
+              .filter(({ activationReceipt }) => activationReceipt.id === card.activation_receipt_id && activationReceipt.storage_path?.trim())}
+            onClick={() => onCardClick(card)}
+            onViewActivationReceipt={onViewActivationReceipt}
+            onDownloadActivationReceipt={onDownloadActivationReceipt}
+          />
         ))}
       </div>
+      {unlinkedReceipts.length > 0 && <p className="text-xs font-medium text-muted-foreground">Unlinked activation receipts</p>}
     </section>
   );
 }
 
-function PrepaidCardRow({ card, onClick }: { card: PrepaidCard; onClick: () => void }) {
+function PrepaidCardRow({
+  card,
+  onClick,
+  linkedReceipts,
+  onViewActivationReceipt,
+  onDownloadActivationReceipt,
+}: {
+  card: PrepaidCard;
+  onClick: () => void;
+  linkedReceipts: Array<{ activationReceipt: PrepaidActivationReceipt; index: number }>;
+  onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+}) {
   return (
-    <button onClick={onClick} className="w-full rounded-md bg-secondary/45 p-3 text-left transition-colors hover:bg-secondary active:scale-[0.99]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-primary" />
-            <span className="text-sm font-semibold">${(card.denomination ?? 0).toFixed(2)} Vanilla</span>
-            {card.state === "archived" && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Archived</span>}
+    <div className="rounded-md bg-secondary/45 p-3 space-y-2">
+      <button onClick={onClick} className="w-full text-left transition-colors hover:bg-secondary active:scale-[0.99]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold">${(card.denomination ?? 0).toFixed(2)} Vanilla</span>
+              {card.state === "archived" && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Archived</span>}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {card.details_captured && card.last4 ? `•••• ${card.last4}` : "Card details not captured"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground break-all">Package barcode: {shortBarcode(card.activation_barcode)}</p>
+            <p className="mt-1 text-xs text-muted-foreground break-all">Vanilla serial: {card.vanilla_serial}</p>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {card.details_captured && card.last4 ? `•••• ${card.last4}` : "Card details not captured"}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground break-all">Package barcode: {shortBarcode(card.activation_barcode)}</p>
         </div>
-      </div>
-    </button>
+      </button>
+      {linkedReceipts.length > 0 && <div className="grid gap-2 sm:grid-cols-2" aria-label="Linked activation receipts">
+        {linkedReceipts.map(({ activationReceipt, index }) => <div key={activationReceipt.id} className="rounded-md border bg-background p-2 space-y-2" role="group" aria-label={`Activation receipt ${index + 1}`}>
+          <p className="text-xs text-muted-foreground">Linked activation {index + 1}</p>
+          <div className="grid grid-cols-2 gap-2"><Button variant="outline" size="sm" onClick={() => onViewActivationReceipt(activationReceipt, index)}><Eye className="w-4 h-4 mr-2" />View</Button><Button variant="outline" size="sm" onClick={() => onDownloadActivationReceipt(activationReceipt, index)}><Download className="w-4 h-4 mr-2" />Download</Button></div>
+        </div>)}
+      </div>}
+    </div>
   );
 }
 
@@ -950,13 +988,337 @@ function PrepaidCardDetail({
   );
 }
 
+/** New front/back detail editor. The older editor above remains compiled for
+ * legacy callers, while all newly opened cards use this contract-aware view. */
+function PrepaidCardDetailV2({
+  entry,
+  receipt,
+  onViewSalesReceipt,
+  onDownloadSalesReceipt,
+  onViewActivationReceipt,
+  onDownloadActivationReceipt,
+  onClose,
+  onUpdated,
+}: {
+  entry: SelectedCard;
+  receipt?: Receipt | null;
+  onViewSalesReceipt: () => void;
+  onDownloadSalesReceipt: () => void;
+  onViewActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onDownloadActivationReceipt: (receipt: PrepaidActivationReceipt, index: number) => void;
+  onClose: () => void;
+  onUpdated: (purchase: PrepaidPurchase) => void;
+}) {
+  const {
+    uploadPrepaidImage,
+    extractCardFront,
+    extractCardBack,
+    updateCard,
+    archiveCard,
+    getCardDetail,
+    signCardImage,
+  } = usePrepaidApi();
+  const [detailCard, setDetailCard] = useState(entry.card);
+  const [activationBarcode, setActivationBarcode] = useState(entry.card.activation_barcode);
+  const [vanillaSerial, setVanillaSerial] = useState(entry.card.vanilla_serial);
+  const [pan, setPan] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [cvv, setCvv] = useState("");
+  const [activationReceiptID, setActivationReceiptID] = useState("");
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
+  const [frontPreview, setFrontPreview] = useState<string | null>(null);
+  const [backPreview, setBackPreview] = useState<string | null>(null);
+  const [frontStoragePath, setFrontStoragePath] = useState("");
+  const [backStoragePath, setBackStoragePath] = useState("");
+  const [frontNeedsUpload, setFrontNeedsUpload] = useState(false);
+  const [backNeedsUpload, setBackNeedsUpload] = useState(false);
+  const [frontSavedImageUrl, setFrontSavedImageUrl] = useState<string | null>(null);
+  const [backSavedImageUrl, setBackSavedImageUrl] = useState<string | null>(null);
+  const [packageImageUrl, setPackageImageUrl] = useState<string | null>(null);
+  const [legacyImageUrl, setLegacyImageUrl] = useState<string | null>(null);
+  const [frontWarnings, setFrontWarnings] = useState<string[]>([]);
+  const [backWarnings, setBackWarnings] = useState<string[]>([]);
+  const [frontStatus, setFrontStatus] = useState<"idle" | "preparing" | "extracting" | "ready" | "warning" | "error">("idle");
+  const [backStatus, setBackStatus] = useState<"idle" | "preparing" | "extracting" | "ready" | "warning" | "error">("idle");
+  const [busy, setBusy] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const [frontCameraOpen, setFrontCameraOpen] = useState(false);
+  const [backCameraOpen, setBackCameraOpen] = useState(false);
+  const [cardImageModal, setCardImageModal] = useState<ImageModalState | null>(null);
+  const generationsRef = useRef({ front: 0, back: 0 });
+  const frontFileRef = useRef<HTMLInputElement>(null);
+  const backFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetailLoading(true);
+    void getCardDetail(entry.purchase.id, entry.card.id)
+      .then((card) => {
+        if (cancelled) return;
+        setDetailCard(card);
+        setActivationBarcode(card.activation_barcode || "");
+        setVanillaSerial(card.vanilla_serial || "");
+        setPan(card.pan || "");
+        setExpiry(card.expiry || "");
+        setCvv(card.cvv || "");
+        setActivationReceiptID(card.activation_receipt_id || "");
+        setFrontStoragePath(card.card_front_image_storage_path || "");
+        setBackStoragePath(card.card_back_image_storage_path || "");
+        setFrontNeedsUpload(false);
+        setBackNeedsUpload(false);
+        setPackageImageUrl(null);
+        setFrontSavedImageUrl(null);
+        setBackSavedImageUrl(null);
+        setLegacyImageUrl(null);
+        if (card.package_image_storage_path) {
+          void signCardImage(entry.purchase.id, entry.card.id, "package").then((url) => { if (!cancelled) setPackageImageUrl(url); }).catch(() => undefined);
+        }
+        if (card.card_front_image_storage_path) {
+          void signCardImage(entry.purchase.id, entry.card.id, "card-front").then((url) => { if (!cancelled) setFrontSavedImageUrl(url); }).catch(() => undefined);
+        }
+        if (card.card_back_image_storage_path) {
+          void signCardImage(entry.purchase.id, entry.card.id, "card-back").then((url) => { if (!cancelled) setBackSavedImageUrl(url); }).catch(() => undefined);
+        }
+        if (card.opened_card_image_storage_path) {
+          void signCardImage(entry.purchase.id, entry.card.id, "opened-card").then((url) => { if (!cancelled) setLegacyImageUrl(url); }).catch(() => undefined);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Failed to load card details");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [entry.card.id, entry.purchase.id, getCardDetail, signCardImage]);
+
+  useEffect(() => () => {
+    if (frontPreview) URL.revokeObjectURL(frontPreview);
+  }, [frontPreview]);
+
+  useEffect(() => () => {
+    if (backPreview) URL.revokeObjectURL(backPreview);
+  }, [backPreview]);
+
+  const currentGeneration = (side: "front" | "back") => generationsRef.current[side];
+  const setSideStatus = (side: "front" | "back", status: typeof frontStatus) => {
+    if (side === "front") setFrontStatus(status);
+    else setBackStatus(status);
+  };
+  const setSideWarnings = (side: "front" | "back", warnings: string[]) => {
+    if (side === "front") setFrontWarnings(warnings);
+    else setBackWarnings(warnings);
+  };
+
+  const processSide = async (side: "front" | "back", file: File, grayscale: boolean, generation: number) => {
+    const valuesAtStart = side === "front" ? { pan, expiry } : { cvv };
+    const imageType = side === "front" ? "card_front" as const : "card_back" as const;
+    try {
+      setSideStatus(side, "preparing");
+      const result = await prepareAndUploadPrepaidImage(file, imageType, { grayscale, upload: uploadPrepaidImage });
+      const storagePath = result.storagePath;
+      if (!storagePath) throw new Error("Image upload did not return a storage path.");
+      if (generation !== currentGeneration(side)) return;
+      const preparedPreview = URL.createObjectURL(result.file);
+      if (side === "front") {
+        setFrontPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return preparedPreview; });
+        setFrontStoragePath(storagePath);
+        setFrontNeedsUpload(false);
+      } else {
+        setBackPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return preparedPreview; });
+        setBackStoragePath(storagePath);
+        setBackNeedsUpload(false);
+      }
+      setSideStatus(side, "extracting");
+      const extraction = side === "front" ? await extractCardFront(storagePath) : await extractCardBack(storagePath);
+      if (generation !== currentGeneration(side)) return;
+      setSideWarnings(side, extraction.warnings || []);
+      setSideStatus(side, extraction.warnings?.length ? "warning" : "ready");
+      if (side === "front") {
+        const frontExtraction = extraction as Awaited<ReturnType<typeof extractCardFront>>;
+        setPan((current) => current === valuesAtStart.pan ? frontExtraction.extraction.pan || current : current);
+        setExpiry((current) => current === valuesAtStart.expiry ? frontExtraction.extraction.expiry || current : current);
+      } else {
+        const backExtraction = extraction as Awaited<ReturnType<typeof extractCardBack>>;
+        setCvv((current) => current === valuesAtStart.cvv ? backExtraction.extraction.cvv || current : current);
+      }
+    } catch (error) {
+      if (generation !== currentGeneration(side)) return;
+      const message = error instanceof Error ? error.message : "Extraction failed";
+      setSideWarnings(side, [message]);
+      setSideStatus(side, "error");
+      toast.error(message);
+    }
+  };
+
+  const setSideImage = (side: "front" | "back", file: File, colorMode: CameraColorMode = "color") => {
+    if (!file.type.startsWith("image/")) return;
+    generationsRef.current[side] += 1;
+    const generation = generationsRef.current[side];
+    setSideWarnings(side, []);
+    setSideStatus(side, "preparing");
+    if (side === "front") {
+      setFrontFile(file);
+      setFrontNeedsUpload(true);
+      setFrontPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
+    } else {
+      setBackFile(file);
+      setBackNeedsUpload(true);
+      setBackPreview((previous) => { if (previous) URL.revokeObjectURL(previous); return URL.createObjectURL(file); });
+    }
+    void processSide(side, file, colorMode === "grayscale", generation);
+  };
+
+  const retrySide = (side: "front" | "back") => {
+    const path = side === "front" ? frontStoragePath : backStoragePath;
+    const needsUpload = side === "front" ? frontNeedsUpload : backNeedsUpload;
+    const file = side === "front" ? frontFile : backFile;
+    if (needsUpload && file) {
+      setSideImage(side, file);
+      return;
+    }
+    if (!path) {
+      if (file) setSideImage(side, file);
+      return;
+    }
+    const generation = currentGeneration(side);
+    const valuesAtStart = side === "front" ? { pan, expiry } : { cvv };
+    setSideWarnings(side, []);
+    setSideStatus(side, "extracting");
+    void (async () => {
+      try {
+        const result = side === "front" ? await extractCardFront(path) : await extractCardBack(path);
+        if (generation !== currentGeneration(side)) return;
+        setSideWarnings(side, result.warnings || []);
+        setSideStatus(side, result.warnings?.length ? "warning" : "ready");
+        if (side === "front") {
+          const frontResult = result as Awaited<ReturnType<typeof extractCardFront>>;
+          setPan((current) => current === valuesAtStart.pan ? frontResult.extraction.pan || current : current);
+          setExpiry((current) => current === valuesAtStart.expiry ? frontResult.extraction.expiry || current : current);
+        } else {
+          const backResult = result as Awaited<ReturnType<typeof extractCardBack>>;
+          setCvv((current) => current === valuesAtStart.cvv ? backResult.extraction.cvv || current : current);
+        }
+      } catch (error) {
+        if (generation !== currentGeneration(side)) return;
+        const message = error instanceof Error ? error.message : "Extraction failed";
+        setSideWarnings(side, [message]);
+        setSideStatus(side, "error");
+        toast.error(message);
+      }
+    })();
+  };
+
+  const updateCredential = (field: "pan" | "expiry" | "cvv", value: string) => {
+    if (field === "pan") setPan(digitsOnly(value).slice(0, 16));
+    if (field === "expiry") setExpiry(value);
+    if (field === "cvv") setCvv(digitsOnly(value).slice(0, 4));
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const purchase = await updateCard(entry.purchase.id, entry.card.id, {
+        activation_barcode: digitsOnly(activationBarcode),
+        vanilla_serial: digitsOnly(vanillaSerial),
+        denomination: detailCard.denomination,
+        activation_receipt_id: activationReceiptID || null,
+        package_image_storage_path: detailCard.package_image_storage_path,
+        card_front_image_storage_path: frontStoragePath || undefined,
+        card_back_image_storage_path: backStoragePath || undefined,
+        opened_card_image_storage_path: detailCard.opened_card_image_storage_path,
+        pan: digitsOnly(pan) || undefined,
+        expiry: expiry.trim() || undefined,
+        cvv: digitsOnly(cvv) || undefined,
+        confirmed: true,
+      });
+      toast.success("Card details saved");
+      onUpdated(purchase);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save card");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markArchived = async () => {
+    setBusy(true);
+    try {
+      const purchase = await archiveCard(entry.purchase.id, entry.card.id);
+      toast.success("Card archived");
+      onUpdated(purchase);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to archive card");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadCardImage = async (kind: "package" | "card-front" | "card-back" | "opened-card") => {
+    try {
+      await downloadFromSignedURL(() => signCardImage(entry.purchase.id, entry.card.id, kind), cardImageFilename(kind, detailCard));
+    } catch {
+      toast.error("Failed to download card image");
+    }
+  };
+
+  const viewCardImage = async (kind: "package" | "card-front" | "card-back" | "opened-card") => {
+    const title = kind === "package" ? "Package image" : kind === "card-front" ? "Card front image" : kind === "card-back" ? "Card back image" : "Legacy opened-card image";
+    try {
+      const url = await signCardImage(entry.purchase.id, entry.card.id, kind);
+      if (kind === "package") setPackageImageUrl(url);
+      if (kind === "card-front") setFrontSavedImageUrl(url);
+      if (kind === "card-back") setBackSavedImageUrl(url);
+      if (kind === "opened-card") setLegacyImageUrl(url);
+      setCardImageModal({ title, url, filename: cardImageFilename(kind, detailCard) });
+    } catch {
+      toast.error(`${title} is unavailable`);
+    }
+  };
+
+  const linkedReceipts = detailCard.activation_receipt_id
+    ? entry.purchase.activation_receipts.filter((activationReceipt) => activationReceipt.id === detailCard.activation_receipt_id)
+    : entry.card.activation_receipt_id
+      ? entry.purchase.activation_receipts.filter((activationReceipt) => activationReceipt.id === entry.card.activation_receipt_id)
+      : entry.purchase.activation_receipts;
+
+  return <div className="fixed inset-0 z-50 flex flex-col bg-background animate-fade-in">
+    <header className="flex items-center justify-between border-b px-4 py-3"><button onClick={onClose} className="p-2 -ml-2 rounded-md hover:bg-secondary"><X className="w-5 h-5" /></button><h2 className="text-sm font-semibold">Prepaid Card</h2><Button size="sm" onClick={save} disabled={busy || detailLoading || frontStatus === "preparing" || frontStatus === "extracting" || backStatus === "preparing" || backStatus === "extracting"}>{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}</Button></header>
+    <main className="flex-1 overflow-y-auto"><div className="max-w-2xl mx-auto p-4 space-y-4">
+      <div className="rounded-lg border bg-card p-4 space-y-3"><p className="text-sm font-semibold">${(detailCard.denomination ?? 0).toFixed(2)} Vanilla</p><div className="space-y-2"><Input aria-label="Package barcode" inputMode="numeric" value={activationBarcode} maxLength={30} onChange={(event) => setActivationBarcode(digitsOnly(event.target.value).slice(0, 30))} placeholder="30-digit package barcode" /><Input aria-label="Vanilla serial" inputMode="numeric" value={vanillaSerial} maxLength={11} onChange={(event) => setVanillaSerial(digitsOnly(event.target.value).slice(0, 11))} placeholder="11-digit Vanilla serial" /></div><p className="text-xs text-muted-foreground">State: {detailCard.state === "archived" ? "Archived" : "Active"}</p>{receipt?.vendor && <p className="text-xs text-muted-foreground">Retailer: {receipt.vendor}</p>}</div>
+      <RelatedReceiptActions purchase={{ ...entry.purchase, activation_receipts: linkedReceipts }} onViewSalesReceipt={onViewSalesReceipt} onDownloadSalesReceipt={onDownloadSalesReceipt} onViewActivationReceipt={onViewActivationReceipt} onDownloadActivationReceipt={onDownloadActivationReceipt} />
+      <label className="block rounded-lg border bg-card p-4 space-y-2 text-sm"><span className="font-medium">Activation receipt relationship</span><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="Activation receipt relationship" value={activationReceiptID} onChange={(event) => setActivationReceiptID(event.target.value)}><option value="">No linked activation receipt</option>{entry.purchase.activation_receipts.map((activationReceipt, index) => <option key={activationReceipt.id} value={activationReceipt.id}>Activation receipt {index + 1}</option>)}</select></label>
+      {(detailCard.package_image_storage_path || detailCard.card_front_image_storage_path || detailCard.card_back_image_storage_path || detailCard.opened_card_image_storage_path) && <div className="grid gap-3 sm:grid-cols-2">
+        {detailCard.package_image_storage_path && <SavedCardImage title="Package image" imageUrl={packageImageUrl} onView={() => void viewCardImage("package")} onDownload={() => void downloadCardImage("package")} />}
+        {detailCard.card_front_image_storage_path && <SavedCardImage title="Card front image" imageUrl={frontSavedImageUrl} onView={() => void viewCardImage("card-front")} onDownload={() => void downloadCardImage("card-front")} />}
+        {detailCard.card_back_image_storage_path && <SavedCardImage title="Card back image" imageUrl={backSavedImageUrl} onView={() => void viewCardImage("card-back")} onDownload={() => void downloadCardImage("card-back")} />}
+        {detailCard.opened_card_image_storage_path && <SavedCardImage title="Opened-card image" displayTitle="Legacy opened-card image" imageUrl={legacyImageUrl} onView={() => void viewCardImage("opened-card")} onDownload={() => void downloadCardImage("opened-card")} />}
+      </div>}
+      <CardSideCaptureV2 title="Card front" preview={frontPreview} savedPath={frontStoragePath} status={frontStatus} warnings={frontWarnings} cameraLabel="Camera" fileRef={frontFileRef} onCamera={() => setFrontCameraOpen(true)} onGallery={() => frontFileRef.current?.click()} onCapture={(file, mode) => setSideImage("front", file, mode)} onRetry={() => retrySide("front")} cameraOpen={frontCameraOpen} onCloseCamera={() => setFrontCameraOpen(false)} />
+      <CardSideCaptureV2 title="Card back" preview={backPreview} savedPath={backStoragePath} status={backStatus} warnings={backWarnings} cameraLabel="Back camera" fileRef={backFileRef} onCamera={() => setBackCameraOpen(true)} onGallery={() => backFileRef.current?.click()} onCapture={(file, mode) => setSideImage("back", file, mode)} onRetry={() => retrySide("back")} cameraOpen={backCameraOpen} onCloseCamera={() => setBackCameraOpen(false)} />
+      <div className="space-y-2"><Input inputMode="numeric" value={pan} maxLength={16} onChange={(event) => updateCredential("pan", event.target.value)} placeholder="16-digit PAN" /><Input value={expiry} onChange={(event) => updateCredential("expiry", event.target.value)} placeholder="Expiry MM/YY" /><Input inputMode="numeric" value={cvv} maxLength={4} onChange={(event) => updateCredential("cvv", event.target.value)} placeholder="CVV" /></div>
+      {detailCard.state !== "archived" && <Button variant="outline" className="w-full border-destructive/40 text-destructive hover:bg-destructive/10" onClick={markArchived} disabled={busy || detailLoading}><Archive className="w-4 h-4 mr-2" />Mark fully used</Button>}
+    </div></main>
+    {cardImageModal && <ImageViewer title={cardImageModal.title} imageUrl={cardImageModal.url} filename={cardImageModal.filename} onClose={() => setCardImageModal(null)} />}
+  </div>;
+}
+
+function CardSideCaptureV2({ title, preview, savedPath, status, warnings, cameraLabel, fileRef, onCamera, onGallery, onCapture, onRetry, cameraOpen, onCloseCamera }: { title: string; preview: string | null; savedPath: string; status: "idle" | "preparing" | "extracting" | "ready" | "warning" | "error"; warnings: string[]; cameraLabel: string; fileRef: React.RefObject<HTMLInputElement>; onCamera: () => void; onGallery: () => void; onCapture: (file: File, mode?: CameraColorMode) => void; onRetry: () => void; cameraOpen: boolean; onCloseCamera: () => void }) {
+  return <section className="rounded-lg border bg-card p-4 space-y-3" aria-label={`${title} capture`}><div className="flex items-center justify-between"><span className="text-sm font-medium">{title}</span>{(status === "preparing" || status === "extracting") && <Loader2 className="w-4 h-4 animate-spin" />}</div><input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) onCapture(file); event.target.value = ""; }} />{preview ? <div className="aspect-[4/3] overflow-hidden rounded-lg bg-muted"><img src={preview} alt={`${title} preview`} className="h-full w-full object-cover" /></div> : <div className="grid grid-cols-2 gap-3"><Button variant="outline" className="h-24 flex-col gap-2" onClick={onCamera}><Camera className="w-5 h-5" />{cameraLabel}</Button><Button variant="outline" className="h-24 flex-col gap-2" onClick={onGallery}><Upload className="w-5 h-5" />Gallery</Button></div>}<BrowserCamera open={cameraOpen} defaultColorMode="color" onCapture={onCapture} onClose={onCloseCamera} />{savedPath && <p className="text-xs text-muted-foreground">Saved image ready</p>}{warnings.length > 0 && <><Alert><AlertDescription>{warnings.join(". ")}</AlertDescription></Alert><Button variant="outline" size="sm" onClick={onRetry} disabled={!savedPath && !preview}>Retry extraction</Button></>}</section>;
+}
+
 function SavedCardImage({
   title,
+  displayTitle,
   imageUrl,
   onView,
   onDownload,
 }: {
   title: string;
+  displayTitle?: string;
   imageUrl: string | null;
   onView: () => void;
   onDownload: () => void;
@@ -973,7 +1335,7 @@ function SavedCardImage({
         )}
       </div>
       <div className="space-y-2">
-        <p className="text-sm font-medium">{title}</p>
+        <p className="text-sm font-medium">{displayTitle || title}</p>
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" size="sm" onClick={onView}>
             <Eye className="w-4 h-4 mr-2" />
@@ -1050,7 +1412,7 @@ function ImageViewer({ title, imageUrl, filename, onClose }: { title: string; im
   const downloadImage = async () => {
     try {
       setDownloadPending(true);
-      await downloadFromSignedURL(imageUrl, filename);
+      await downloadFromSignedURL(() => imageUrl, filename);
     } catch {
       toast.error("Failed to download image");
     } finally {
