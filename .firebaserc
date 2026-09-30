@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "jcdigitalsolutions-jc7"
+    "default": "jcdigitalsolutions-jc7",
+    "receipt-keeper": "receipt-keeper-510215"
   }
 }

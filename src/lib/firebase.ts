@@ -4,9 +4,10 @@ import { getFirestore } from "firebase/firestore/lite";
 import { FIREBASE_DATABASE_ID } from "@/config";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
-  authDomain: "jcdigitalsolutions-jc7.firebaseapp.com",
-  projectId: "jcdigitalsolutions-jc7",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDW1XNpjfpBQ0grRZurnxJRZn296lhDQrk",
+  authDomain: "receipt-keeper-510215.firebaseapp.com",
+  projectId: "receipt-keeper-510215",
+  appId: "1:974614483217:web:a87be02273a1a3747b7cb0",
 };
 
 const app = initializeApp(firebaseConfig);

@@ -40,16 +40,15 @@ Create a `.env` file in the project root.
 
 ```bash
 VITE_FIREBASE_API_KEY=your_firebase_web_api_key
-VITE_FIREBASE_DATABASE_ID=ai-receipt-track
+VITE_FIREBASE_DATABASE_ID=(default)
 VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id
-VITE_API_BASE_URL=https://your-backend-url
+VITE_API_BASE_URL=https://ai-receipt-tracker-backend-974614483217.northamerica-northeast2.run.app
 VITE_PAYMENT_PAGE_URL=https://your-payment-hosted-page
 ```
 
 Notes:
 
-- `authDomain` and `projectId` are currently set in [firebase.ts](/C:/Users/John/Desktop/receipt-keeper-main/src/lib/firebase.ts).
-- If you fork to another Firebase project, update those values there.
+- Frontend hosting remains on the legacy Firebase site. Firebase Auth and Firestore use project `receipt-keeper-510215`; Firestore rules are tracked in `firestore.rules`. The `receipt-keeper` Firebase alias targets the new data project. Deploy rule changes with `npx firebase-tools deploy --only firestore:rules --project receipt-keeper`.
 
 ## Scripts
 

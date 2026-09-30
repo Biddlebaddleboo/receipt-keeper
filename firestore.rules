@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /plans/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if request.auth != null
+        && (
+          request.auth.uid == uid ||
+          (resource.data.owner_email is string &&
+           request.auth.token.email is string &&
+           resource.data.owner_email == request.auth.token.email)
+        );
+      allow write: if false;
+    }
+    
+    match /receipts/{receiptId} {
+      allow read: if request.auth != null
+        && request.auth.token.email is string
+        && resource.data.owner_email is string
+        && resource.data.owner_email == request.auth.token.email;
+
+      allow update: if request.auth != null
+        && request.auth.token.email is string
+        && resource.data.owner_email is string
+        && resource.data.owner_email == request.auth.token.email
+        && request.resource.data.owner_email == resource.data.owner_email;
+
+      allow create, delete: if false;
+
+      match /details/{detailId} {
+        allow read: if request.auth != null
+          && request.auth.token.email is string
+          && get(/databases/$(database)/documents/receipts/$(receiptId)).data.owner_email is string
+          && get(/databases/$(database)/documents/receipts/$(receiptId)).data.owner_email == request.auth.token.email;
+
+        allow update: if request.auth != null
+          && request.auth.token.email is string
+          && get(/databases/$(database)/documents/receipts/$(receiptId)).data.owner_email is string
+          && get(/databases/$(database)/documents/receipts/$(receiptId)).data.owner_email == request.auth.token.email
+          && request.resource.data.owner_email == resource.data.owner_email;
+
+        allow create, delete: if false;
+      }
+    }
+    
+    match /categories/{uid} {
+      allow read, delete: if request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true
+        && resource.data.owner_email is string
+        && (
+          resource.data.owner_email == request.auth.token.email ||
+          resource.data.owner_email == lower(request.auth.token.email)
+        );
+
+      allow create: if request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true
+        && request.resource.data.keys().hasOnly(["owner_email", "categories"])
+        && request.resource.data.owner_email is string
+        && request.resource.data.owner_email.size() > 0
+        && (
+          request.resource.data.owner_email == request.auth.token.email ||
+          request.resource.data.owner_email == lower(request.auth.token.email)
+        )
+        && request.resource.data.categories is map;
+
+      allow update: if request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true
+        && resource.data.owner_email is string
+        && request.resource.data.owner_email is string
+        && (
+          resource.data.owner_email == request.auth.token.email ||
+          resource.data.owner_email == lower(request.auth.token.email)
+        )
+        && request.resource.data.owner_email == resource.data.owner_email
+        && request.resource.data.keys().hasOnly(["owner_email", "categories"])
+        && request.resource.data.categories is map;
+    }
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
