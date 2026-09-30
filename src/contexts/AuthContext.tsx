@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut as firebaseSignOut } from "firebase/auth";
+import { GoogleAuthProvider, onIdTokenChanged, signInWithCredential, signOut as firebaseSignOut } from "firebase/auth";
 import { updateAuthReadyState } from "@/lib/authReady";
 import { firebaseAuth } from "@/lib/firebase";
 
@@ -21,17 +21,6 @@ export function useAuth() {
   return ctx;
 }
 
-function decodeJwtPayload(token: string) {
-  try {
-    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(base64));
-  } catch {
-    return null;
-  }
-}
-
-const STORAGE_KEY = "auth_token";
-
 const signInFirebaseWithGoogleCredential = async (credential: string) => {
   const firebaseCredential = GoogleAuthProvider.credential(credential);
   await signInWithCredential(firebaseAuth, firebaseCredential);
@@ -45,74 +34,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const signIn = useCallback((credential: string) => {
-    const payload = decodeJwtPayload(credential);
-    if (!payload) return;
-    setToken(credential);
-    setUser({ email: payload.email, name: payload.name, picture: payload.picture });
-    localStorage.setItem(STORAGE_KEY, credential);
     void signInFirebaseWithGoogleCredential(credential).catch(() => {
-      // Keep app auth functioning even if Firebase Auth is temporarily unavailable.
+      // The app requires the Firebase Auth session before API and Firestore access.
     });
   }, []);
 
   const signOut = useCallback(() => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem(STORAGE_KEY);
     void firebaseSignOut(firebaseAuth).catch(() => {
       // Ignore Firebase sign-out errors; local auth state is already cleared.
     });
   }, []);
 
-  // Restore session on mount
+  // Firebase Auth owns session persistence and provides ID tokens for the backend.
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const payload = decodeJwtPayload(stored);
-      if (payload && payload.exp * 1000 > Date.now()) {
-        setToken(stored);
-        setUser({ email: payload.email, name: payload.name, picture: payload.picture });
-        void signInFirebaseWithGoogleCredential(stored).catch(() => {
-          // Don't block session restore if Firebase sign-in fails.
-        });
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem("auth_token");
+    let eventID = 0;
+    const unsubscribe = onIdTokenChanged(firebaseAuth, async (firebaseUser) => {
+      const currentEventID = ++eventID;
+      setFirebaseUID(firebaseUser?.uid ?? null);
+      setIsFirebaseReady(true);
+
+      if (!firebaseUser) {
+        setToken(null);
+        setUser(null);
+        setIsLoading(false);
+        return;
       }
-    }
-    setIsLoading(false);
+
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        if (currentEventID !== eventID) return;
+        setToken(idToken);
+        setUser({
+          email: firebaseUser.email ?? "",
+          name: firebaseUser.displayName ?? "",
+          picture: firebaseUser.photoURL ?? "",
+        });
+        setIsLoading(false);
+      } catch {
+        if (currentEventID !== eventID) return;
+        setToken(null);
+        setUser(null);
+        setIsLoading(false);
+      }
+    });
+    return () => unsubscribe();
   }, []);
-
-  // Periodically check token expiry and auto-sign-out
-  useEffect(() => {
-    if (!token) return;
-    const payload = decodeJwtPayload(token);
-    if (!payload?.exp) return;
-
-    const msUntilExpiry = payload.exp * 1000 - Date.now();
-    if (msUntilExpiry <= 0) {
-      signOut();
-      return;
-    }
-
-    // Sign out 30s before actual expiry to avoid 401s
-    const timeout = setTimeout(() => {
-      signOut();
-    }, Math.max(msUntilExpiry - 30_000, 0));
-
-    return () => clearTimeout(timeout);
-  }, [token, signOut]);
 
   useEffect(() => {
     updateAuthReadyState(token, isLoading);
   }, [token, isLoading]);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(firebaseAuth, (firebaseUser) => {
-      setFirebaseUID(firebaseUser?.uid ?? null);
-      setIsFirebaseReady(true);
-    });
-    return () => unsubscribe();
-  }, []);
 
   return (
     <AuthContext.Provider value={{ token, user, firebaseUID, isFirebaseReady, isLoading, signIn, signOut }}>
